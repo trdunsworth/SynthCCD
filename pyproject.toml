@@ -1,0 +1,42 @@
+[project]
+name = "synth911gen3"
+version = "0.1.0"
+description = "Synthetic 911 CAD and phone data generator"
+readme = "README.md"
+authors = [
+    { name = "Tony Dunsworth", email = "tony.dunsworth@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "faker>=40.13.0",
+    "httpx>=0.28.1",
+    "numpy>=2.4.4",
+    "pandas>=3.0.2",
+    "polars>=1.39.3",
+    "pyarrow>=23.0.1",
+    "pyyaml>=6.0.3",
+    "scipy>=1.17.1",
+    "textual>=8.2.3",
+    "typer>=0.24.1",
+]
+
+[project.scripts]
+synth911gen3 = "synth911gen3.cli:main"
+synth911gen3-tui = "synth911gen3.tui:run"
+
+[build-system]
+requires = ["uv_build>=0.10.5,<0.11.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.3",
+    "ruff>=0.15.10",
+    "ty>=0.0.31",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
