@@ -10,11 +10,18 @@ requires-python = ">=3.12"
 dependencies = [
     "faker>=40.13.0",
     "httpx>=0.28.1",
+    "inquirerpy>=0.3.4",
     "numpy>=2.4.4",
+    "overpy>=0.7",
     "pandas>=3.0.2",
     "polars>=1.39.3",
+    "prompt-toolkit>=3.0.52",
     "pyarrow>=23.0.1",
+    "pydantic>=2.13.4",
+    "pyqt6>=6.11.0",
     "pyyaml>=6.0.3",
+    "requests>=2.34.2",
+    "rich>=15.0.0",
     "scipy>=1.17.1",
     "textual>=8.2.3",
     "typer>=0.24.1",
@@ -40,3 +47,8 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.uv.workspace]
+members = [
+    "synth911gen3",
+]
