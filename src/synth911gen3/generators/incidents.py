@@ -9,16 +9,8 @@ from faker import Faker
 
 from synth911gen3.addresses import AddressProvider
 from synth911gen3.config import GenerationRequest
-from synth911gen3.constants import (
-    AGENCY_WEIGHTS,
-    CALL_RECEPTION_WEIGHTS,
-    DEFAULT_LOCALE,
-    DISPOSITION_PROFILES,
-    HOURLY_WEIGHTS,
-    PRIORITY_WEIGHTS,
-    PROBLEM_PROFILES,
-    TIME_PROFILES,
-)
+from synth911gen3.constants import DEFAULT_LOCALE
+from synth911gen3.realism_config import RealismConfig
 
 
 def _weighted_choice(rng: np.random.Generator, weights_by_value: dict[str, float]) -> str:
@@ -35,8 +27,8 @@ def _weighted_choice_from_pairs(
     return str(rng.choice(values, p=probabilities))
 
 
-def _weighted_priority(rng: np.random.Generator, agency: str) -> int:
-    weights_by_priority = PRIORITY_WEIGHTS[agency]
+def _weighted_priority(rng: np.random.Generator, agency: str, realism: RealismConfig) -> int:
+    weights_by_priority = realism.priority_weights[agency]
     priorities = list(weights_by_priority)
     probabilities = list(weights_by_priority.values())
     return int(rng.choice(priorities, p=probabilities))
@@ -56,11 +48,11 @@ def _sample_lognormal_seconds(
     return max(minimum, value)
 
 
-def _generate_event_times(request: GenerationRequest, rng: np.random.Generator) -> list[datetime]:
+def _generate_event_times(request: GenerationRequest, rng: np.random.Generator, realism: RealismConfig) -> list[datetime]:
     start_datetime = datetime.combine(request.resolved_start_date(), time.min)
     total_days = (request.resolved_end_date() - request.resolved_start_date()).days + 1
     day_offsets = rng.integers(0, max(total_days, 1), size=request.rows)
-    hours = rng.choice(np.arange(24), size=request.rows, p=HOURLY_WEIGHTS)
+    hours = rng.choice(np.arange(24), size=request.rows, p=realism.hourly_weights)
     minute_offsets = rng.integers(0, 60, size=request.rows)
     second_offsets = rng.integers(0, 60, size=request.rows)
 
@@ -88,6 +80,7 @@ class IncidentGenerator:
 
     def generate(self, request: GenerationRequest) -> pd.DataFrame:
         request.validate()
+        realism = request.get_realism_config()
         rng = np.random.default_rng(request.seed)
         faker = Faker(self._faker_locale)
         faker.seed_instance(request.seed)
@@ -95,14 +88,14 @@ class IncidentGenerator:
         calltakers = _build_personnel_pool(faker, request.calltaker_pool_size)
         dispatchers = _build_personnel_pool(faker, request.dispatcher_pool_size)
         addresses = self._address_provider.load_addresses(request.area_query)
-        event_times = _generate_event_times(request, rng)
+        event_times = _generate_event_times(request, rng, realism)
         reference_counters: defaultdict[str, int] = defaultdict(int)
 
         records: list[dict[str, object]] = []
         for incident_index, call_start_time in enumerate(event_times, start=1):
-            agency = _weighted_choice(rng, AGENCY_WEIGHTS)
-            priority = _weighted_priority(rng, agency)
-            profile = TIME_PROFILES[agency][priority]
+            agency = _weighted_choice(rng, realism.agency_weights)
+            priority = _weighted_priority(rng, agency, realism)
+            profile = realism.time_profiles[agency][priority]
             address = addresses[int(rng.integers(0, len(addresses)))]
             reference_counters[agency] += 1
 
@@ -172,7 +165,7 @@ class IncidentGenerator:
                         f"{agency}-{call_start_time:%y%m%d}-{reference_counters[agency]:06d}"
                     ),
                     "agency": agency,
-                    "problem_nature": _weighted_choice_from_pairs(rng, PROBLEM_PROFILES[agency]),
+                    "problem_nature": _weighted_choice_from_pairs(rng, realism.problem_profiles[agency]),
                     "priority": priority,
                     "street_address": address.street_address,
                     "city": address.city,
@@ -189,9 +182,9 @@ class IncidentGenerator:
                     "time_phone_disconnect": time_phone_disconnect,
                     "calltaker": str(rng.choice(calltakers)),
                     "dispatcher": str(rng.choice(dispatchers)),
-                    "method_of_call_reception": _weighted_choice(rng, CALL_RECEPTION_WEIGHTS),
+                    "method_of_call_reception": _weighted_choice(rng, realism.call_reception_weights),
                     "call_disposition": _weighted_choice_from_pairs(
-                        rng, DISPOSITION_PROFILES[agency]
+                        rng, realism.disposition_profiles[agency]
                     ),
                     "pickup_delay_seconds": pickup_delay_seconds,
                     "interview_seconds": interview_seconds,

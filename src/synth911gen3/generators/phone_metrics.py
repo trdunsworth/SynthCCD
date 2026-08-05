@@ -6,12 +6,12 @@ import numpy as np
 import pandas as pd
 
 from synth911gen3.config import GenerationRequest
-from synth911gen3.constants import HOURLY_WEIGHTS
 
 
 class HourlyCallCountGenerator:
     def generate(self, request: GenerationRequest) -> pd.DataFrame:
         request.validate()
+        realism = request.get_realism_config()
         rng = np.random.default_rng(request.seed + 101)
         start_datetime = datetime.combine(request.resolved_start_date(), time.min)
         end_datetime = datetime.combine(request.resolved_end_date(), time(hour=23))
@@ -30,11 +30,11 @@ class HourlyCallCountGenerator:
             )
 
         base_hourly_volume = max(2.0, request.rows / len(hours))
-        average_weight = float(np.mean(HOURLY_WEIGHTS))
+        average_weight = float(np.mean(realism.hourly_weights))
 
         records: list[dict[str, int | datetime]] = []
         for hour_start in hours:
-            weight_multiplier = float(HOURLY_WEIGHTS[hour_start.hour] / average_weight)
+            weight_multiplier = float(realism.hourly_weights[hour_start.hour] / average_weight)
             weekend_multiplier = 1.12 if hour_start.weekday() in (4, 5) else 1.0
             busy_factor = weight_multiplier * weekend_multiplier
 

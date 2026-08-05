@@ -12,6 +12,13 @@ from .config import DatasetKind, GenerationRequest, OutputFormat
 from .exceptions import AddressLookupError, ExportError, ValidationError
 from .tui import run as run_tui
 
+
+def _parse_date(value: str | None) -> date | None:
+    if value is None:
+        return None
+    return date.fromisoformat(value)
+
+
 app = typer.Typer(
     help="Synthetic 911 CAD incident and hourly phone-center data generator.",
     no_args_is_help=True,
@@ -52,19 +59,28 @@ def generate(
         "--output-stem",
         help="Filename stem used for exported datasets.",
     ),
-    start_date: date | None = typer.Option(
+    start_date: str | None = typer.Option(
         None,
         "--start-date",
-        formats=["%Y-%m-%d"],
-        help="Inclusive start date for generated data.",
+        help="Inclusive start date for generated data (YYYY-MM-DD).",
     ),
-    end_date: date | None = typer.Option(
+    end_date: str | None = typer.Option(
         None,
         "--end-date",
-        formats=["%Y-%m-%d"],
-        help="Inclusive end date for generated data.",
+        help="Inclusive end date for generated data (YYYY-MM-DD).",
     ),
     seed: int = typer.Option(911, "--seed", help="Random seed for reproducible output."),
+    calltaker_pool_size: int = typer.Option(12, "--calltaker-pool-size", help="Number of unique calltaker names."),
+    dispatcher_pool_size: int = typer.Option(10, "--dispatcher-pool-size", help="Number of unique dispatcher names."),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Path to YAML realism configuration file.",
+    ),
 ) -> None:
     request = GenerationRequest(
         rows=rows,
@@ -73,9 +89,12 @@ def generate(
         dataset=dataset,
         output_dir=output_dir,
         output_stem=output_stem,
-        start_date=start_date,
-        end_date=end_date,
+        start_date=_parse_date(start_date),
+        end_date=_parse_date(end_date),
         seed=seed,
+        calltaker_pool_size=calltaker_pool_size,
+        dispatcher_pool_size=dispatcher_pool_size,
+        realism_config_path=config,
     )
 
     try:

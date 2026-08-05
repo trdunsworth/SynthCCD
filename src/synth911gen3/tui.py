@@ -48,6 +48,7 @@ class Synth911Tui(App[None]):
             yield Input("csv", id="format", placeholder="Output format")
             yield Input("all", id="dataset", placeholder="Dataset")
             yield Input("synthetic_911", id="stem", placeholder="Output stem")
+            yield Input("", id="config", placeholder="Config file (optional)")
             yield Button("Generate", id="generate", variant="primary")
             yield Static("Ready. Press G or use the button to generate data.", id="status")
         yield Footer()
@@ -65,6 +66,7 @@ class Synth911Tui(App[None]):
         output_format = OutputFormat(self.query_one("#format", Input).value.strip().lower())
         dataset = DatasetKind(self.query_one("#dataset", Input).value.strip().lower())
         output_stem = self.query_one("#stem", Input).value.strip()
+        config_path = self.query_one("#config", Input).value.strip()
         return GenerationRequest(
             rows=rows,
             area_query=area,
@@ -72,6 +74,7 @@ class Synth911Tui(App[None]):
             dataset=dataset,
             output_dir=Path("output"),
             output_stem=output_stem,
+            realism_config_path=Path(config_path) if config_path else None,
         )
 
     def _generate(self) -> None:

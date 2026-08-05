@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .constants import DEFAULT_AREA_QUERY, DEFAULT_OUTPUT_DIR, DEFAULT_OUTPUT_STEM, DEFAULT_ROWS
 from .exceptions import ValidationError
+from .realism_config import RealismConfig
 
 
 class OutputFormat(StrEnum):
@@ -37,6 +38,8 @@ class GenerationRequest:
     seed: int = 911
     calltaker_pool_size: int = 12
     dispatcher_pool_size: int = 10
+    realism_config: RealismConfig | None = None
+    realism_config_path: Path | None = None
 
     def resolved_start_date(self) -> date:
         today = date.today()
@@ -45,6 +48,13 @@ class GenerationRequest:
     def resolved_end_date(self) -> date:
         today = date.today()
         return self.end_date or date(today.year, 12, 31)
+
+    def get_realism_config(self) -> RealismConfig:
+        if self.realism_config is not None:
+            return self.realism_config
+        if self.realism_config_path is not None:
+            return RealismConfig.from_yaml(self.realism_config_path)
+        return RealismConfig()
 
     def validate(self) -> None:
         if self.rows <= 0:
@@ -59,3 +69,5 @@ class GenerationRequest:
             raise ValidationError("dispatcher_pool_size must be greater than zero.")
         if self.resolved_start_date() > self.resolved_end_date():
             raise ValidationError("start_date must be on or before end_date.")
+        # Validate realism config if provided
+        self.get_realism_config()
