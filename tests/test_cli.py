@@ -1,5 +1,6 @@
 from datetime import date
 from pathlib import Path
+import re
 
 import pytest
 import typer
@@ -9,6 +10,10 @@ from synth911gen3.cli import _coerce_param, app, build_request_from_params, load
 from synth911gen3.config import DatasetKind, OutputFormat
 
 runner = CliRunner()
+
+
+def _strip_ansi(text: str) -> str:
+    return re.sub(r"\x1b\[[0-9;]*m", "", text)
 
 
 def _write(tmp_path: Path, name: str, content: str) -> Path:
@@ -134,4 +139,4 @@ def test_coerce_param_output_format_enum() -> None:
 def test_cli_params_help_lists_params_option() -> None:
     result = runner.invoke(app, ["generate", "--help"])
     assert result.exit_code == 0
-    assert "--params" in result.output
+    assert "--params" in _strip_ansi(result.output)

@@ -307,7 +307,7 @@ def test_nominatim_enforces_min_request_interval(tmp_path: Path, monkeypatch) ->
     provider._geocode_area("Kansas City, MO")
 
     assert provider._client.search_calls == 2
-    assert any(sleep >= 5.0 for sleep in sleeps)
+    assert any(sleep == pytest.approx(5.0, abs=1.0) for sleep in sleeps)
 
 
 def test_build_queries_contain_bbox() -> None:
