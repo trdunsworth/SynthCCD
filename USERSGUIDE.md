@@ -9,11 +9,14 @@ A synthetic data generator for 9-1-1 CAD incidents and hourly phone-center metri
 3. [Command-Line Interface (CLI)](#command-line-interface-cli)
 4. [Textual User Interface (TUI)](#textual-user-interface-tui)
 5. [Configuration Parameters](#configuration-parameters)
-6. [Output Formats](#output-formats)
-7. [Generated Data Schema](#generated-data-schema)
-8. [Realism Features](#realism-features)
-9. [Examples](#examples)
-10. [Troubleshooting](#troubleshooting)
+6. [Realism Configuration](#realism-configuration)
+7. [Params Files (Bundled Options)](#params-files-bundled-options)
+8. [Output Formats](#output-formats)
+9. [Generated Data Schema](#generated-data-schema)
+10. [Realism Features](#realism-features)
+11. [Examples](#examples)
+12. [Troubleshooting](#troubleshooting)
+13. [Advanced Configuration](#advanced-configuration)
 
 ---
 
@@ -70,6 +73,7 @@ uv run synth911gen3 generate [OPTIONS]
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
+| `--params` | `-p` | *(none)* | Path to a JSON/YAML/TOML file specifying multiple generation parameters at once |
 | `--rows` | `-r` | `10000` | Number of incident rows to generate (minimum: 1) |
 | `--area` | `-a` | `"Kansas City, MO"` | Area query for OpenStreetMap address lookup |
 | `--format` | `-f` | `csv` | Output format: `csv`, `parquet`, `json`, `yaml`, `pandas`, `polars` |
@@ -145,6 +149,10 @@ uv run synth911gen3 tui
 | `calltaker_pool_size` | int | 12 | Unique calltaker names to generate |
 | `dispatcher_pool_size` | int | 10 | Unique dispatcher names to generate |
 
+### Supplying Parameters from a File
+
+All parameters in this section can be supplied at once from a JSON, YAML, or TOML file with `--params`. See [Params Files](#params-files-bundled-options).
+
 ### Date Range Behavior
 
 - If `start_date` and `end_date` are not specified, the full current calendar year is used
@@ -153,7 +161,9 @@ uv run synth911gen3 tui
 
 ### Address Generation
 
-Addresses are fetched from OpenStreetMap using the `area_query` parameter. The query follows **Nominatim search syntax** and accepts **any valid location query** that OpenStreetMap's Nominatim API supports.
+Addresses are fetched from OpenStreetMap using the `area_query` parameter. The query accepts **any valid location query** that OpenStreetMap's Nominatim API supports, which is geocoded to a bounding box. Real street addresses with `addr:housenumber` + `addr:street` tags are then pulled from that bounding box via the Overpass API (overpy). Where an area lacks mapped house numbers, the generator falls back to real named streets with synthesized house numbers so output is still produced.
+
+Larger areas provide more address variety but take longer to fetch initially (addresses are cached locally after first query).
 
 **Examples (not an exhaustive list):**
 
@@ -371,6 +381,107 @@ result = app.generate(request)
 
 ---
 
+## Params Files (Bundled Options)
+
+Instead of typing every flag on the command line, you can store all generation parameters in a single file and pass it with `--params`. This is useful for repeatable runs, team-shared presets, and batch/CI workflows.
+
+### Using a Params File
+
+```bash
+uv run synth911gen3 generate --params config/example_params.json
+```
+
+### Supported Formats
+
+Params files may be JSON (`.json`), YAML (`.yaml`/`.yml`), or TOML (`.toml`). Format is detected from the file extension.
+
+### File Structure
+
+Keys mirror the CLI option names. Canonical `GenerationRequest` field names are also accepted.
+
+```json
+{
+  "rows": 50000,
+  "area": "Denver, CO",
+  "format": "parquet",
+  "dataset": "all",
+  "output_dir": "output",
+  "output_stem": "denver_911",
+  "start_date": "2024-01-01",
+  "end_date": "2024-12-31",
+  "seed": 42,
+  "calltaker_pool_size": 20,
+  "dispatcher_pool_size": 15,
+  "config": "config/example_realism.yaml"
+}
+```
+
+The same file in YAML:
+
+```yaml
+rows: 25000
+area: "Seattle, WA"
+format: csv
+dataset: incidents
+output_dir: "output"
+output_stem: "seattle_911"
+start_date: "2024-07-01"
+end_date: "2024-09-30"
+seed: 2024
+calltaker_pool_size: 16
+dispatcher_pool_size: 12
+```
+
+### Key Reference
+
+| Key | Accepted Alias | Type | Description |
+|-----|---------------|------|-------------|
+| `rows` | | int | Number of incident rows |
+| `area_query` | `area` | str | OpenStreetMap area query |
+| `output_format` | `format` | str | csv, parquet, json, yaml, pandas, polars |
+| `dataset` | | str | incidents, phone, all |
+| `output_dir` | | str | Output directory |
+| `output_stem` | | str | Filename stem |
+| `start_date` | | str (YYYY-MM-DD) | Inclusive start date |
+| `end_date` | | str (YYYY-MM-DD) | Inclusive end date |
+| `seed` | | int | Random seed |
+| `calltaker_pool_size` | | int | Unique calltaker names |
+| `dispatcher_pool_size` | | int | Unique dispatcher names |
+| `realism_config_path` | `config` | str | Path to YAML realism config |
+
+### Precedence
+
+Values are merged with the following precedence (highest wins):
+
+1. **CLI flags** (e.g., `--rows 100` overrides the file)
+2. **Params file** values
+3. **Built-in defaults** (10,000 rows, Kansas City, MO, csv, etc.)
+
+Omitted keys fall through to the next source, so a params file may contain only the subset you care about:
+
+```bash
+# File sets rows/area/dates; CLI overrides format and rows
+uv run synth911gen3 generate --params my_run.json --format json --rows 75000
+```
+
+### Examples
+
+```bash
+# Full run from a params file
+uv run synth911gen3 generate --params config/example_params.json
+
+# Override selected values on top of a file
+uv run synth911gen3 generate --params denver.json --rows 1000000 --format parquet
+
+# YAML or TOML params files work too
+uv run synth911gen3 generate --params config/example_params.yaml
+uv run synth911gen3 generate --params run.toml
+```
+
+Two ready-made examples are included in the repo: `config/example_params.json` and `config/example_params.yaml`.
+
+---
+
 ## Output Formats
 
 | Format | Extension | Description | Use Case |
@@ -464,11 +575,11 @@ When using `pandas` or `polars` format, no files are written. The generator retu
 
 ### Problem Natures (Weighted by Agency)
 
-**LAW**: Traffic Crash, Domestic Disturbance, Suspicious Person, Noise Complaint, Theft Report, Welfare Check, Burglary Alarm, Disorderly Conduct, Shots Fired
+**LAW** (24): Noise Complaint, Suspicious Person, Traffic Crash, Traffic Stop, Welfare Check, Theft Report, Domestic Disturbance, Disorderly Conduct, Burglary Alarm, Assault, Shots Fired, Motor Vehicle Theft, Drug/Narcotic Violation, Trespass, Vandalism, Reckless Driving, Vehicle Collision w/ Injury, Burglary In Progress, Fraud, Harassment, DUI / Impaired Driver, Weapons Violation, Missing Person, Shoplifting
 
-**FIRE**: Fire Alarm, Structure Fire, Smoke Investigation, Vehicle Fire, Gas Leak, Rescue Call, Hazardous Condition, Mutual Aid
+**FIRE** (20): Fire Alarm, Smoke Investigation, Medical Assist, Structure Fire, Vehicle Fire, Cooking Fire, Brush/Grass Fire, Gas Leak, CO Investigation, Hazardous Condition, Rescue Call, Mutual Aid, Odor Investigation, Overheat Investigation, Electrical Wiring Problem, Lockout / Public Service, Water Rescue, Vehicle Extrication, Assist Police, Elevator Rescue
 
-**EMS**: Chest Pain, Difficulty Breathing, Fall Injury, Unconscious Person, Motor Vehicle Crash, Seizure, Overdose, Psychiatric Emergency, Sick Person
+**EMS** (22): Chest Pain, Difficulty Breathing, Fall Injury, Motor Vehicle Crash, Sick Person, Unconscious Person, Seizure, Altered Mental Status, Abdominal Pain, Overdose, Psychiatric Emergency, Stroke, Diabetic Problem, Heart Problems, Allergic Reaction, Hemorrhage / Bleeding, Traumatic Injury, Head Injury, Choking, Heat/Cold Exposure, Pregnancy / Childbirth, Animal Bite
 
 ### Time Profiles (Lognormal Distributions)
 
@@ -597,6 +708,19 @@ uv run synth911gen3 generate --config config/example_realism.yaml --rows 50000 -
 uv run synth911gen3 generate --config my_center.yaml --rows 100000 --output-dir /data/exports --output-stem my_center_2024
 ```
 
+### Params Files
+
+```bash
+# Run with all parameters defined in a single file
+uv run synth911gen3 generate --params config/example_params.json
+
+# Override individual values on top of the file
+uv run synth911gen3 generate --params config/example_params.json --rows 250000 --format csv
+
+# YAML params file
+uv run synth911gen3 generate --params config/example_params.yaml
+```
+
 ---
 
 ## Python API Usage
@@ -658,6 +782,29 @@ incidents_df = result.incidents  # pd.DataFrame
 - Check internet connectivity (required for initial OSM fetch)
 - Try a simpler area query: `"Kansas City"` instead of `"Kansas City, MO, USA"`
 - Addresses are cached locally after first fetch
+
+#### TLS errors on restricted networks (corporate proxy / MITM)
+
+On networks where a TLS-inspecting proxy intercepts HTTPS traffic, Python and `uv` may reject the
+proxy's certificate with errors like `invalid peer certificate: UnknownIssuer` or
+`certificate verify failed: unable to get local issuer certificate`. The safe fix is to verify
+against the **operating system trust store** instead of bundled CA lists (verification stays on):
+
+```bash
+# 1. Let uv use the OS trust store for package downloads
+$env:UV_NATIVE_TLS = "true"        # PowerShell
+# export UV_NATIVE_TLS=true         # Linux/macOS
+uv sync
+
+# 2. Let the generator use the OS trust store for OSM lookups (dev dependency: truststore)
+$env:SYNTH911_SYSTEM_TRUST = "1"   # PowerShell
+# export SYNTH911_SYSTEM_TRUST=1     # Linux/macOS
+uv run synth911gen3 generate
+```
+
+The runtime flag is a no-op unless set, so production behavior is unchanged. If the OS trust
+store does not trust the proxy's issuer, contact your network administrator instead — do not
+disable TLS verification.
 
 #### "ExportError: Unsupported output format"
 - Valid formats: `csv`, `parquet`, `json`, `yaml`, `pandas`, `polars`

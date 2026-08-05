@@ -8,21 +8,16 @@ authors = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "click>=8.3.3",
     "faker>=40.13.0",
     "httpx>=0.28.1",
-    "inquirerpy>=0.3.4",
+    "idna>=3.15",
     "numpy>=2.4.4",
     "overpy>=0.7",
     "pandas>=3.0.2",
     "polars>=1.39.3",
-    "prompt-toolkit>=3.0.52",
     "pyarrow>=23.0.1",
-    "pydantic>=2.13.4",
-    "pyqt6>=6.11.0",
     "pyyaml>=6.0.3",
-    "requests>=2.34.2",
-    "rich>=15.0.0",
-    "scipy>=1.17.1",
     "textual>=8.2.3",
     "typer>=0.24.1",
 ]
@@ -37,8 +32,10 @@ build-backend = "uv_build"
 
 [dependency-groups]
 dev = [
+    "pip-audit>=2.10.1",
     "pytest>=9.0.3",
     "ruff>=0.15.10",
+    "truststore>=0.10.4",
     "ty>=0.0.31",
 ]
 

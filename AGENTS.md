@@ -154,6 +154,16 @@ source .venv/bin/activate  # Linux/Mac
 - Install dependencies: `uv sync`
 - Lock environment: `uv lock`
 
+## Local Network Notes (this machine)
+
+This machine sits behind a TLS-inspecting proxy. Python's bundled CA list and uv's default
+rustls roots do not trust the proxy's issuer, so TLS fails with `invalid peer certificate:
+UnknownIssuer`. Safe workaround (verification stays on):
+
+- `uv sync` / `uv add`: prefix with `UV_NATIVE_TLS=true`
+- Runtime OSM lookups: set `SYNTH911_SYSTEM_TRUST=1` (uses the dev-only `truststore` package
+  via `synth911gen3.tls.maybe_inject_system_trust()` to verify against the OS trust store)
+
 ## Commands
 
 - Install package: `uv add` + package name

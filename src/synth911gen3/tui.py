@@ -10,6 +10,7 @@ from .addresses import OpenStreetMapAddressProvider
 from .app import Synth911Application
 from .config import DatasetKind, GenerationRequest, OutputFormat
 from .exceptions import AddressLookupError, ExportError, ValidationError
+from .tls import maybe_inject_system_trust
 
 
 class Synth911Tui(App[None]):
@@ -111,4 +112,5 @@ class Synth911Tui(App[None]):
 
 
 def run() -> None:
+    maybe_inject_system_trust()
     Synth911Tui().run()

@@ -1,12 +1,82 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+import hashlib
+import time
+from collections.abc import Callable, Sequence
+from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 import httpx
+import overpy
+import pandas as pd
 
 from .domain import Address
 from .exceptions import AddressLookupError
+
+_NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+_NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
+_OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+_USER_AGENT = "synth911gen3/0.1.0 (synthetic CAD data generator)"
+_DEFAULT_CACHE_DIR = Path.home() / ".cache" / "synth911gen3"
+_NOMINATIM_MIN_REQUEST_INTERVAL = 1.0  # seconds; Nominatim usage policy: max 1 req/s
+_RETRYABLE_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
+
+_US_STATE_NAMES = {
+    "AL": "Alabama",
+    "AK": "Alaska",
+    "AZ": "Arizona",
+    "AR": "Arkansas",
+    "CA": "California",
+    "CO": "Colorado",
+    "CT": "Connecticut",
+    "DE": "Delaware",
+    "DC": "District of Columbia",
+    "FL": "Florida",
+    "GA": "Georgia",
+    "HI": "Hawaii",
+    "ID": "Idaho",
+    "IL": "Illinois",
+    "IN": "Indiana",
+    "IA": "Iowa",
+    "KS": "Kansas",
+    "KY": "Kentucky",
+    "LA": "Louisiana",
+    "ME": "Maine",
+    "MD": "Maryland",
+    "MA": "Massachusetts",
+    "MI": "Michigan",
+    "MN": "Minnesota",
+    "MS": "Mississippi",
+    "MO": "Missouri",
+    "MT": "Montana",
+    "NE": "Nebraska",
+    "NV": "Nevada",
+    "NH": "New Hampshire",
+    "NJ": "New Jersey",
+    "NM": "New Mexico",
+    "NY": "New York",
+    "NC": "North Carolina",
+    "ND": "North Dakota",
+    "OH": "Ohio",
+    "OK": "Oklahoma",
+    "OR": "Oregon",
+    "PA": "Pennsylvania",
+    "RI": "Rhode Island",
+    "SC": "South Carolina",
+    "SD": "South Dakota",
+    "TN": "Tennessee",
+    "TX": "Texas",
+    "UT": "Utah",
+    "VT": "Vermont",
+    "VA": "Virginia",
+    "WA": "Washington",
+    "WV": "West Virginia",
+    "WI": "Wisconsin",
+    "WY": "Wyoming",
+}
+
+_LOCAL_HIGHWAY_PATTERN = "^(residential|living_street|unclassified|service|tertiary|secondary|primary)$"
 
 
 class AddressProvider(Protocol):
@@ -24,82 +94,314 @@ class StaticAddressProvider:
         return list(self._addresses)
 
 
-class OpenStreetMapAddressProvider:
-    SEARCH_URL = "https://nominatim.openstreetmap.org/search"
+@dataclass(frozen=True, slots=True)
+class _GeocodedArea:
+    south: float
+    west: float
+    north: float
+    east: float
+    city: str
+    state: str
 
-    def __init__(self, client: httpx.Client | None = None, limit: int = 75) -> None:
+
+def _parse_bbox(area_query: str) -> tuple[float, float, float, float] | None:
+    """Parse an area query of the form "minlat,minlon,maxlat,maxlon" into (south, west, north, east)."""
+    parts = [part.strip() for part in area_query.split(",")]
+    if len(parts) != 4:
+        return None
+    try:
+        south, west, north, east = (float(part) for part in parts)
+    except ValueError:
+        return None
+    if not (-90 <= south <= north <= 90 and -180 <= west <= east <= 180):
+        return None
+    return south, west, north, east
+
+
+def _normalize_state(state: str) -> str:
+    normalized = state.strip()
+    if normalized.upper() in _US_STATE_NAMES:
+        return _US_STATE_NAMES[normalized.upper()]
+    return normalized
+
+
+def _extract_city(components: dict[str, Any]) -> str:
+    for key in ("city", "town", "village", "hamlet", "municipality", "county"):
+        value = components.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def _build_real_address_query(south: float, west: float, north: float, east: float, limit: int) -> str:
+    bbox = f"{south},{west},{north},{east}"
+    return (
+        "[out:xml][timeout:60];("
+        f'way["addr:housenumber"]["addr:street"]({bbox});'
+        f'node["addr:housenumber"]["addr:street"]({bbox});'
+        f");out center {limit};"
+    )
+
+
+def _build_named_street_query(south: float, west: float, north: float, east: float, limit: int) -> str:
+    bbox = f"{south},{west},{north},{east}"
+    return (
+        "[out:xml][timeout:60];"
+        f'way["highway"~"{_LOCAL_HIGHWAY_PATTERN}"]["name"]({bbox});'
+        f"out center {limit};"
+    )
+
+
+class OpenStreetMapAddressProvider:
+    def __init__(
+        self,
+        client: httpx.Client | None = None,
+        cache_dir: Path = _DEFAULT_CACHE_DIR,
+        query_runner: Callable[[str], overpy.Result] | None = None,
+        min_addresses: int = 5,
+        max_addresses: int = 1_000,
+        max_retries: int = 3,
+        nominatim_min_interval: float = _NOMINATIM_MIN_REQUEST_INTERVAL,
+    ) -> None:
         self._client = client or httpx.Client(
             headers={
-                "User-Agent": "synth911gen3/0.1.0 (synthetic CAD data generator)",
-                "Accept": "application/json",
+                "User-Agent": _USER_AGENT,
+                "Accept": "application/json, application/osm3s+xml",
             },
-            timeout=20.0,
+            timeout=120.0,
         )
-        self._limit = limit
+        self._cache_dir = Path(cache_dir)
+        self._query_runner = query_runner or self._run_overpass_query
+        self._min_addresses = min_addresses
+        self._max_addresses = max_addresses
+        self._max_retries = max_retries
+        self._nominatim_min_interval = nominatim_min_interval
+        self._last_nominatim_request = 0.0
 
     def load_addresses(self, area_query: str) -> list[Address]:
-        try:
-            response = self._client.get(
-                self.SEARCH_URL,
-                params={
-                    "q": area_query,
-                    "format": "jsonv2",
-                    "addressdetails": 1,
-                    "limit": self._limit,
-                },
-            )
-            response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise AddressLookupError(f"Unable to query OpenStreetMap for '{area_query}'.") from exc
+        cache_path = self._cache_path(area_query)
+        cached = self._load_cache(cache_path)
+        if cached is not None:
+            return cached
 
-        addresses = self._parse_addresses(response.json())
-        if len(addresses) < 5:
+        addresses = self._fetch_addresses(area_query)
+        self._write_cache(cache_path, addresses)
+        return addresses
+
+    def _cache_path(self, area_query: str) -> Path:
+        digest = hashlib.md5(area_query.strip().lower().encode("utf-8")).hexdigest()[:12]
+        return self._cache_dir / f"addresses_{digest}.parquet"
+
+    def _load_cache(self, path: Path) -> list[Address] | None:
+        if not path.is_file():
+            return None
+        try:
+            frame = pd.read_parquet(path)
+        except Exception:
+            return None
+        if len(frame) < self._min_addresses:
+            return None
+        return [
+            Address(street_address=str(row.street_address), city=str(row.city), state=str(row.state))
+            for row in frame.itertuples()
+        ]
+
+    def _write_cache(self, path: Path, addresses: list[Address]) -> None:
+        frame = pd.DataFrame(
+            {
+                "street_address": [address.street_address for address in addresses],
+                "city": [address.city for address in addresses],
+                "state": [address.state for address in addresses],
+            }
+        )
+        self._cache_dir.mkdir(parents=True, exist_ok=True)
+        frame.to_parquet(path, index=False)
+
+    def _fetch_addresses(self, area_query: str) -> list[Address]:
+        bbox = _parse_bbox(area_query)
+        if bbox is None:
+            area = self._geocode_area(area_query)
+        else:
+            area = self._geocode_bbox(bbox)
+
+        addresses = self._query_real_addresses(area)
+        if len(addresses) < self._min_addresses:
+            street_addresses = self._query_named_streets(area)
+            addresses = self._dedupe(addresses + street_addresses)
+
+        if len(addresses) < self._min_addresses:
             raise AddressLookupError(
                 f"OpenStreetMap returned too few usable addresses for '{area_query}'."
             )
+        return addresses[: self._max_addresses]
+
+    def _nominatim_get(self, url: str, params: dict[str, Any]) -> Any:
+        """GET a Nominatim endpoint honoring the 1 req/s usage policy with retry/backoff.
+
+        Returns the parsed JSON payload. Retries on rate-limit (429) and server
+        errors (5xx) up to ``max_retries`` with exponential backoff, honoring a
+        ``Retry-After`` header when present.
+        """
+        for attempt in range(self._max_retries):
+            elapsed = time.monotonic() - self._last_nominatim_request
+            if elapsed < self._nominatim_min_interval:
+                time.sleep(self._nominatim_min_interval - elapsed)
+
+            try:
+                response = self._client.get(url, params=params)
+            except httpx.HTTPError as exc:
+                raise AddressLookupError("Unable to reach the OpenStreetMap Nominatim service.") from exc
+            self._last_nominatim_request = time.monotonic()
+
+            if response.status_code == 200:
+                return response.json()
+            if response.status_code in _RETRYABLE_HTTP_STATUS:
+                retry_after = response.headers.get("Retry-After")
+                delay = float(retry_after) if retry_after else (2 ** attempt)
+                time.sleep(min(delay, 30))
+                continue
+            raise AddressLookupError(
+                f"OpenStreetMap Nominatim request failed (HTTP {response.status_code})."
+            )
+        raise AddressLookupError(
+            "OpenStreetMap Nominatim request failed after retries (HTTP rate limit or server error)."
+        )
+
+    def _geocode_area(self, area_query: str) -> _GeocodedArea:
+        payload = self._nominatim_get(
+            _NOMINATIM_SEARCH_URL,
+            params={"q": area_query, "format": "jsonv2", "addressdetails": 1, "limit": 1},
+        )
+
+        if not isinstance(payload, list) or not payload:
+            raise AddressLookupError(f"Unable to geocode area query '{area_query}'.")
+
+        item = payload[0]
+        if not isinstance(item, dict) or "boundingbox" not in item:
+            raise AddressLookupError(f"Unable to geocode area query '{area_query}'.")
+
+        south, north, west, east = (float(value) for value in item["boundingbox"])
+        components = item.get("address") if isinstance(item.get("address"), dict) else {}
+        return _GeocodedArea(
+            south=south,
+            west=west,
+            north=north,
+            east=east,
+            city=_extract_city(components),
+            state=_normalize_state(str(components.get("state") or "")),
+        )
+
+    def _geocode_bbox(self, bbox: tuple[float, float, float, float]) -> _GeocodedArea:
+        south, west, north, east = bbox
+        payload = self._nominatim_get(
+            _NOMINATIM_REVERSE_URL,
+            params={
+                "format": "jsonv2",
+                "lat": (south + north) / 2,
+                "lon": (west + east) / 2,
+                "addressdetails": 1,
+            },
+        )
+
+        components = payload.get("address") if isinstance(payload, dict) else {}
+        return _GeocodedArea(
+            south=south,
+            west=west,
+            north=north,
+            east=east,
+            city=_extract_city(components),
+            state=_normalize_state(str(components.get("state") or "")),
+        )
+
+    def _run_overpass_query(self, query: str) -> overpy.Result:
+        last_status: int | None = None
+        for attempt in range(self._max_retries):
+            response = self._client.post(_OVERPASS_URL, content=query.encode("utf-8"))
+            last_status = response.status_code
+            if response.status_code == 200:
+                return overpy.Overpass().parse_xml(response.content)
+            if response.status_code in (429, 503, 504):
+                time.sleep((attempt + 1) * 2)
+                continue
+            break
+        raise AddressLookupError(f"Overpass API request failed (HTTP {last_status}).")
+
+    def _query_real_addresses(self, area: _GeocodedArea) -> list[Address]:
+        query = _build_real_address_query(area.south, area.west, area.north, area.east, self._max_addresses)
+        try:
+            result = self._query_runner(query)
+        except AddressLookupError:
+            return []
+        return self._parse_elements(result, area.city, area.state)
+
+    def _query_named_streets(self, area: _GeocodedArea) -> list[Address]:
+        query = _build_named_street_query(area.south, area.west, area.north, area.east, self._max_addresses)
+        try:
+            result = self._query_runner(query)
+        except AddressLookupError:
+            return []
+        street_names = self._named_streets(result)
+        return self._synthesize_addresses(street_names, area.city, area.state, self._max_addresses)
+
+    def _parse_elements(
+        self, result: overpy.Result, fallback_city: str, fallback_state: str
+    ) -> list[Address]:
+        addresses: list[Address] = []
+        for element in [*result.ways, *result.nodes]:
+            tags = element.tags
+            housenumber = tags.get("addr:housenumber")
+            street = tags.get("addr:street")
+            if not housenumber or not street:
+                continue
+            city = tags.get("addr:city") or fallback_city
+            state = _normalize_state(tags.get("addr:state") or fallback_state)
+            if not city or not state:
+                continue
+            addresses.append(Address(f"{housenumber} {street}".strip(), city, state))
+        return self._dedupe(addresses)
+
+    @staticmethod
+    def _named_streets(result: overpy.Result) -> list[str]:
+        names: list[str] = []
+        seen: set[str] = set()
+        for way in result.ways:
+            name = way.tags.get("name")
+            if name and name not in seen:
+                seen.add(name)
+                names.append(name)
+        return names
+
+    @staticmethod
+    def _synthesize_addresses(
+        street_names: list[str],
+        city: str,
+        state: str,
+        count: int,
+    ) -> list[Address]:
+        if not street_names:
+            return []
+        addresses: list[Address] = []
+        seen: set[tuple[str, str, str]] = set()
+        index = 0
+        while len(addresses) < count and index < count * len(street_names):
+            name = street_names[index % len(street_names)]
+            offset = index // len(street_names)
+            number = 100 + (int(hashlib.md5(name.encode("utf-8")).hexdigest(), 16) + offset * 97) % 8_900
+            address = Address(f"{number} {name}", city, state)
+            key = (address.street_address, city, state)
+            if key not in seen:
+                seen.add(key)
+                addresses.append(address)
+            index += 1
         return addresses
 
     @staticmethod
-    def _parse_addresses(payload: Any) -> list[Address]:
-        if not isinstance(payload, list):
-            raise AddressLookupError("OpenStreetMap returned an unexpected payload format.")
-
-        parsed: list[Address] = []
+    def _dedupe(addresses: list[Address]) -> list[Address]:
         seen: set[tuple[str, str, str]] = set()
-        for item in payload:
-            if not isinstance(item, dict):
-                continue
-            components = item.get("address", {})
-            if not isinstance(components, dict):
-                continue
-
-            road = (
-                components.get("road")
-                or components.get("pedestrian")
-                or components.get("residential")
-                or components.get("footway")
-            )
-            if not isinstance(road, str) or not road.strip():
-                continue
-
-            city = (
-                components.get("city")
-                or components.get("town")
-                or components.get("village")
-                or components.get("hamlet")
-                or components.get("county")
-            )
-            state = components.get("state") or components.get("state_district")
-            if not isinstance(city, str) or not city.strip():
-                continue
-            if not isinstance(state, str) or not state.strip():
-                continue
-
-            house_number = components.get("house_number")
-            street_address = f"{house_number} {road}".strip() if house_number else road
-            key = (street_address, city, state)
-            if key in seen:
-                continue
-            seen.add(key)
-            parsed.append(Address(street_address=street_address, city=city, state=state))
-        return parsed
+        unique: list[Address] = []
+        for address in addresses:
+            key = (address.street_address, address.city, address.state)
+            if key not in seen:
+                seen.add(key)
+                unique.append(address)
+        return unique

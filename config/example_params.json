@@ -1,0 +1,14 @@
+{
+  "rows": 50000,
+  "area": "Denver, CO",
+  "format": "parquet",
+  "dataset": "all",
+  "output_dir": "output",
+  "output_stem": "denver_911",
+  "start_date": "2024-01-01",
+  "end_date": "2024-12-31",
+  "seed": 42,
+  "calltaker_pool_size": 20,
+  "dispatcher_pool_size": 15,
+  "config": "config/example_realism.yaml"
+}

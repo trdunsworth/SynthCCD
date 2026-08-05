@@ -9,6 +9,10 @@ from .constants import DEFAULT_AREA_QUERY, DEFAULT_OUTPUT_DIR, DEFAULT_OUTPUT_ST
 from .exceptions import ValidationError
 from .realism_config import RealismConfig
 
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+)
+
 
 class OutputFormat(StrEnum):
     CSV = "csv"
@@ -61,8 +65,7 @@ class GenerationRequest:
             raise ValidationError("rows must be greater than zero.")
         if not self.area_query.strip():
             raise ValidationError("area_query must not be empty.")
-        if not self.output_stem.strip():
-            raise ValidationError("output_stem must not be empty.")
+        self._validate_output_path()
         if self.calltaker_pool_size <= 0:
             raise ValidationError("calltaker_pool_size must be greater than zero.")
         if self.dispatcher_pool_size <= 0:
@@ -71,3 +74,19 @@ class GenerationRequest:
             raise ValidationError("start_date must be on or before end_date.")
         # Validate realism config if provided
         self.get_realism_config()
+
+    def _validate_output_path(self) -> None:
+        if not self.output_stem.strip():
+            raise ValidationError("output_stem must not be empty.")
+        if self.output_stem in (".", ".."):
+            raise ValidationError("output_stem must not be '.' or '..'.")
+        if any(char in self.output_stem for char in ("/", "\\", "\x00")):
+            raise ValidationError("output_stem must not contain path separators or null bytes.")
+        stem_root = self.output_stem.split(".", 1)[0].upper()
+        if stem_root in _WINDOWS_RESERVED_NAMES:
+            raise ValidationError(f"output_stem must not be a reserved device name: {stem_root}.")
+
+        if "\x00" in str(self.output_dir):
+            raise ValidationError("output_dir must not contain null bytes.")
+        if any(part == ".." for part in self.output_dir.parts):
+            raise ValidationError("output_dir must not contain '..' path segments.")

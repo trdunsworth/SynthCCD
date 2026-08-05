@@ -1,0 +1,16 @@
+# synth911gen3 Generation Parameters
+# Usage: uv run synth911gen3 generate --params config/example_params.yaml
+# Keys mirror the CLI options (area, format, config) or the GenerationRequest fields
+# (area_query, output_format, realism_config_path). CLI flags override file values.
+
+rows: 25000
+area: "Seattle, WA"
+format: csv
+dataset: incidents
+output_dir: "output"
+output_stem: "seattle_911"
+start_date: "2024-07-01"
+end_date: "2024-09-30"
+seed: 2024
+calltaker_pool_size: 16
+dispatcher_pool_size: 12

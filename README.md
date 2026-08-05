@@ -51,4 +51,8 @@ uv run synth911gen3 tui
 uv run pytest tests/
 uv run ruff check .
 uv run ty check
+uv run scripts/audit_deps.py   # dependency security audit (pip-audit)
 ```
+
+On networks behind a TLS-inspecting proxy, prefix the audit with
+`$env:SYNTH911_SYSTEM_TRUST = "1"` so it verifies against the OS trust store.
