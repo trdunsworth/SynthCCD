@@ -12,16 +12,19 @@ recommendation docs in `docs/`, and direct code review.
       `.venv/`, `__pycache__/*.pyc`, `.pytest_cache/`, `.ruff_cache/`, `.DS_Store`,
       `output/*`, and IDE files; ran `git rm --cached` on the tracked artifacts (files
       remain on disk). Verified with `git check-ignore`; no artifacts remain in the index.
-- [ ] **P1 — Add a CI pipeline (GitHub Actions) that runs `pytest`, `ruff check .`,
-      `ty check`, and the dependency audit on every push/PR.** `AGENTS.md` PR
-      requirements reference "All CI checks must pass" but no CI workflow exists yet
-      (`.github/` is absent).
+- [x] **P1 — Add a CI pipeline (GitHub Actions) that runs `pytest`, `ruff check .`,
+      `ty check`, and the dependency audit on every push/PR.** Added
+      `.github/workflows/ci.yml` (setup-uv + Python 3.12, `uv sync --locked`, ruff, ty,
+      pytest, `scripts/audit_deps.py`) triggered on pushes to `main` and all PRs. To make
+      the gate pass: fixed the 8 pre-existing `ty` diagnostics in `addresses.py` and
+      excluded read-only `docs/` scripts from ruff scope in `pyproject.toml`.
 - [x] **P1 — Add a dependency/security audit check.** Added `pip-audit` (dev group) and a
       wrapper script `scripts/audit_deps.py` (injects the OS trust store when
       `SYNTH911_SYSTEM_TRUST=1`). Ran it and fixed the findings: pinned `idna>=3.15`
-      (PYSEC-2026-215) and `click>=8.3.3` (PYSEC-2026-2132). Audit is currently clean.
-      Remaining: wire into CI (blocked on the CI item) and enable dependabot for
-      `uv.lock`.
+      (PYSEC-2026-215) and `click>=8.3.3` (PYSEC-2026-2132). Audit is currently clean
+      and wired into the CI gate via `scripts/audit_deps.py`. Remaining: enable
+      dependabot for `uv.lock` (GitHub dependabot has no native `uv.lock` support; a
+      `pip`-ecosystem config for `pyproject.toml` is the closest option).
 - [x] **P1 — Trim unused runtime dependencies.** Removed from `pyproject.toml`:
       `pydantic`, `requests`, `scipy`, `rich`, `prompt_toolkit`, `inquirerpy`, `pyqt6`.
       `pyarrow` was kept (needed transitively for `pandas.to_parquet`).
@@ -111,10 +114,11 @@ recommendation docs in `docs/`, and direct code review.
       weight-validation error paths.** Currently untested.
 - [ ] **P1 — Add tests for `tui.py` request building and `addresses.py` cache
       invalidation/corruption paths.**
-- [ ] **P2 — Clear the pre-existing `ty` diagnostics (22) and `docs/*` ruff errors.**
+- [ ] **P2 — Clear the remaining pre-existing `ty` diagnostics and `docs/*` ruff errors.**
       `docs/` contains v2-era scripts (`synthgui.py`, `webgui.py`, `synth911.py`, …) that
-      fail lint/type checks. Move them to a `docs/archive/` or exclude from lint scope and
-      add an architecture decision note.
+      fail lint/type checks. The 8 `ty` diagnostics in `addresses.py` were fixed (Dec 2026)
+      and `docs/` is now excluded from ruff scope; remaining: add an architecture decision
+      note for the exclusion, and decide whether to move the scripts to `docs/archive/`.
 - [ ] **P2 — Add a CHANGELOG and version bump discipline** (semver), wired to the `0.1.0`
       version in `pyproject.toml`.
 

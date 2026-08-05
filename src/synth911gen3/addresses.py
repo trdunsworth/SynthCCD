@@ -202,8 +202,10 @@ class OpenStreetMapAddressProvider:
         if len(frame) < self._min_addresses:
             return None
         return [
-            Address(street_address=str(row.street_address), city=str(row.city), state=str(row.state))
-            for row in frame.itertuples()
+            Address(street_address=str(street), city=str(city), state=str(state))
+            for street, city, state in zip(
+                frame["street_address"], frame["city"], frame["state"]
+            )
         ]
 
     def _write_cache(self, path: Path, addresses: list[Address]) -> None:
@@ -348,7 +350,7 @@ class OpenStreetMapAddressProvider:
     ) -> list[Address]:
         addresses: list[Address] = []
         for element in [*result.ways, *result.nodes]:
-            tags = element.tags
+            tags = element.tags or {}
             housenumber = tags.get("addr:housenumber")
             street = tags.get("addr:street")
             if not housenumber or not street:
@@ -365,7 +367,7 @@ class OpenStreetMapAddressProvider:
         names: list[str] = []
         seen: set[str] = set()
         for way in result.ways:
-            name = way.tags.get("name")
+            name = (way.tags or {}).get("name")
             if name and name not in seen:
                 seen.add(name)
                 names.append(name)

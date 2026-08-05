@@ -44,6 +44,9 @@ testpaths = ["tests"]
 
 [tool.ruff]
 line-length = 100
+# `docs/` contains read-only v2-era reference scripts (see AGENTS.md) that are
+# intentionally excluded from linting; they are not part of the package.
+exclude = ["docs"]
 
 [tool.uv.workspace]
 members = [
