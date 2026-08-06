@@ -10,8 +10,10 @@ import yaml
 from .constants import (
     AGENCY_WEIGHTS as DEFAULT_AGENCY_WEIGHTS,
     CALL_RECEPTION_WEIGHTS as DEFAULT_CALL_RECEPTION_WEIGHTS,
+    DISPATCH_INIT_FRACTION as DEFAULT_DISPATCH_INIT_FRACTION,
     DISPOSITION_PROFILES as DEFAULT_DISPOSITION_PROFILES,
     HOURLY_WEIGHTS as DEFAULT_HOURLY_WEIGHTS,
+    PHONE_METRICS as DEFAULT_PHONE_METRICS,
     PRIORITY_WEIGHTS as DEFAULT_PRIORITY_WEIGHTS,
     PROBLEM_PROFILES as DEFAULT_PROBLEM_PROFILES,
     TIME_PROFILES as DEFAULT_TIME_PROFILES,
@@ -23,10 +25,12 @@ from .exceptions import ValidationError
 class RealismConfig:
     agency_weights: dict[str, float] = field(default_factory=dict)
     priority_weights: dict[str, dict[int, float]] = field(default_factory=dict)
-    problem_profiles: dict[str, list[tuple[str, float]]] = field(default_factory=dict)
+    problem_profiles: dict[str, dict[int, list[tuple[str, float]]]] = field(default_factory=dict)
     call_reception_weights: dict[str, float] = field(default_factory=dict)
     disposition_profiles: dict[str, list[tuple[str, float]]] = field(default_factory=dict)
     time_profiles: dict[str, dict[int, dict[str, int]]] = field(default_factory=dict)
+    dispatch_init_fraction: dict[int, tuple[float, float]] = field(default_factory=dict)
+    phone_metrics: dict[str, float] = field(default_factory=dict)
     hourly_weights: np.ndarray = field(default_factory=lambda: np.array([]))
     agency_names: dict[str, str] = field(default_factory=dict)
 
@@ -36,13 +40,19 @@ class RealismConfig:
         if not self.priority_weights:
             self.priority_weights = {k: v.copy() for k, v in DEFAULT_PRIORITY_WEIGHTS.items()}
         if not self.problem_profiles:
-            self.problem_profiles = {k: v.copy() for k, v in DEFAULT_PROBLEM_PROFILES.items()}
+            self.problem_profiles = {
+                k: {pk: pv.copy() for pk, pv in v.items()} for k, v in DEFAULT_PROBLEM_PROFILES.items()
+            }
         if not self.call_reception_weights:
             self.call_reception_weights = DEFAULT_CALL_RECEPTION_WEIGHTS.copy()
         if not self.disposition_profiles:
             self.disposition_profiles = {k: v.copy() for k, v in DEFAULT_DISPOSITION_PROFILES.items()}
         if not self.time_profiles:
             self.time_profiles = {k: {pk: pv.copy() for pk, pv in v.items()} for k, v in DEFAULT_TIME_PROFILES.items()}
+        if not self.dispatch_init_fraction:
+            self.dispatch_init_fraction = DEFAULT_DISPATCH_INIT_FRACTION.copy()
+        if not self.phone_metrics:
+            self.phone_metrics = DEFAULT_PHONE_METRICS.copy()
         if self.hourly_weights.size == 0:
             self.hourly_weights = DEFAULT_HOURLY_WEIGHTS.copy()
         if not self.agency_names:
@@ -65,8 +75,12 @@ class RealismConfig:
 
         if "problem_profiles" in data:
             config.problem_profiles = {}
-            for agency, profiles in data["problem_profiles"].items():
-                config.problem_profiles[agency] = [(str(p[0]), float(p[1])) for p in profiles]
+            for agency, priorities in data["problem_profiles"].items():
+                config.problem_profiles[agency] = {}
+                for priority, profiles in priorities.items():
+                    config.problem_profiles[agency][int(priority)] = [
+                        (str(p[0]), float(p[1])) for p in profiles
+                    ]
 
         if "call_reception_weights" in data:
             config.call_reception_weights = cls._normalize_weights(data["call_reception_weights"])
@@ -82,6 +96,17 @@ class RealismConfig:
                 config.time_profiles[agency] = {}
                 for priority, intervals in priorities.items():
                     config.time_profiles[agency][int(priority)] = {k: int(v) for k, v in intervals.items()}
+
+        if "dispatch_init_fraction" in data:
+            config.dispatch_init_fraction = {}
+            for priority, bounds in data["dispatch_init_fraction"].items():
+                config.dispatch_init_fraction[int(priority)] = (
+                    float(bounds[0]),
+                    float(bounds[1]),
+                )
+
+        if "phone_metrics" in data:
+            config.phone_metrics = {str(k): float(v) for k, v in data["phone_metrics"].items()}
 
         if "hourly_weights" in data:
             hw = np.array(data["hourly_weights"], dtype=float)
@@ -111,12 +136,15 @@ class RealismConfig:
             if abs(total - 1.0) > 0.001:
                 raise ValidationError(f"Priority weights for {agency} must sum to 1.0")
 
-        for agency, profiles in self.problem_profiles.items():
+        for agency, priorities in self.problem_profiles.items():
             if agency not in self.agency_weights:
                 raise ValidationError(f"Problem profiles defined for unknown agency: {agency}")
-            total = sum(w for _, w in profiles)
-            if abs(total - 1.0) > 0.001:
-                raise ValidationError(f"Problem profiles for {agency} must sum to 1.0")
+            for priority in (1, 2, 3, 4, 5):
+                if priority not in priorities:
+                    raise ValidationError(f"Problem profiles missing for {agency} priority {priority}")
+                total = sum(w for _, w in priorities[priority])
+                if abs(total - 1.0) > 0.001:
+                    raise ValidationError(f"Problem profiles for {agency} priority {priority} must sum to 1.0")
 
         for agency, profiles in self.disposition_profiles.items():
             if agency not in self.agency_weights:
@@ -136,6 +164,32 @@ class RealismConfig:
                 if missing:
                     raise ValidationError(f"Time profiles for {agency} priority {priority} missing keys: {missing}")
 
+        for priority in (1, 2, 3, 4, 5):
+            if priority not in self.dispatch_init_fraction:
+                raise ValidationError(f"dispatch_init_fraction missing for priority {priority}")
+            lo, hi = self.dispatch_init_fraction[priority]
+            if lo < 0 or hi < lo:
+                raise ValidationError(f"dispatch_init_fraction for priority {priority} must satisfy 0 <= lo <= hi")
+
+        required_phone_keys = {
+            "min_hourly_volume",
+            "nine_one_one_received_fraction",
+            "non_emergency_received_fraction",
+            "outbound_calls_fraction",
+            "nine_one_one_abandonment_rate",
+            "night_abandonment_increment",
+            "non_emergency_abandonment_rate",
+            "max_abandonment_rate",
+            "weekend_multiplier",
+        }
+        missing_phone_keys = required_phone_keys - set(self.phone_metrics)
+        if missing_phone_keys:
+            raise ValidationError(f"phone_metrics missing keys: {missing_phone_keys}")
+        if self.phone_metrics.get("max_abandonment_rate", 1.0) < 0 or self.phone_metrics.get("max_abandonment_rate", 1.0) > 1.0:
+            raise ValidationError("phone_metrics.max_abandonment_rate must be between 0 and 1")
+        if self.phone_metrics.get("min_hourly_volume", 0) < 0:
+            raise ValidationError("phone_metrics.min_hourly_volume must be non-negative")
+
         for agency in self.agency_weights:
             if agency not in self.agency_names:
                 raise ValidationError(f"Agency name mapping missing for: {agency}")
@@ -144,10 +198,15 @@ class RealismConfig:
         data = {
             "agency_weights": self.agency_weights,
             "priority_weights": {k: v for k, v in self.priority_weights.items()},
-            "problem_profiles": {k: [[p, w] for p, w in v] for k, v in self.problem_profiles.items()},
+            "problem_profiles": {
+                k: {str(pk): [[p, w] for p, w in pv] for pk, pv in v.items()}
+                for k, v in self.problem_profiles.items()
+            },
             "call_reception_weights": self.call_reception_weights,
             "disposition_profiles": {k: [[p, w] for p, w in v] for k, v in self.disposition_profiles.items()},
             "time_profiles": {k: {str(pk): pv for pk, pv in v.items()} for k, v in self.time_profiles.items()},
+            "dispatch_init_fraction": {str(k): [lo, hi] for k, (lo, hi) in self.dispatch_init_fraction.items()},
+            "phone_metrics": self.phone_metrics,
             "hourly_weights": self.hourly_weights.tolist(),
             "agency_names": self.agency_names,
         }

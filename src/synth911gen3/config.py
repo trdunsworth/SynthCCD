@@ -29,12 +29,18 @@ class DatasetKind(StrEnum):
     ALL = "all"
 
 
+class IdFormat(StrEnum):
+    INTEGER = "integer"
+    GUID = "guid"
+
+
 @dataclass(slots=True)
 class GenerationRequest:
     rows: int = DEFAULT_ROWS
     area_query: str = DEFAULT_AREA_QUERY
     output_format: OutputFormat = OutputFormat.CSV
     dataset: DatasetKind = DatasetKind.ALL
+    id_format: IdFormat = IdFormat.INTEGER
     output_dir: Path = Path(DEFAULT_OUTPUT_DIR)
     output_stem: str = DEFAULT_OUTPUT_STEM
     start_date: date | None = None

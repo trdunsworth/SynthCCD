@@ -1,27 +1,24 @@
 from __future__ import annotations
 
-import json
-from dataclasses import fields
 from datetime import date
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
 import typer
-import yaml
 
 from .addresses import OpenStreetMapAddressProvider
 from .app import Synth911Application
-from .config import DatasetKind, GenerationRequest, OutputFormat
+from .config import DatasetKind, IdFormat, OutputFormat
 from .exceptions import AddressLookupError, ExportError, ValidationError
+from .logging_conf import configure_logging, get_logger
+from .params import (
+    build_request_from_params,
+    coerce_param as _coerce_param,  # noqa: F401  (re-exported for tests)
+    load_params_file,
+)
 from .tls import maybe_inject_system_trust
 from .tui import run as run_tui
-
-_PARAMS_FILE_ALIASES = {
-    "area": "area_query",
-    "format": "output_format",
-    "config": "realism_config_path",
-}
 
 
 def _parse_date(value: str | None) -> date | None:
@@ -35,76 +32,19 @@ app = typer.Typer(
     no_args_is_help=True,
 )
 
+logger = get_logger("cli")
+
+
+@app.callback()
+def configure(
+    verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug-level logging."),
+    quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress non-error logging."),
+) -> None:
+    configure_logging(verbose=verbose, quiet=quiet)
+
 
 def _describe_frame(name: str, frame: pd.DataFrame) -> str:
     return f"{name}: {len(frame):,} rows x {len(frame.columns)} columns"
-
-
-def load_params_file(path: Path) -> dict[str, Any]:
-    """Load a params file and normalize key names to GenerationRequest fields.
-
-    Supports JSON (``.json``), YAML (``.yaml``/``.yml``), and TOML (``.toml``).
-    Keys may use the CLI option names (``area``, ``format``, ``config``) or the
-    canonical ``GenerationRequest`` field names (``area_query``, ``output_format``,
-    ``realism_config_path``).
-    """
-    suffix = path.suffix.lower()
-    try:
-        if suffix == ".json":
-            data = json.loads(path.read_text(encoding="utf-8"))
-        elif suffix in (".yaml", ".yml"):
-            data = yaml.safe_load(path.read_text(encoding="utf-8"))
-        elif suffix == ".toml":
-            import tomllib
-
-            data = tomllib.loads(path.read_text(encoding="utf-8"))
-        else:
-            raise typer.BadParameter(
-                f"Unsupported params file format: {suffix} (expected .json, .yaml, .yml, or .toml)."
-            )
-    except json.JSONDecodeError as exc:
-        raise typer.BadParameter(f"Invalid JSON in params file: {exc}") from exc
-    except yaml.YAMLError as exc:
-        raise typer.BadParameter(f"Invalid YAML in params file: {exc}") from exc
-
-    if not isinstance(data, dict):
-        raise typer.BadParameter("Params file must contain a top-level mapping of parameters.")
-
-    for alias, canonical in _PARAMS_FILE_ALIASES.items():
-        if alias in data:
-            data.setdefault(canonical, data[alias])
-            data.pop(alias)
-
-    return data
-
-
-def _coerce_param(key: str, value: Any) -> Any:
-    if key in ("output_format",):
-        return OutputFormat(str(value))
-    if key in ("dataset",):
-        return DatasetKind(str(value))
-    if key in ("output_dir", "realism_config_path"):
-        return Path(value)
-    if key in ("start_date", "end_date"):
-        return date.fromisoformat(str(value))
-    if key in ("rows", "seed", "calltaker_pool_size", "dispatcher_pool_size"):
-        return int(value)
-    return value
-
-
-def build_request_from_params(file_params: dict[str, Any], cli_params: dict[str, Any]) -> GenerationRequest:
-    """Merge params-file values with explicit CLI flags and build a GenerationRequest.
-
-    Precedence: CLI flags > params file > GenerationRequest defaults.
-    """
-    allowed = {field.name for field in fields(GenerationRequest)}
-    unknown = set(file_params) - allowed
-    if unknown:
-        raise typer.BadParameter(f"Unknown parameter(s) in params file: {', '.join(sorted(unknown))}")
-
-    merged = {key: _coerce_param(key, value) for key, value in file_params.items()}
-    merged.update(cli_params)
-    return GenerationRequest(**merged)
 
 
 @app.command()
@@ -145,6 +85,13 @@ def generate(
         case_sensitive=False,
         show_default=False,
         help="Dataset to generate: incidents, phone, or all (default: all).",
+    ),
+    id_format: IdFormat | None = typer.Option(
+        None,
+        "--id-format",
+        case_sensitive=False,
+        show_default=False,
+        help="id_number style: integer or guid (default: integer).",
     ),
     output_dir: Path | None = typer.Option(
         None,
@@ -205,6 +152,8 @@ def generate(
         cli_params["output_format"] = output_format
     if dataset is not None:
         cli_params["dataset"] = dataset
+    if id_format is not None:
+        cli_params["id_format"] = id_format
     if output_dir is not None:
         cli_params["output_dir"] = output_dir
     if output_stem is not None:
@@ -225,9 +174,11 @@ def generate(
     file_params = load_params_file(params) if params is not None else {}
     request = build_request_from_params(file_params, cli_params)
 
+    logger.info("Generating %d rows (%s, %s)", request.rows, request.dataset.value, request.output_format.value)
     try:
         result = Synth911Application(address_provider=OpenStreetMapAddressProvider()).generate(request)
     except (AddressLookupError, ExportError, ValidationError) as exc:
+        logger.error("%s: %s", type(exc).__name__, exc)
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
@@ -239,6 +190,7 @@ def generate(
         return
 
     for dataset_name, artifact in result.exported_artifacts.items():
+        logger.info("Exported %s -> %s", dataset_name, artifact)
         typer.echo(f"{dataset_name}: {artifact}")
 
 

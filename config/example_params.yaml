@@ -7,6 +7,7 @@ rows: 25000
 area: "Seattle, WA"
 format: csv
 dataset: incidents
+id_format: guid
 output_dir: "output"
 output_stem: "seattle_911"
 start_date: "2024-07-01"

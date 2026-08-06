@@ -6,9 +6,13 @@ TUI-first scaffold for generating synthetic 9-1-1 CAD incidents and hourly phone
 
 - `src\synth911gen3\` application package with shared generator services
 - CAD incident generation with agency, priority, lifecycle timestamps, personnel, and elapsed seconds
+- Configurable incident IDs: sequential integers or seeded UUID v4 GUIDs (`id_format`)
+- Full street-address columns: `prefix_directional`, `street_number`, `street_name`, `street_type`,
+  `postfix_directional`, `postal_code`, plus the combined `street_address` and `location`
+- Time-derived columns from `call_start_time`: `hour`, `dow` (MON–SUN), `week_no` (ISO week)
 - Hourly call-count generation for 9-1-1, non-emergency, abandoned, and outbound calls
 - Export routing for CSV, Parquet, JSON, YAML, pandas, and polars
-- OpenStreetMap-backed address provider abstraction
+- OpenStreetMap-backed address provider abstraction with local caching
 - Typer CLI and Textual TUI entrypoints
 - Pytest coverage for defaults, generation flow, and export behavior
 
@@ -37,6 +41,12 @@ Generate only incidents in parquet format:
 
 ```powershell
 uv run synth911gen3 generate --dataset incidents --format parquet --rows 5000
+```
+
+Generate incidents with GUID IDs:
+
+```powershell
+uv run synth911gen3 generate --id-format guid
 ```
 
 Launch the TUI:

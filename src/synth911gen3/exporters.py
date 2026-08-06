@@ -11,6 +11,9 @@ import yaml
 
 from .config import OutputFormat
 from .exceptions import ExportError
+from .logging_conf import get_logger
+
+logger = get_logger("exporters")
 
 
 def _records_for_serialization(frame: pd.DataFrame) -> list[dict[str, Any]]:
@@ -40,6 +43,7 @@ def export_generated_data(
             path = output_dir / f"{output_stem}_{dataset_name}.csv"
             frame.to_csv(path, index=False)
             artifacts[dataset_name] = path
+            logger.info("Wrote CSV: %s", path)
         return artifacts
 
     if output_format is OutputFormat.PARQUET:
@@ -48,12 +52,14 @@ def export_generated_data(
             path = output_dir / f"{output_stem}_{dataset_name}.parquet"
             frame.to_parquet(path, index=False)
             artifacts[dataset_name] = path
+            logger.info("Wrote parquet: %s", path)
         return artifacts
 
     bundled_payload = {name: _records_for_serialization(frame) for name, frame in datasets.items()}
     if output_format is OutputFormat.JSON:
         path = output_dir / f"{output_stem}_bundle.json"
         path.write_text(json.dumps(bundled_payload, indent=2), encoding="utf-8")
+        logger.info("Wrote JSON bundle: %s", path)
         return {"bundle": path}
 
     if output_format is OutputFormat.YAML:
@@ -62,6 +68,7 @@ def export_generated_data(
             yaml.safe_dump(bundled_payload, sort_keys=False, allow_unicode=False),
             encoding="utf-8",
         )
+        logger.info("Wrote YAML bundle: %s", path)
         return {"bundle": path}
 
     raise ExportError(f"Unsupported output format: {output_format}")

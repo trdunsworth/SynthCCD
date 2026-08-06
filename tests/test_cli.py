@@ -7,7 +7,7 @@ import typer
 from typer.testing import CliRunner
 
 from synth911gen3.cli import _coerce_param, app, build_request_from_params, load_params_file
-from synth911gen3.config import DatasetKind, OutputFormat
+from synth911gen3.config import DatasetKind, IdFormat, OutputFormat
 
 runner = CliRunner()
 
@@ -136,7 +136,35 @@ def test_coerce_param_output_format_enum() -> None:
     assert _coerce_param("output_format", "parquet") is OutputFormat.PARQUET
 
 
+def test_coerce_param_id_format_enum() -> None:
+    assert _coerce_param("id_format", "guid") is IdFormat.GUID
+
+
+def test_build_request_coerces_id_format() -> None:
+    request = build_request_from_params({"id_format": "guid"}, {})
+    assert request.id_format is IdFormat.GUID
+
+
+def test_build_request_unknown_id_format_raises() -> None:
+    with pytest.raises(ValueError):
+        build_request_from_params({"id_format": "hex"}, {})
+
+
+def test_cli_params_help_lists_id_format_option() -> None:
+    result = runner.invoke(app, ["generate", "--help"])
+    assert result.exit_code == 0
+    assert "--id-format" in _strip_ansi(result.output)
+
+
 def test_cli_params_help_lists_params_option() -> None:
     result = runner.invoke(app, ["generate", "--help"])
     assert result.exit_code == 0
     assert "--params" in _strip_ansi(result.output)
+
+
+def test_cli_help_lists_verbosity_flags() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    output = _strip_ansi(result.output)
+    assert "--verbose" in output
+    assert "--quiet" in output

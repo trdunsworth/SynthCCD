@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from datetime import datetime, time, timedelta
 
 import numpy as np
@@ -8,9 +9,14 @@ import pandas as pd
 from faker import Faker
 
 from synth911gen3.addresses import AddressProvider
-from synth911gen3.config import GenerationRequest
+from synth911gen3.config import GenerationRequest, IdFormat
 from synth911gen3.constants import DEFAULT_LOCALE
+from synth911gen3.logging_conf import ProgressReporter, get_logger
 from synth911gen3.realism_config import RealismConfig
+
+_DAY_ABBREVIATIONS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
+
+logger = get_logger("incidents")
 
 
 def _weighted_choice(rng: np.random.Generator, weights_by_value: dict[str, float]) -> str:
@@ -78,7 +84,11 @@ class IncidentGenerator:
         self._address_provider = address_provider
         self._faker_locale = faker_locale
 
-    def generate(self, request: GenerationRequest) -> pd.DataFrame:
+    def generate(
+        self,
+        request: GenerationRequest,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> pd.DataFrame:
         request.validate()
         realism = request.get_realism_config()
         rng = np.random.default_rng(request.seed)
@@ -87,12 +97,23 @@ class IncidentGenerator:
 
         calltakers = _build_personnel_pool(faker, request.calltaker_pool_size)
         dispatchers = _build_personnel_pool(faker, request.dispatcher_pool_size)
+        logger.debug("Personnel pools built: %d calltakers, %d dispatchers", len(calltakers), len(dispatchers))
+        logger.info("Loading addresses for '%s'...", request.area_query.strip())
         addresses = self._address_provider.load_addresses(request.area_query)
+        logger.info("Loaded %d addresses for sampling", len(addresses))
         event_times = _generate_event_times(request, rng, realism)
         reference_counters: defaultdict[str, int] = defaultdict(int)
 
+        progress = ProgressReporter(request.rows, logger)
         records: list[dict[str, object]] = []
+        last_permille = -1
         for incident_index, call_start_time in enumerate(event_times, start=1):
+            progress.update(incident_index)
+            if on_progress is not None:
+                permille = int(incident_index * 1000 / max(request.rows, 1))
+                if permille != last_permille or incident_index == request.rows:
+                    last_permille = permille
+                    on_progress(incident_index, request.rows)
             agency = _weighted_choice(rng, realism.agency_weights)
             priority = _weighted_priority(rng, agency, realism)
             profile = realism.time_profiles[agency][priority]
@@ -146,10 +167,16 @@ class IncidentGenerator:
                 ),
             )
 
+            pre_cad_offset_seconds = int(rng.integers(0, 4))
+            incident_start_time = call_start_time + timedelta(seconds=pre_cad_offset_seconds)
             time_phone_pickup = call_start_time + timedelta(seconds=pickup_delay_seconds)
             time_call_enters_queue = time_phone_pickup + timedelta(seconds=interview_seconds)
-            time_first_unit_assigned = time_call_enters_queue + timedelta(
-                seconds=dispatch_queue_seconds
+
+            dispatch_lo, dispatch_hi = realism.dispatch_init_fraction[priority]
+            dispatch_fraction = float(rng.uniform(dispatch_lo, dispatch_hi))
+            dispatch_init_seconds = int(phone_duration_seconds * dispatch_fraction)
+            time_first_unit_assigned = time_phone_pickup + timedelta(
+                seconds=dispatch_init_seconds + dispatch_queue_seconds
             )
             time_unit_enroute = time_first_unit_assigned + timedelta(seconds=turnout_seconds)
             time_unit_arrived = time_unit_enroute + timedelta(seconds=travel_seconds)
@@ -158,20 +185,35 @@ class IncidentGenerator:
             time_phone_disconnect = time_phone_pickup + timedelta(seconds=phone_duration_seconds)
             total_elapsed_seconds = int((time_call_closed - call_start_time).total_seconds())
 
+            if request.id_format is IdFormat.GUID:
+                id_number: int | str = str(faker.uuid4())
+            else:
+                id_number = incident_index
+
             records.append(
                 {
-                    "id_number": incident_index,
+                    "id_number": id_number,
                     "internal_reference_number": (
                         f"{agency}-{call_start_time:%y%m%d}-{reference_counters[agency]:06d}"
                     ),
                     "agency": agency,
-                    "problem_nature": _weighted_choice_from_pairs(rng, realism.problem_profiles[agency]),
+                    "problem_nature": _weighted_choice_from_pairs(rng, realism.problem_profiles[agency][priority]),
                     "priority": priority,
+                    "prefix_directional": address.prefix_directional,
+                    "street_number": address.street_number,
+                    "street_name": address.street_name,
+                    "street_type": address.street_type,
+                    "postfix_directional": address.postfix_directional,
                     "street_address": address.street_address,
                     "city": address.city,
                     "state": address.state,
+                    "postal_code": address.postal_code,
                     "location": address.location,
                     "call_start_time": call_start_time,
+                    "hour": call_start_time.hour,
+                    "dow": _DAY_ABBREVIATIONS[call_start_time.weekday()],
+                    "week_no": call_start_time.isocalendar().week,
+                    "incident_start_time": incident_start_time,
                     "time_phone_pickup": time_phone_pickup,
                     "time_call_enters_queue": time_call_enters_queue,
                     "time_first_unit_assigned": time_first_unit_assigned,
@@ -187,6 +229,7 @@ class IncidentGenerator:
                         rng, realism.disposition_profiles[agency]
                     ),
                     "pickup_delay_seconds": pickup_delay_seconds,
+                    "pre_cad_offset_seconds": pre_cad_offset_seconds,
                     "interview_seconds": interview_seconds,
                     "dispatch_queue_seconds": dispatch_queue_seconds,
                     "turnout_seconds": turnout_seconds,
@@ -198,4 +241,5 @@ class IncidentGenerator:
                 }
             )
 
+        progress.finish()
         return pd.DataFrame.from_records(records)

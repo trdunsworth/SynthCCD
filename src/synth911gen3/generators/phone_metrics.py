@@ -6,12 +6,23 @@ import numpy as np
 import pandas as pd
 
 from synth911gen3.config import GenerationRequest
+from synth911gen3.logging_conf import get_logger
+from synth911gen3.realism_config import RealismConfig
+
+logger = get_logger("phone_metrics")
 
 
 class HourlyCallCountGenerator:
     def generate(self, request: GenerationRequest) -> pd.DataFrame:
         request.validate()
         realism = request.get_realism_config()
+        frame = self._generate_with_config(request, realism)
+        logger.info("Hourly call counts generated: %d rows", len(frame))
+        return frame
+
+    def _generate_with_config(
+        self, request: GenerationRequest, realism: RealismConfig
+    ) -> pd.DataFrame:
         rng = np.random.default_rng(request.seed + 101)
         start_datetime = datetime.combine(request.resolved_start_date(), time.min)
         end_datetime = datetime.combine(request.resolved_end_date(), time(hour=23))
@@ -29,31 +40,34 @@ class HourlyCallCountGenerator:
                 ]
             )
 
-        base_hourly_volume = max(2.0, request.rows / len(hours))
+        pm = realism.phone_metrics
+        base_hourly_volume = max(pm["min_hourly_volume"], request.rows / len(hours))
         average_weight = float(np.mean(realism.hourly_weights))
 
         records: list[dict[str, int | datetime]] = []
         for hour_start in hours:
             weight_multiplier = float(realism.hourly_weights[hour_start.hour] / average_weight)
-            weekend_multiplier = 1.12 if hour_start.weekday() in (4, 5) else 1.0
+            weekend_multiplier = pm["weekend_multiplier"] if hour_start.weekday() in (4, 5) else 1.0
             busy_factor = weight_multiplier * weekend_multiplier
 
             nine_one_one_calls_received = int(
-                rng.poisson(max(1.0, base_hourly_volume * 0.48 * busy_factor))
+                rng.poisson(max(1.0, base_hourly_volume * pm["nine_one_one_received_fraction"] * busy_factor))
             )
             non_emergency_calls_received = int(
-                rng.poisson(max(1.0, base_hourly_volume * 0.58 * busy_factor))
+                rng.poisson(max(1.0, base_hourly_volume * pm["non_emergency_received_fraction"] * busy_factor))
             )
             outbound_calls_placed = int(
-                rng.poisson(max(0.5, base_hourly_volume * 0.26 * busy_factor))
+                rng.poisson(max(0.5, base_hourly_volume * pm["outbound_calls_fraction"] * busy_factor))
             )
 
-            abandonment_rate = 0.02 + (0.03 if 0 <= hour_start.hour <= 5 else 0.0)
+            abandonment_rate = pm["nine_one_one_abandonment_rate"] + (
+                pm["night_abandonment_increment"] if 0 <= hour_start.hour <= 5 else 0.0
+            )
             nine_one_one_calls_abandoned = int(
-                rng.binomial(nine_one_one_calls_received, min(abandonment_rate, 0.12))
+                rng.binomial(nine_one_one_calls_received, min(abandonment_rate, pm["max_abandonment_rate"]))
             )
             non_emergency_calls_abandoned = int(
-                rng.binomial(non_emergency_calls_received, 0.05)
+                rng.binomial(non_emergency_calls_received, pm["non_emergency_abandonment_rate"])
             )
 
             records.append(

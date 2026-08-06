@@ -44,32 +44,39 @@ recommendation docs in `docs/`, and direct code review.
 
 ## Functionality (AGENTS.md goal gaps)
 
-- [ ] **P1 — Implement GUID or integer incident ID option.** `AGENTS.md` goal: "Id number …
-      either an integer or a GUID, depending on the user's preference." Currently only
-      sequential integers are emitted (`incidents.py` `id_number`).
-- [ ] **P1 — Add `incident_start_time` field** distinct from `call_start_time` by a 0–30 s
-      offset (recommendation #13). Mirrors real CAD where the phone pickup precedes the CAD
-      open timestamp.
-- [ ] **P1 — Model parallel dispatch and call-taking timelines** (recommendation #8). High
-      priority calls are dispatched while the call is still in progress; add a
-      `dispatch_init_fraction` concept keyed by priority (see `docs/synth911gen_recommendations_ckaude2.md`).
-- [ ] **P1 — Add postal code / directional / street-component address columns.** Current
-      `Address` only stores `street_address`, `city`, `state` combined. AGENTS.md requires
-      prefix directional, street number, name, type, postfix directional, and postal code.
-      Extend `Address` domain model + OSM parsing + schema + exports.
+- [x] **P1 — Implement GUID or integer incident ID option.** `AGENTS.md` goal: "Id number …
+      either an integer or a GUID, depending on the user's preference." Added an `IdFormat`
+      enum (`integer`/`guid`) wired through `GenerationRequest`, the `--id-format` CLI flag,
+      the TUI ID-format select, and params files; GUIDs are seeded UUID v4 values via Faker
+      so output stays reproducible.
+- [x] **P1 — Add `incident_start_time` field** distinct from `call_start_time`. Added a
+      `pre_cad_offset_seconds` draw (0–3 s, the CAD record opens a moment after the call is
+      received) and the resulting `incident_start_time` column; covered by tests and
+      documented in the schema.
+- [x] **P1 — Model parallel dispatch and call-taking timelines** (recommendation #8). High
+      priority calls are dispatched while the call is still in progress via a configurable
+      `dispatch_init_fraction` keyed by priority (fractions < 1.0 dispatch mid-call,
+      >= 1.0 defer until after the call ends).
+- [x] **P1 — Add postal code / directional / street-component address columns.** Extended
+      the `Address` model with `street_number`, `street_name`, `street_type`,
+      `prefix_directional`, `postfix_directional`, and `postal_code` (auto-parsed from the
+      street string, with OSM `addr:postcode` preserved through the cache); wired the
+      components into the incident schema, OSM parsing, cache, and docs.
 - [ ] **P1 — Add a business/landmark indicator column.** AGENTS.md: "If an address is a
       business address or a known landmark then that should be reflected in a column on its
       own." Requires mapping `amenity`/`shop`/`tourism` OSM tags onto address results.
-- [ ] **P2 — Make call reception and disposition use real CAD code vocabulary.** Currently
-      plain-English strings ("911", "Report Issued"). Recommendation #11/#12 suggest
-      E-911/OFFICER/Radio/C2C and code+label pairs (e.g., `NR-No Report`). Config-driven so
-      deployments can match local CAD.
-- [ ] **P2 — Priority-weighted problem selection.** `problem_nature` is currently chosen
-      independently of `priority`; weight problem choice by priority so high-acuity problems
-      are not uniformly likely at low priorities (recommendation #10).
-- [ ] **P2 — Add hourly phone-metrics config for abandonment/volume rates.** Abandonment
-      and volume factors in `phone_metrics.py` are hardcoded; expose them through
-      `RealismConfig`/YAML.
+- [x] **P2 — Make call reception and disposition use real CAD code vocabulary.** Reception
+      methods now use E-911/Phone/OFFICER/Radio/C2C/NOT CAPTURED/Text/CAD2CAD and dispositions
+      use code+label pairs (e.g., `NR-No Report`, `RE-Report`, `CI-Citation`),
+      agency-calibrated and config-driven (recommendation #11/#12).
+- [x] **P2 — Priority-weighted problem selection.** `problem_profiles` now split into per-
+      priority pools (`{agency: {priority: [(name, weight)]}}`); after selecting priority,
+      the problem is drawn only from the matching pool so high-acuity problems are not
+      likely at low priorities (recommendation #10).
+- [x] **P2 — Add hourly phone-metrics config for abandonment/volume rates.** Abandonment
+      and volume factors in `phone_metrics.py` are now exposed through the `phone_metrics`
+      section of `RealismConfig`/YAML (volume fractions, abandonment rates, night
+      increment, max abandonment, weekend multiplier).
 
 ---
 
@@ -87,20 +94,31 @@ recommendation docs in `docs/`, and direct code review.
 
 ## Usability
 
-- [ ] **P1 — Add `logging` throughout the app.** Replace bare `typer.echo` status with a
-      proper logger (module + level + optional `-v/--verbose`), and a progress indicator for
-      long address fetches and large generations.
-- [ ] **P1 — Finish the TUI.** `tui.py` exposes only rows/area/format/dataset/stem/config.
-      Add seed, date range, pool sizes, output dir, and validation feedback; surface the
-      same realism-config fields as the CLI.
+- [x] **P1 — Add `logging` throughout the app.** Added `logging_conf.py` (package-scoped
+      loggers, `configure_logging` with `--verbose/-v` and `--quiet/-q` global CLI flags and
+      `SYNTH911_LOG_LEVEL` env support, plus a `ProgressReporter` that logs 5% completion steps
+      for runs over 10k rows). Instrumented `app.py`, `incidents.py`, `phone_metrics.py`,
+      `addresses.py`, `exporters.py`, and `cli.py`; status summaries still print via `typer.echo`
+      while granular detail goes to the stderr logger.
+- [x] **P1 — Finish the TUI.** Reworked `tui.py`: generation now runs on a Textual worker
+      thread (UI stays responsive) with a live `ProgressBar` driven by a new
+      `on_progress` hook threaded through `Synth911Application`/`IncidentGenerator`; fields are
+      grouped into General/Geography/Personnel/Configuration sections with themed CSS; invalid
+      fields are highlighted with an error border via aggregated `FieldValidationError`
+      feedback (cleared on edit); status panel colors info/success/error states. The TUI
+      already exposed seed, date range, pool sizes, output dir, and the realism-config path.
 - [ ] **P2 — Implement the PyQt6 GUI** (AGENTS.md goal: "TUI or a GUI"). Requires re-adding
       the `pyqt6` dependency (removed in the dependency trim); a desktop GUI would serve
       non-technical operators.
-- [ ] **P2 — Document/reconcile env vars.** `USERSGUIDE.md` documents `SYNTH911_SEED` and
-      `SYNTH911_OUTPUT_DIR`, but neither is read anywhere in `src/` (verified). Either
-      implement them in `config.py`/`cli.py` or remove from docs.
-- [ ] **P2 — Split the oversized `USERSGUIDE.md`.** It is 880 lines; move realism details
-      into a dedicated document and keep the guide to quick-start + CLI reference.
+- [x] **P2 — Document/reconcile env vars.** `USERSGUIDE.md` previously documented `SYNTH911_SEED` and
+      `SYNTH911_OUTPUT_DIR`, but neither is read anywhere in `src/` (verified). Removed both rows from
+      the env-var table, leaving only the implemented `SYNTH911_LOG_LEVEL` (and the documented
+      `SYNTH911_SYSTEM_TRUST` TLS flag in Troubleshooting).
+- [x] **P2 — Split the oversized `USERSGUIDE.md`.** It was ~1000 lines; moved all realism
+      content (YAML realism configuration reference and default distribution tables) into a
+      new companion `REALISMGUIDE.md` and kept the user guide to quick-start, CLI reference,
+      params files, output formats, schema, examples, and troubleshooting, with cross-links
+      between the two documents.
 - [ ] **P2 — Provide a `--schema`/`--dry-run` CLI flag** to print the generated schema and a
       few sample rows without a full OSM fetch or long generation run.
 
@@ -112,8 +130,13 @@ recommendation docs in `docs/`, and direct code review.
       `--cov` threshold; no coverage config exists despite the AGENTS.md requirement.
 - [ ] **P1 — Add tests for `realism_config.py` round-trip (`to_yaml`/`from_yaml`) and
       weight-validation error paths.** Currently untested.
-- [ ] **P1 — Add tests for `tui.py` request building and `addresses.py` cache
-      invalidation/corruption paths.**
+- [x] **P1 — Add tests for `tui.py` request building and `addresses.py` cache
+      invalidation/corruption paths.** `test_tui.py` covers request building,
+      defaults/customs, invalid-int/date field validation, aggregated
+      `FieldValidationError`, params loading, reset, and worker generation;
+      `test_addresses.py` now covers `_load_cache` returning `None` for missing,
+      corrupt, and below-minimum frames, plus `load_addresses` recovering from a
+      corrupt cache and refetching when the cached frame is below the minimum.
 - [ ] **P2 — Clear the remaining pre-existing `ty` diagnostics and `docs/*` ruff errors.**
       `docs/` contains v2-era scripts (`synthgui.py`, `webgui.py`, `synth911.py`, …) that
       fail lint/type checks. The 8 `ty` diagnostics in `addresses.py` were fixed (Dec 2026)
@@ -137,11 +160,11 @@ recommendation docs in `docs/`, and direct code review.
       late-shift dispatch-time penalty (recommendation #4, #14).
 - [x] **Diurnal call volume patterns** — done via `hourly_weights`.
 - [ ] **Geographic zone multipliers** (URBAN/SUBURBAN/RURAL) applied to travel time.
-- [ ] **Parallel dispatch/call-taking timelines** — see Functionality above.
+- [x] **Parallel dispatch/call-taking timelines** — see Functionality above.
 - [x] **Separate turnout and travel times** — done.
-- [ ] **Priority-weighted problem selection** — see Functionality above.
-- [ ] **Enhanced reception/disposition vocabularies** — see Functionality above.
-- [ ] **Incident start time field** — see Functionality above.
+- [x] **Priority-weighted problem selection** — see Functionality above.
+- [x] **Enhanced reception/disposition vocabularies** — see Functionality above.
+- [x] **Incident start time field** — see Functionality above.
 - [ ] **Configurable personnel assignment with workload distribution** — see Personnel above.
 
 ---
@@ -166,3 +189,7 @@ recommendation docs in `docs/`, and direct code review.
   Docker build and a `synth911gen3 serve` (FastAPI) entrypoint for a hosted API.
 - **Schema evolution** (pydantic models for `GenerationRequest`/`RealismConfig`) to
   formalize validation and produce versioned output schemas.
+- **Long-form user's guide.** `USERSGUIDE.md` / `REALISMGUIDE.md` currently cover quick
+  start, CLI, configuration, and realism defaults. A fuller "getting started" guide with
+  tutorials (first 911 dataset, tuning realism to a center, large-scale cloud runs) plus a
+  reference-style API section and FAQ would serve new operators end-to-end.

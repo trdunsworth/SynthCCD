@@ -3,6 +3,7 @@
   "area": "Denver, CO",
   "format": "parquet",
   "dataset": "all",
+  "id_format": "guid",
   "output_dir": "output",
   "output_stem": "denver_911",
   "start_date": "2024-01-01",

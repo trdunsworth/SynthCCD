@@ -9,14 +9,15 @@ A synthetic data generator for 9-1-1 CAD incidents and hourly phone-center metri
 3. [Command-Line Interface (CLI)](#command-line-interface-cli)
 4. [Textual User Interface (TUI)](#textual-user-interface-tui)
 5. [Configuration Parameters](#configuration-parameters)
-6. [Realism Configuration](#realism-configuration)
-7. [Params Files (Bundled Options)](#params-files-bundled-options)
-8. [Output Formats](#output-formats)
-9. [Generated Data Schema](#generated-data-schema)
-10. [Realism Features](#realism-features)
-11. [Examples](#examples)
-12. [Troubleshooting](#troubleshooting)
-13. [Advanced Configuration](#advanced-configuration)
+6. [Params Files (Bundled Options)](#params-files-bundled-options)
+7. [Output Formats](#output-formats)
+8. [Generated Data Schema](#generated-data-schema)
+9. [Examples](#examples)
+10. [Troubleshooting](#troubleshooting)
+11. [Advanced Configuration](#advanced-configuration)
+
+Statistical realism details — the default distributions and the YAML realism
+configuration — are documented in the companion [Realism Guide](REALISMGUIDE.md).
 
 ---
 
@@ -78,6 +79,7 @@ uv run synth911gen3 generate [OPTIONS]
 | `--area` | `-a` | `"Kansas City, MO"` | Area query for OpenStreetMap address lookup |
 | `--format` | `-f` | `csv` | Output format: `csv`, `parquet`, `json`, `yaml`, `pandas`, `polars` |
 | `--dataset` | `-d` | `all` | Dataset to generate: `incidents`, `phone`, `all` |
+| `--id-format` | | `integer` | id_number style: `integer` or `guid` |
 | `--output-dir` | `-o` | `output` | Directory for exported files |
 | `--output-stem` | `-s` | `synthetic_911` | Filename prefix for exported files |
 | `--start-date` | | `Jan 1 current year` | Inclusive start date (YYYY-MM-DD) |
@@ -89,9 +91,22 @@ uv run synth911gen3 generate [OPTIONS]
 
 ### Global Options
 
+Global options are accepted before the subcommand (e.g. `uv run synth911gen3 --verbose generate ...`).
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--verbose` | `-v` | *(off)* | Enable debug-level logging to stderr |
+| `--quiet` | `-q` | *(off)* | Suppress all non-error logging |
+
+Logging writes to stderr. The `SYNTH911_LOG_LEVEL` environment variable
+(`DEBUG`, `INFO`, `WARNING`, `ERROR`) also controls verbosity and is used when
+neither `--verbose` nor `--quiet` is given. On large runs the incident
+generator reports percentage progress (5% steps) once `rows` exceeds 10,000.
+
 ```bash
 uv run synth911gen3 --help          # Show all commands and options
 uv run synth911gen3 generate --help # Show generate-specific options
+uv run synth911gen3 --verbose generate --rows 50000 --format parquet
 ```
 
 ---
@@ -113,16 +128,32 @@ uv run synth911gen3 tui
 | `Tab` | Navigate between fields |
 | `Enter` | Activate focused button |
 
+Generation runs in a background worker, so the interface stays responsive. A progress bar
+tracks incident generation (updates ~0.1% granularity) and the status panel reflects each
+phase; invalid inputs are highlighted with a red border and reported together in the status
+panel, clearing as you edit.
+
 ### TUI Fields
+
+Fields are grouped into sections — General, Geography, Personnel, and Configuration Files.
+The status panel and help tab explain each field.
 
 | Field | Description |
 |-------|-------------|
 | Rows | Number of incident rows (default: 10000) |
-| Area | OpenStreetMap query (default: "Kansas City, MO") |
-| Format | Output format: csv, parquet, json, yaml, pandas, polars |
-| Dataset | Dataset type: incidents, phone, all |
-| Output Stem | Filename prefix (default: "synthetic_911") |
-| Config | Path to YAML realism configuration file (optional) |
+| Seed | Random seed for reproducible output (default: 911) |
+| Area query | OpenStreetMap query (default: "Kansas City, MO") |
+| Output format | csv, parquet, json, yaml, pandas, polars |
+| Dataset | incidents, phone, all |
+| ID format | id_number style: integer or guid |
+| Output directory | Directory for exported files (default: output) |
+| Output stem | Filename prefix (default: "synthetic_911") |
+| Start date | Inclusive start date, YYYY-MM-DD (optional) |
+| End date | Inclusive end date, YYYY-MM-DD (optional) |
+| Calltaker pool size | Unique calltaker names (default: 12) |
+| Dispatcher pool size | Unique dispatcher names (default: 10) |
+| Params file | JSON/YAML/TOML preset; Load Params fills the fields |
+| Realism config file | YAML realism configuration (optional) |
 
 ---
 
@@ -136,6 +167,7 @@ uv run synth911gen3 tui
 | `area_query` | str | "Kansas City, MO" | OpenStreetMap Nominatim query for address geocoding |
 | `output_format` | enum | CSV | Export format (see [Output Formats](#output-formats)) |
 | `dataset` | enum | ALL | Which dataset(s) to generate |
+| `id_format` | enum | INTEGER | Incident id_number style: `integer` or `guid` |
 | `output_dir` | Path | "output" | Output directory path |
 | `output_stem` | str | "synthetic_911" | Base filename for exports |
 | `start_date` | date | Jan 1 (current year) | Start of date range for incident timestamps |
@@ -163,6 +195,8 @@ All parameters in this section can be supplied at once from a JSON, YAML, or TOM
 
 Addresses are fetched from OpenStreetMap using the `area_query` parameter. The query accepts **any valid location query** that OpenStreetMap's Nominatim API supports, which is geocoded to a bounding box. Real street addresses with `addr:housenumber` + `addr:street` tags are then pulled from that bounding box via the Overpass API (overpy). Where an area lacks mapped house numbers, the generator falls back to real named streets with synthesized house numbers so output is still produced.
 
+Each address is emitted as individual components (`prefix_directional`, `street_number`, `street_name`, `street_type`, `postfix_directional`, `postal_code`) in addition to the combined `street_address`. Directionals are normalized to abbreviations (e.g., `NORTH` → `N`); a component is left empty when it cannot be determined from the source data.
+
 Larger areas provide more address variety but take longer to fetch initially (addresses are cached locally after first query).
 
 **Examples (not an exhaustive list):**
@@ -183,6 +217,7 @@ Larger areas provide more address variety but take longer to fetch initially (ad
 ```
 
 **Query flexibility:**
+
 - City names: `"Portland, OR"`
 - County/region: `"King County, WA"`
 - State/province: `"Texas, USA"`
@@ -196,188 +231,17 @@ Larger areas provide more address variety but may take longer to fetch initially
 
 ## Realism Configuration
 
-For users who want to emulate a specific 9-1-1 center with known operational characteristics, synth911gen3 supports a **YAML realism configuration file** that overrides all default statistical distributions.
+How the generator produces realistic statistics — agency/priority/problem
+distributions, time profiles, the parallel dispatch timeline, and hourly phone
+metrics — and how to override them with a YAML realism configuration file, is
+documented in the dedicated [Realism Guide](REALISMGUIDE.md).
 
-### Using a Config File
+Key facts:
 
-```bash
-# Generate with custom realism config
-uv run synth911gen3 generate --config path/to/realism_config.yaml --rows 50000
-```
-
-### Config File Structure
-
-An example config file is provided at `config/example_realism.yaml`. Copy and modify it to match your center's data:
-
-```yaml
-# Agency distribution (must sum to 1.0)
-agency_weights:
-  LAW: 0.52
-  FIRE: 0.20
-  EMS: 0.28
-
-# Agency display names (used in output)
-agency_names:
-  LAW: "POLICE"
-  FIRE: "FIRE"
-  EMS: "EMS"
-
-# Priority weights per agency (each agency must sum to 1.0)
-# Priority 1 = highest, 5 = lowest
-priority_weights:
-  LAW:
-    1: 0.12
-    2: 0.18
-    3: 0.28
-    4: 0.26
-    5: 0.16
-  FIRE:
-    1: 0.18
-    2: 0.24
-    3: 0.24
-    4: 0.20
-    5: 0.14
-  EMS:
-    1: 0.16
-    2: 0.26
-    3: 0.28
-    4: 0.18
-    5: 0.12
-
-# Problem natures per agency (weights must sum to 1.0 per agency)
-problem_profiles:
-  LAW:
-    - ["Traffic Crash", 0.12]
-    - ["Domestic Disturbance", 0.12]
-    - ["Suspicious Person", 0.14]
-    # ... more entries
-  FIRE:
-    - ["Fire Alarm", 0.22]
-    # ... more entries
-  EMS:
-    - ["Chest Pain", 0.16]
-    # ... more entries
-
-# Call reception methods (must sum to 1.0)
-call_reception_weights:
-  "911": 0.38
-  "Phone": 0.31
-  "Radio": 0.16
-  "Walk In": 0.09
-  "Flag Down": 0.06
-
-# Disposition codes per agency (must sum to 1.0 per agency)
-disposition_profiles:
-  LAW:
-    - ["Report Issued", 0.34]
-    # ... more entries
-  FIRE:
-    - ["Report Issued", 0.49]
-    # ... more entries
-  EMS:
-    - ["Report Issued", 0.44]
-    # ... more entries
-
-# Time profiles per agency and priority (mean seconds for lognormal distribution)
-time_profiles:
-  LAW:
-    1:
-      interview_mean: 12
-      dispatch_mean: 4
-      turnout_mean: 10
-      travel_mean: 220
-      scene_mean: 1500
-      closeout_mean: 240
-      phone_mean: 170
-    # ... priorities 2-5
-  FIRE:
-    # ... all 5 priorities
-  EMS:
-    # ... all 5 priorities
-
-# Diurnal call volume pattern (24 values for hours 0-23, will be normalized)
-hourly_weights:
-  - 0.030
-  - 0.025
-  # ... 24 values total
-```
-
-### Customizable Parameters
-
-| Section | Description | Validation |
-|---------|-------------|------------|
-| `agency_weights` | Relative frequency of LAW/FIRE/EMS incidents | Must sum to 1.0 |
-| `agency_names` | Display names for agencies in output | Must cover all agencies in `agency_weights` |
-| `priority_weights` | Priority 1-5 distribution per agency | Each agency sums to 1.0 |
-| `problem_problems` | Call type distribution per agency | Each agency sums to 1.0 |
-| `call_reception_weights` | How calls are received (911, Phone, etc.) | Must sum to 1.0 |
-| `disposition_profiles` | Outcome codes per agency | Each agency sums to 1.0 |
-| `time_profiles` | Mean seconds for 7 time intervals per agency/priority | All 7 intervals required per priority |
-| `hourly_weights` | 24-hour call volume pattern | 24 values, auto-normalized |
-
-### Time Profile Intervals
-
-Each agency/priority combination requires these 7 intervals (mean seconds):
-
-| Interval | Description |
-|----------|-------------|
-| `interview_mean` | Caller questioning duration |
-| `dispatch_mean` | Queue to unit assignment |
-| `turnout_mean` | Station to wheels rolling |
-| `travel_mean` | Wheels rolling to on-scene |
-| `scene_mean` | On-scene duration |
-| `closeout_mean` | Scene clear to incident close |
-| `phone_mean` | Total call duration |
-
-### Creating a Config from Your Data
-
-1. **Analyze your CAD data** to compute:
-   - Agency call volumes
-   - Priority distributions per agency
-   - Problem type frequencies
-   - Average times for each interval by priority
-   - Hourly call volume pattern
-   - Disposition code frequencies
-   - Call reception method breakdown
-
-2. **Copy `config/example_realism.yaml`** and replace values with your computed statistics
-
-3. **Validate** by running a small test generation:
-   ```bash
-   uv run synth911gen3 generate --config your_config.yaml --rows 1000 --format pandas
-   ```
-
-4. **Iterate** until generated statistics match your real data
-
-### Python API Usage
-
-```python
-from synth911gen3 import Synth911Application, RealismConfig
-from synth911gen3.addresses import OpenStreetMapAddressProvider
-from synth911gen3.config import GenerationRequest, OutputFormat, DatasetKind
-from pathlib import Path
-
-# Load custom realism config
-realism = RealismConfig.from_yaml(Path("config/my_center.yaml"))
-
-# Or create programmatically
-realism = RealismConfig(
-    agency_weights={"LAW": 0.65, "FIRE": 0.20, "EMS": 0.15},
-    agency_names={"LAW": "POLICE", "FIRE": "FIRE", "EMS": "EMS"},
-    # ... other parameters
-)
-
-request = GenerationRequest(
-    rows=50000,
-    area_query="Denver, CO",
-    output_format=OutputFormat.PARQUET,
-    dataset=DatasetKind.ALL,
-    realism_config=realism,
-)
-
-app = Synth911Application(address_provider=OpenStreetMapAddressProvider())
-result = app.generate(request)
-```
+- No configuration is required; defaults are tuned to realistic 9-1-1 center behavior.
+- A `--config path/to/realism.yaml` file overrides any or all default distributions.
+- An example config ships at `config/example_realism.yaml`.
+- Use `RealismConfig.from_yaml(...)` from Python (see [Python API Usage](#python-api-usage)).
 
 ---
 
@@ -440,6 +304,7 @@ dispatcher_pool_size: 12
 | `area_query` | `area` | str | OpenStreetMap area query |
 | `output_format` | `format` | str | csv, parquet, json, yaml, pandas, polars |
 | `dataset` | | str | incidents, phone, all |
+| `id_format` | | str | integer or guid |
 | `output_dir` | | str | Output directory |
 | `output_stem` | | str | Filename stem |
 | `start_date` | | str (YYYY-MM-DD) | Inclusive start date |
@@ -510,19 +375,29 @@ When using `pandas` or `polars` format, no files are written. The generator retu
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id_number` | int | Sequential incident ID (1 to N) |
+| `id_number` | int or str | Incident ID: sequential integer (1 to N), or UUID v4 string when `id_format` is `guid` |
 | `internal_reference_number` | str | Agency-specific reference: `{AGENCY}-{YYMMDD}-{SEQ:06d}` |
 | `agency` | str | Responding agency: LAW, FIRE, EMS |
 | `problem_nature` | str | Call type (e.g., "Traffic Crash", "Chest Pain") |
 | `priority` | int | Priority level 1-5 (1=highest) |
-| `street_address` | str | Full street address from OSM |
+| `prefix_directional` | str | Directional prefix (N/S/E/W/NE/…) or empty |
+| `street_number` | str | House number (e.g., "101", "204A") |
+| `street_name` | str | Street name without type (e.g., "Main", "12th") |
+| `street_type` | str | Street suffix (e.g., St, Ave, Blvd) or empty |
+| `postfix_directional` | str | Directional suffix (NW/SE/…) or empty |
+| `street_address` | str | Full street address from OSM (all components) |
 | `city` | str | City name |
 | `state` | str | State/province |
-| `location` | str | Additional location context |
+| `postal_code` | str | ZIP/postal code from OSM when available |
+| `location` | str | `street_address, city, state` |
 | `call_start_time` | datetime | Call received timestamp |
+| `hour` | int | Hour of day (0–23) of `call_start_time` |
+| `dow` | str | Day of week abbreviation (MON–SUN) of `call_start_time` |
+| `week_no` | int | ISO week number (1–53) of `call_start_time` |
+| `incident_start_time` | datetime | CAD incident record opened; 0–3 s after `call_start_time` |
 | `time_phone_pickup` | datetime | Call answered by calltaker |
 | `time_call_enters_queue` | datetime | Call queued for dispatch |
-| `time_first_unit_assigned` | datetime | First unit assigned |
+| `time_first_unit_assigned` | datetime | First unit assigned (parallel to call-taking for high priority) |
 | `time_unit_enroute` | datetime | Unit enroute (wheels rolling) |
 | `time_unit_arrived` | datetime | Unit on scene |
 | `time_last_unit_cleared` | datetime | Last unit cleared scene |
@@ -530,9 +405,10 @@ When using `pandas` or `polars` format, no files are written. The generator retu
 | `time_phone_disconnect` | datetime | Caller disconnected |
 | `calltaker` | str | Calltaker name |
 | `dispatcher` | str | Dispatcher name |
-| `method_of_call_reception` | str | 911, Phone, Radio, Walk In, Flag Down |
-| `call_disposition` | str | Report Issued, No Report Issued, Cancelled, No Action Taken |
+| `method_of_call_reception` | str | E-911, Phone, OFFICER, Radio, C2C, NOT CAPTURED, Text, CAD2CAD |
+| `call_disposition` | str | Code+label pair, e.g., NR-No Report, RE-Report, CI-Citation, UNDEFINED |
 | `pickup_delay_seconds` | int | Ring-to-answer time |
+| `pre_cad_offset_seconds` | int | Call start to CAD incident open (0–3 s) |
 | `interview_seconds` | int | Caller interview duration |
 | `dispatch_queue_seconds` | int | Queue-to-dispatch time |
 | `turnout_seconds` | int | Station-to-wheels-rolling time |
@@ -558,68 +434,10 @@ When using `pandas` or `polars` format, no files are written. The generator retu
 
 ## Realism Features
 
-### Agency Distribution
-- **LAW**: 52% of incidents
-- **FIRE**: 20% of incidents
-- **EMS**: 28% of incidents
-
-### Priority Weights (by Agency)
-
-| Priority | LAW | FIRE | EMS |
-|----------|-----|------|-----|
-| 1 (Highest) | 12% | 18% | 16% |
-| 2 | 18% | 24% | 26% |
-| 3 | 28% | 24% | 28% |
-| 4 | 26% | 20% | 18% |
-| 5 (Lowest) | 16% | 14% | 12% |
-
-### Problem Natures (Weighted by Agency)
-
-**LAW** (24): Noise Complaint, Suspicious Person, Traffic Crash, Traffic Stop, Welfare Check, Theft Report, Domestic Disturbance, Disorderly Conduct, Burglary Alarm, Assault, Shots Fired, Motor Vehicle Theft, Drug/Narcotic Violation, Trespass, Vandalism, Reckless Driving, Vehicle Collision w/ Injury, Burglary In Progress, Fraud, Harassment, DUI / Impaired Driver, Weapons Violation, Missing Person, Shoplifting
-
-**FIRE** (20): Fire Alarm, Smoke Investigation, Medical Assist, Structure Fire, Vehicle Fire, Cooking Fire, Brush/Grass Fire, Gas Leak, CO Investigation, Hazardous Condition, Rescue Call, Mutual Aid, Odor Investigation, Overheat Investigation, Electrical Wiring Problem, Lockout / Public Service, Water Rescue, Vehicle Extrication, Assist Police, Elevator Rescue
-
-**EMS** (22): Chest Pain, Difficulty Breathing, Fall Injury, Motor Vehicle Crash, Sick Person, Unconscious Person, Seizure, Altered Mental Status, Abdominal Pain, Overdose, Psychiatric Emergency, Stroke, Diabetic Problem, Heart Problems, Allergic Reaction, Hemorrhage / Bleeding, Traumatic Injury, Head Injury, Choking, Heat/Cold Exposure, Pregnancy / Childbirth, Animal Bite
-
-### Time Profiles (Lognormal Distributions)
-
-Each agency/priority combination has calibrated time profiles:
-
-| Interval | Description | Distribution |
-|----------|-------------|--------------|
-| Pickup Delay | Ring to answer | Lognormal(3s, σ=0.45) |
-| Interview | Caller questioning | Lognormal(14-105s by priority) |
-| Dispatch Queue | Queue to dispatch | Lognormal(4-320s by priority) |
-| Turnout | Station to wheels rolling | Lognormal(10-84s by priority) |
-| Travel | Wheels rolling to on-scene | Lognormal(220-560s by priority) |
-| On Scene | On-scene duration | Lognormal(1380-3060s by priority) |
-| Closeout | Scene clear to incident close | Lognormal(240-420s by priority) |
-
-### Diurnal Call Patterns
-
-Hourly weights follow real 9-1-1 center patterns:
-- **Peak**: 13:00-18:00 (6.2% per hour)
-- **Valley**: 03:00-05:00 (2.0-2.2% per hour)
-- Weekend multiplier: +12% Fri/Sat
-
-### Call Reception Methods
-
-| Method | Weight |
-|--------|--------|
-| 911 | 38% |
-| Phone | 31% |
-| Radio | 16% |
-| Walk In | 9% |
-| Flag Down | 6% |
-
-### Disposition Codes (by Agency)
-
-| Disposition | LAW | FIRE | EMS |
-|-------------|-----|------|-----|
-| Report Issued | 34% | 49% | 44% |
-| No Report Issued | 26% | 18% | 23% |
-| Cancelled | 18% | 14% | 12% |
-| No Action Taken | 22% | 19% | 21% |
+The built-in default distributions — agency split, priority weights, problem
+vocabularies, lognormal time profiles, diurnal patterns, hourly phone metrics,
+call reception methods, and disposition codes — are described in the
+[Realism Guide](REALISMGUIDE.md).
 
 ---
 
@@ -849,8 +667,7 @@ Delete cache files to force re-fetch for updated area boundaries.
 
 | Variable | Description |
 |----------|-------------|
-| `SYNTH911_SEED` | Default random seed (overridden by --seed) |
-| `SYNTH911_OUTPUT_DIR` | Default output directory |
+| `SYNTH911_LOG_LEVEL` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, or `ERROR` (used when no `--verbose`/`--quiet` flag is given) |
 
 ### Extending with Custom Providers
 

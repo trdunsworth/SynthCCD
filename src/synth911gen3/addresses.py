@@ -13,6 +13,9 @@ import pandas as pd
 
 from .domain import Address
 from .exceptions import AddressLookupError
+from .logging_conf import get_logger
+
+logger = get_logger("addresses")
 
 _NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 _NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
@@ -182,9 +185,12 @@ class OpenStreetMapAddressProvider:
         cache_path = self._cache_path(area_query)
         cached = self._load_cache(cache_path)
         if cached is not None:
+            logger.debug("Cache hit for '%s' (%d addresses)", area_query, len(cached))
             return cached
 
+        logger.info("Fetching addresses for '%s' (no cache at %s)", area_query, cache_path)
         addresses = self._fetch_addresses(area_query)
+        logger.info("Fetched %d addresses", len(addresses))
         self._write_cache(cache_path, addresses)
         return addresses
 
@@ -201,10 +207,20 @@ class OpenStreetMapAddressProvider:
             return None
         if len(frame) < self._min_addresses:
             return None
+        postal_codes = (
+            frame["postal_code"]
+            if "postal_code" in frame.columns
+            else [""] * len(frame)
+        )
         return [
-            Address(street_address=str(street), city=str(city), state=str(state))
-            for street, city, state in zip(
-                frame["street_address"], frame["city"], frame["state"]
+            Address(
+                str(street),
+                str(city),
+                str(state),
+                postal_code=str(postal) if pd.notna(postal) else "",
+            )
+            for street, city, state, postal in zip(
+                frame["street_address"], frame["city"], frame["state"], postal_codes
             )
         ]
 
@@ -212,6 +228,12 @@ class OpenStreetMapAddressProvider:
         frame = pd.DataFrame(
             {
                 "street_address": [address.street_address for address in addresses],
+                "street_number": [address.street_number for address in addresses],
+                "street_name": [address.street_name for address in addresses],
+                "street_type": [address.street_type for address in addresses],
+                "prefix_directional": [address.prefix_directional for address in addresses],
+                "postfix_directional": [address.postfix_directional for address in addresses],
+                "postal_code": [address.postal_code for address in addresses],
                 "city": [address.city for address in addresses],
                 "state": [address.state for address in addresses],
             }
@@ -359,7 +381,15 @@ class OpenStreetMapAddressProvider:
             state = _normalize_state(tags.get("addr:state") or fallback_state)
             if not city or not state:
                 continue
-            addresses.append(Address(f"{housenumber} {street}".strip(), city, state))
+            addresses.append(
+                Address(
+                    f"{housenumber} {street}".strip(),
+                    city,
+                    state,
+                    street_number=housenumber,
+                    postal_code=tags.get("addr:postcode") or "",
+                )
+            )
         return self._dedupe(addresses)
 
     @staticmethod
