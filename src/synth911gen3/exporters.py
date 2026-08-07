@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +21,52 @@ def _records_for_serialization(frame: pd.DataFrame) -> list[dict[str, Any]]:
     for column in serializable.select_dtypes(include=["datetime64[ns]"]).columns:
         serializable[column] = serializable[column].dt.strftime("%Y-%m-%dT%H:%M:%S")
     return serializable.to_dict(orient="records")
+
+
+def export_chunked_generator(
+    frames: Iterable[pd.DataFrame],
+    output_format: OutputFormat,
+    output_dir: Path,
+    output_stem: str,
+    dataset_name: str,
+) -> Path:
+    """Stream an iterable of DataFrame chunks to disk without holding the full frame.
+
+    Supports CSV (header on the first chunk, then append) and PARQUET (via a
+    single ``pyarrow.parquet.ParquetWriter``). Only one chunk's DataFrame is
+    materialized at a time, bounding peak memory for very large runs.
+    """
+    if output_format not in (OutputFormat.CSV, OutputFormat.PARQUET):
+        raise ExportError(
+            f"Chunked export only supports CSV and PARQUET, got {output_format.value}."
+        )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    extension = "csv" if output_format is OutputFormat.CSV else "parquet"
+    path = output_dir / f"{output_stem}_{dataset_name}.{extension}"
+
+    chunk_count = 0
+    if output_format is OutputFormat.CSV:
+        for chunk in frames:
+            chunk.to_csv(path, mode="a" if chunk_count else "w", header=chunk_count == 0, index=False)
+            chunk_count += 1
+    else:
+        import pyarrow as pa
+        from pyarrow import parquet as pq
+
+        writer: pq.ParquetWriter | None = None
+        try:
+            for chunk in frames:
+                table = pa.Table.from_pandas(chunk)
+                if writer is None:
+                    writer = pq.ParquetWriter(path, table.schema)
+                writer.write_table(table)
+                chunk_count += 1
+        finally:
+            if writer is not None:
+                writer.close()
+
+    logger.info("Wrote chunked %s: %s (%d chunks)", extension, path, chunk_count)
+    return path
 
 
 def export_generated_data(

@@ -82,13 +82,22 @@ recommendation docs in `docs/`, and direct code review.
 
 ## Performance / Scalability
 
-- [ ] **P1 — Vectorize incident generation for million-row scale.** `incidents.py` builds
-      records in a Python `for` loop (one dict per row). At 10⁶ rows this is slow and
-      memory-heavy. Replace per-row sampling with vectorized `numpy`/`polars` operations
-      (numpy choice by agency/priority/problem, batched lognormal draws), then build the
-      frame once.
-- [ ] **P2 — Add a memory-budget guard / chunked export.** For very large datasets, write
-      CSV/Parquet incrementally instead of holding the full frame in memory.
+- [x] **P1 — Vectorize incident generation for million-row scale.** Rewrote `incidents.py`
+      from a per-row Python loop to a vectorized `numpy` pipeline (array agency/priority
+      choice, batched lognormal timing draws, vectorized shift resolution and address
+      sampling, `np.char` reference numbers) building the frame once; `phone_metrics.py`
+      likewise vectorized with array `poisson`/`binomial`. Benchmarked on this machine:
+      ~335 µs/row → ~7 µs/row (200k rows 67.1 s → 1.16 s, 1M rows ~7 s, ~514 MB). Column
+      set and seeded reproducibility preserved; covered by the full test suite.
+- [x] **P2 — Add a memory-budget guard / chunked export.** For very large datasets, CSV/Parquet
+      exports now stream incrementally instead of holding the full frame in memory. Added
+      `max_memory_bytes` to `GenerationRequest` (default 2 GiB; CLI `--max-memory-bytes`, TUI
+      field, and params key), a probe-based `IncidentGenerator.resolve_chunk_rows`/`generate_chunks`
+      pipeline that yields bounded DataFrames on a shared RNG, and
+      `exporters.export_chunked_generator` (CSV header-then-append, Parquet via one
+      `ParquetWriter`). `id_number` stays globally sequential and `internal_reference_number`
+      unique per agency across chunks; single-chunk runs remain byte-identical to non-chunked
+      output. Covered by `tests/test_chunking.py` plus config/CLI/TUI tests.
 
 ---
 
@@ -150,14 +159,18 @@ recommendation docs in `docs/`, and direct code review.
 ## Realism Improvements (from AGENTS.md list)
 
 - [x] **Priority-weighted time distributions** — done via `TIME_PROFILES`.
-- [ ] **Config-driven design — complete the section set.** `RealismConfig` supports agency
-      names, weights, problem/disposition/reception profiles, and time profiles, but the
-      AGENTS.md list also names **shift structures, geographic zones, and personnel counts
-      per shift** — none are implemented yet.
+- [x] **Config-driven design — shift structures and per-shift personnel counts.** Added a
+      `shift_config` section to `RealismConfig`/YAML (`ShiftConfig`/`Shift` in
+      `shifts.py`): crew rotation pattern, per-shift hours/label/rotation group, and
+      staffing; four presets (`2x12h-4shift-14day` default, `2x12h-2shift`, `3x8h-3shift`,
+      `4x10h-4shift`) selectable via `--shift-preset`/TUI/params. Still open from the
+      AGENTS.md list: **geographic zones** (URBAN/SUBURBAN/RURAL) — none implemented yet.
 - [x] **Enhanced address generation via overpy/Overpass** — done.
-- [ ] **Personnel modeling — workload weighting + ASCII normalization + late-shift penalty.**
-      Pools are separate, but assignment is uniform random; add Zipf-like weighting and a
-      late-shift dispatch-time penalty (recommendation #4, #14).
+- [x] **Personnel modeling — workload weighting.** Separate calltaker/dispatcher pools with
+      Zipf-like workload weighting are in place (see below). Deliberately not done: ASCII
+      name normalization (output stays UTF-8 so localized names render correctly, e.g. for
+      Tokyo or Moscow deployments) and a late-shift dispatch-time penalty (dropped as not
+      needed for now).
 - [x] **Diurnal call volume patterns** — done via `hourly_weights`.
 - [ ] **Geographic zone multipliers** (URBAN/SUBURBAN/RURAL) applied to travel time.
 - [x] **Parallel dispatch/call-taking timelines** — see Functionality above.
@@ -165,7 +178,11 @@ recommendation docs in `docs/`, and direct code review.
 - [x] **Priority-weighted problem selection** — see Functionality above.
 - [x] **Enhanced reception/disposition vocabularies** — see Functionality above.
 - [x] **Incident start time field** — see Functionality above.
-- [ ] **Configurable personnel assignment with workload distribution** — see Personnel above.
+- [x] **Configurable personnel assignment with workload distribution.** Personnel are
+      assigned per shift from separate calltaker/dispatcher pools with Zipf-like weighting
+      (some staff handle more calls than others); per-shift staffing comes from
+      `shift_config`, falling back to a split of the global pool totals when a shift omits
+      it (recommendation #4, #14).
 
 ---
 

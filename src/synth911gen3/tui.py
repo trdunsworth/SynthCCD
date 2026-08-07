@@ -24,7 +24,7 @@ from textual.widgets import (
 from .addresses import OpenStreetMapAddressProvider
 from .app import Synth911Application
 from .config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
-from .constants import DEFAULT_AREA_QUERY, DEFAULT_OUTPUT_DIR, DEFAULT_OUTPUT_STEM
+from .constants import DEFAULT_AREA_QUERY, DEFAULT_MAX_MEMORY_BYTES, DEFAULT_OUTPUT_DIR, DEFAULT_OUTPUT_STEM
 from .domain import GenerationResult
 from .exceptions import AddressLookupError, ExportError, ValidationError
 from .params import build_request_from_params, load_params_file
@@ -96,6 +96,8 @@ _HELP_TEXT = (
     "  Dispatcher pool    Unique dispatcher name count (default: 10).\n"
     "  Shift preset       Shift structure: 2x12h-4shift-14day (default),\n"
     "                     2x12h-2shift, 3x8h-3shift, or 4x10h-4shift.\n"
+    "  Max memory         Per-chunk memory budget in bytes for CSV/Parquet\n"
+    "                     streaming (blank uses the 2 GiB default).\n"
     "  Params file        JSON/YAML/TOML preset; Load Params fills the fields above.\n"
     "  Config file        YAML realism configuration file (optional).\n\n"
     "KEYS\n"
@@ -264,6 +266,15 @@ class Synth911Tui(App[None]):
                                         id="id_format",
                                     ),
                                 )
+                                yield _field(
+                                    "Max memory (bytes)",
+                                    "max_memory_bytes",
+                                    Input(
+                                        "",
+                                        id="max_memory_bytes",
+                                        placeholder=f"default: {DEFAULT_MAX_MEMORY_BYTES:,}",
+                                    ),
+                                )
                             yield _section_title("Geography")
                             with Grid(classes="fields"):
                                 yield _field(
@@ -399,6 +410,9 @@ class Synth911Tui(App[None]):
         self.query_one("#calltaker_pool_size", Input).value = str(request.calltaker_pool_size)
         self.query_one("#dispatcher_pool_size", Input).value = str(request.dispatcher_pool_size)
         self.query_one("#shift_preset", Select).value = request.shift_preset or DEFAULT_SHIFT_PRESET
+        self.query_one("#max_memory_bytes", Input).value = (
+            str(request.max_memory_bytes) if request.max_memory_bytes is not None else ""
+        )
         self.query_one("#config", Input).value = (
             str(request.realism_config_path) if request.realism_config_path else ""
         )
@@ -460,6 +474,15 @@ class Synth911Tui(App[None]):
                 min_value=1,
             ),
         )
+        max_memory_value = self.query_one("#max_memory_bytes", Input).value.strip()
+        max_memory_bytes: int | None = None
+        if max_memory_value:
+            max_memory_bytes = parse(
+                "max_memory_bytes",
+                lambda: _parse_int(
+                    max_memory_value, "max_memory_bytes", min_value=1
+                ),
+            )
         start_date = parse(
             "start_date",
             lambda: _parse_date_field(self.query_one("#start_date", Input).value, "start_date"),
@@ -501,6 +524,7 @@ class Synth911Tui(App[None]):
             dispatcher_pool_size=dispatcher_pool_size,
             shift_preset=shift_preset,
             realism_config_path=realism_config_path,
+            max_memory_bytes=max_memory_bytes,
         )
 
     def _generate(self) -> None:

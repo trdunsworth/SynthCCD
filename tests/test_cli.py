@@ -162,6 +162,21 @@ def test_cli_params_help_lists_params_option() -> None:
     assert "--params" in _strip_ansi(result.output)
 
 
+def test_cli_params_help_lists_max_memory_bytes_option() -> None:
+    result = runner.invoke(app, ["generate", "--help"])
+    assert result.exit_code == 0
+    assert "--max-memory-bytes" in _strip_ansi(result.output)
+
+
+def test_coerce_param_max_memory_bytes_int() -> None:
+    assert _coerce_param("max_memory_bytes", "500") == 500
+
+
+def test_build_request_coerces_max_memory_bytes() -> None:
+    request = build_request_from_params({"max_memory_bytes": "1048576"}, {})
+    assert request.max_memory_bytes == 1_048_576
+
+
 def test_cli_help_lists_verbosity_flags() -> None:
     result = runner.invoke(app, ["--help"])
     assert result.exit_code == 0

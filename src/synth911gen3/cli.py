@@ -143,6 +143,17 @@ def generate(
             "3x8h-3shift, or 4x10h-4shift (default: realism config)."
         ),
     ),
+    max_memory_bytes: int | None = typer.Option(
+        None,
+        "--max-memory-bytes",
+        min=1,
+        show_default=False,
+        help=(
+            "Approximate in-memory budget per incident chunk in bytes; "
+            "CSV/Parquet exports are streamed in chunks to stay under it "
+            "(default: 2147483648 / 2 GiB)."
+        ),
+    ),
     config: Path | None = typer.Option(
         None,
         "--config",
@@ -180,6 +191,8 @@ def generate(
         cli_params["dispatcher_pool_size"] = dispatcher_pool_size
     if shift_preset is not None:
         cli_params["shift_preset"] = shift_preset
+    if max_memory_bytes is not None:
+        cli_params["max_memory_bytes"] = max_memory_bytes
     if config is not None:
         cli_params["realism_config_path"] = config
 

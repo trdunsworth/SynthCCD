@@ -15,6 +15,18 @@ def test_generation_request_defaults() -> None:
     assert request.dataset is DatasetKind.ALL
     assert request.id_format is IdFormat.INTEGER
     assert request.output_stem == "synthetic_911"
+    assert request.max_memory_bytes is None
+
+
+@pytest.mark.parametrize("budget", [0, -5])
+def test_max_memory_bytes_rejects_non_positive_values(budget: int) -> None:
+    with pytest.raises(ValidationError):
+        GenerationRequest(max_memory_bytes=budget).validate()
+
+
+def test_max_memory_bytes_accepts_positive_value_and_none() -> None:
+    GenerationRequest(max_memory_bytes=1_048_576).validate()
+    GenerationRequest(max_memory_bytes=None).validate()
 
 
 @pytest.mark.parametrize("id_format", [IdFormat.INTEGER, IdFormat.GUID])

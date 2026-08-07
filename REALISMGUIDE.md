@@ -153,6 +153,54 @@ hourly_weights:
   - 0.030
   - 0.025
   # ... 24 values total
+
+# Shift structure: crew rotation pattern plus the shifts on the clock.
+# rotation: one crew-group id per calendar day, repeating. Day 1 is the weekday
+#   given by cycle_start_weekday (0 = Monday).
+# shifts: each entry lists a shift name, a human label, its on-duty hours, its
+#   crew rotation group, and staffing. Omit calltakers/dispatchers to fall back
+#   to the global --calltaker-pool-size / --dispatcher-pool-size split.
+shift_config:
+  name: "2x12h-4shift-14day"
+  cycle_start_weekday: 0
+  rotation: [1, 1, 2, 2, 1, 1, 1, 2, 2, 1, 1, 2, 2, 2]
+  shifts:
+    - name: A
+      label: DAY
+      start_hour: 6
+      start_minute: 0
+      end_hour: 18
+      end_minute: 0
+      rotation: 1
+      calltakers: 3
+      dispatchers: 2
+    - name: B
+      label: DAY
+      start_hour: 6
+      start_minute: 0
+      end_hour: 18
+      end_minute: 0
+      rotation: 2
+      calltakers: 3
+      dispatchers: 2
+    - name: C
+      label: NIGHT
+      start_hour: 18
+      start_minute: 0
+      end_hour: 6
+      end_minute: 0
+      rotation: 1
+      calltakers: 3
+      dispatchers: 2
+    - name: D
+      label: NIGHT
+      start_hour: 18
+      start_minute: 0
+      end_hour: 6
+      end_minute: 0
+      rotation: 2
+      calltakers: 3
+      dispatchers: 2
 ```
 
 ### Customizable Parameters
@@ -169,6 +217,7 @@ hourly_weights:
 | `dispatch_init_fraction` | (lo, hi) fraction of the phone window before dispatch can begin, per priority | All 5 priorities, lo >= 0 and hi >= lo |
 | `phone_metrics` | Volume fractions, abandonment rates, and weekend multiplier for hourly call counts | All required keys; max_abandonment_rate in [0, 1] |
 | `hourly_weights` | 24-hour call volume pattern | 24 values, auto-normalized |
+| `shift_config` | Crew rotation pattern and per-shift hours/rotation/staffing | Unique shift names, every rotation group covers all 24 hours |
 
 > Note: the config key is `problem_profiles` (not `problem_problems`).
 
@@ -191,6 +240,65 @@ how far through the phone window dispatch may begin, per priority: values below 
 mean a unit can be dispatched while the caller is still on the phone (high-priority
 calls), and values of 1.0+ defer dispatch until after the call ends (low-priority
 calls).
+
+### Shift Structures
+
+Every incident is tagged with the shift on duty at its call time (`shift`,
+`shift_label`, and `shift_group` columns). The default is a **2x12h center with
+four shifts and a 14-day crew rotation**; `shift_preset` selects a built-in
+structure, and `shift_config` in the realism YAML defines a fully custom one.
+When `shift_preset` is omitted, the realism config's `shift_config` is used.
+
+Built-in presets (selectable via `--shift-preset`):
+
+| Preset | Structure |
+|--------|-----------|
+| `2x12h-4shift-14day` (default) | Shifts A/B (day 06:00-18:00) and C/D (night 18:00-06:00) on a repeating 14-day rotation `1,1,2,2,1,1,1,2,2,1,1,2,2,2` starting Monday; group 1 = A day + C night, group 2 = B day + D night |
+| `2x12h-2shift` | Single day and single night shift, no crew cycling |
+| `3x8h-3shift` | Morning (06-14), Swing (14-22), Midnight (22-06) |
+| `4x10h-4shift` | Day (06-16), Coverage (10-21), Evening (16-02), Night (21-07) |
+
+Each shift in the YAML defines:
+
+| Key | Description |
+|-----|-------------|
+| `name` | Short identifier, written to the `shift` column (must be unique) |
+| `label` | Human label (e.g., DAY, NIGHT), written to `shift_label` |
+| `start_hour` / `start_minute` | On-duty start time (24-hour clock) |
+| `end_hour` / `end_minute` | On-duty end time; an end before the start means the shift crosses midnight |
+| `rotation` | Crew-group id; the day's active group is `rotation[days_since_cycle_start % len(rotation)]` |
+| `calltakers` / `dispatchers` | Staffed positions on this shift; omit to split the global pool totals |
+
+`rotation` is a repeating list of crew-group ids, one per calendar day, starting
+on `cycle_start_weekday` (0 = Monday). Validation requires unique shift names,
+at least one shift per rotation group, and that each rotation group's shifts
+together cover all 24 hours. Overnight shifts and shifts with overlapping hours
+(used to model peak coverage) are supported; when multiple shifts in the active
+group are on duty, the one that started most recently is assigned.
+
+Example custom structure (2x12h, one day shift and one night shift, no cycling):
+
+```yaml
+shift_config:
+  name: "my-center"
+  cycle_start_weekday: 0
+  rotation: [1]
+  shifts:
+    - name: A
+      label: DAY
+      start_hour: 6
+      end_hour: 18
+      rotation: 1
+      calltakers: 4
+      dispatchers: 3
+    - name: B
+      label: NIGHT
+      start_hour: 18
+      end_hour: 6
+      rotation: 1
+      calltakers: 3
+      dispatchers: 2
+```
 
 ### Creating a Config from Your Data
 
@@ -254,6 +362,15 @@ The values below are the **built-in defaults**, which is exactly what you get wh
 - **LAW**: 52% of incidents
 - **FIRE**: 20% of incidents
 - **EMS**: 28% of incidents
+
+### Shift Structure (Default)
+
+The default shift structure is **2x12h-4shift-14day**: shifts A/B on day
+(06:00-18:00) and C/D on night (18:00-06:00), rotating on the 14-day pattern
+`1,1,2,2,1,1,1,2,2,1,1,2,2,2` (starting Monday), where group 1 = A day + C
+night and group 2 = B day + D night. Each shift is staffed with 3 calltakers
+and 2 dispatchers. This same structure is used when no `--shift-preset` or
+`shift_config` is supplied. See [Shift Structures](#shift-structures) above.
 
 ### Priority Weights (by Agency)
 

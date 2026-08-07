@@ -116,6 +116,19 @@ All outputted files should go into the output folder for now. That will change a
 
 Check to see if uv is installed and updated before trying to install it.
 
+## Documentation Maintenance
+
+Every code change that affects user-facing behavior must keep the guides in sync.
+Before finishing any task, update these files to reflect the change:
+
+- `USERSGUIDE.md` — CLI flags, TUI fields, configuration parameters, params-file keys,
+  generated data schema/columns, examples, Python API usage, environment variables.
+- `REALISMGUIDE.md` — YAML realism configuration sections and validation rules,
+  default distributions, and realism feature behavior.
+- `TODO.md` — mark completed items done (and split or note partially-completed items).
+
+A change is not complete until the relevant guides are updated.
+
 ## Tech Stack
 
 - Framework: Python, Faker, Numpy, SciPy, pandas, requests, overpy, pydantic, polars, rich, prompt_toolkit, PyQt6

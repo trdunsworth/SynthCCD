@@ -68,7 +68,7 @@ def coerce_param(key: str, value: Any) -> Any:
         return Path(value)
     if key in ("start_date", "end_date"):
         return date.fromisoformat(str(value))
-    if key in ("rows", "seed", "calltaker_pool_size", "dispatcher_pool_size"):
+    if key in ("rows", "seed", "calltaker_pool_size", "dispatcher_pool_size", "max_memory_bytes"):
         return int(value)
     return value
 

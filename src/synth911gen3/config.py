@@ -52,6 +52,7 @@ class GenerationRequest:
     shift_preset: str | None = None
     realism_config: RealismConfig | None = None
     realism_config_path: Path | None = None
+    max_memory_bytes: int | None = None
 
     def resolved_start_date(self) -> date:
         today = date.today()
@@ -78,6 +79,8 @@ class GenerationRequest:
             raise ValidationError("calltaker_pool_size must be greater than zero.")
         if self.dispatcher_pool_size <= 0:
             raise ValidationError("dispatcher_pool_size must be greater than zero.")
+        if self.max_memory_bytes is not None and self.max_memory_bytes <= 0:
+            raise ValidationError("max_memory_bytes must be greater than zero when set.")
         if self.resolved_start_date() > self.resolved_end_date():
             raise ValidationError("start_date must be on or before end_date.")
         if self.shift_preset is not None and self.shift_preset not in SHIFT_PRESETS:

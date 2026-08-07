@@ -9,6 +9,8 @@ A synthetic data generator for 9-1-1 CAD incidents and hourly phone-center metri
 3. [Command-Line Interface (CLI)](#command-line-interface-cli)
 4. [Textual User Interface (TUI)](#textual-user-interface-tui)
 5. [Configuration Parameters](#configuration-parameters)
+   - [Personnel and Shift Parameters](#personnel-and-shift-parameters)
+   - [Shift Structures](#shift-structures)
 6. [Params Files (Bundled Options)](#params-files-bundled-options)
 7. [Output Formats](#output-formats)
 8. [Generated Data Schema](#generated-data-schema)
@@ -87,6 +89,8 @@ uv run synth911gen3 generate [OPTIONS]
 | `--seed` | | `911` | Random seed for reproducible output |
 | `--calltaker-pool-size` | | `12` | Number of unique calltaker names |
 | `--dispatcher-pool-size` | | `10` | Number of unique dispatcher names |
+| `--shift-preset` | | *(realism config)* | Shift structure preset: `2x12h-4shift-14day`, `2x12h-2shift`, `3x8h-3shift`, or `4x10h-4shift` |
+| `--max-memory-bytes` | | `2147483648` | Approximate in-memory budget per incident chunk in bytes; CSV/Parquet exports stream in chunks to stay under it |
 | `--config` | | *(none)* | Path to YAML realism configuration file |
 
 ### Global Options
@@ -152,6 +156,8 @@ The status panel and help tab explain each field.
 | End date | Inclusive end date, YYYY-MM-DD (optional) |
 | Calltaker pool size | Unique calltaker names (default: 12) |
 | Dispatcher pool size | Unique dispatcher names (default: 10) |
+| Shift preset | Shift structure preset (default: 2x12h-4shift-14day) |
+| Max memory (bytes) | Per-chunk memory budget for CSV/Parquet streaming (blank = 2 GiB default) |
 | Params file | JSON/YAML/TOML preset; Load Params fills the fields |
 | Realism config file | YAML realism configuration (optional) |
 
@@ -173,13 +179,45 @@ The status panel and help tab explain each field.
 | `start_date` | date | Jan 1 (current year) | Start of date range for incident timestamps |
 | `end_date` | date | Dec 31 (current year) | End of date range for incident timestamps |
 | `seed` | int | 911 | Random seed for reproducibility |
+| `max_memory_bytes` | int | None (2 GiB) | Per-chunk memory budget in bytes for incident CSV/Parquet streaming; see [Memory Budget & Chunked Export](#memory-budget--chunked-export) |
 
-### Personnel Parameters
+### Personnel and Shift Parameters
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `calltaker_pool_size` | int | 12 | Unique calltaker names to generate |
 | `dispatcher_pool_size` | int | 10 | Unique dispatcher names to generate |
+| `shift_preset` | str | None | Shift structure preset name (see [Shift Structures](#shift-structures)); when None the realism config's `shift_config` is used |
+
+### Shift Structures
+
+Incidents are assigned to a named shift (`shift` column) using a configurable
+crew-rotation schedule. A preset selects a complete structure up front; omit it
+(or set it to `None`) to use whatever `shift_config` is defined in the realism
+configuration file.
+
+Available presets:
+
+| Preset | Structure |
+|--------|-----------|
+| `2x12h-4shift-14day` (default) | 2x12h, shifts A/B (day) and C/D (night), 14-day crew rotation |
+| `2x12h-2shift` | 2x12h, single day and single night shift (no crew cycling) |
+| `3x8h-3shift` | 3x8h, Morning / Swing / Midnight |
+| `4x10h-4shift` | 4x10h, Day / Coverage / Evening / Night |
+
+```bash
+# Use a different shift structure from the CLI
+uv run synth911gen3 generate --shift-preset 3x8h-3shift
+
+# Or programmatically
+GenerationRequest(rows=10000, shift_preset="4x10h-4shift")
+```
+
+Each shift also carries its own staffing (calltakers/dispatchers). Shifts that
+omit staffing fall back to splitting the global `calltaker_pool_size` /
+`dispatcher_pool_size` totals. Custom structures — arbitrary shift hours,
+overnight shifts, rotation patterns, and per-shift staffing — are defined in the
+realism config's `shift_config` section; see the [Realism Guide](REALISMGUIDE.md).
 
 ### Supplying Parameters from a File
 
@@ -276,6 +314,8 @@ Keys mirror the CLI option names. Canonical `GenerationRequest` field names are 
   "seed": 42,
   "calltaker_pool_size": 20,
   "dispatcher_pool_size": 15,
+  "shift_preset": "3x8h-3shift",
+  "max_memory_bytes": 1073741824,
   "config": "config/example_realism.yaml"
 }
 ```
@@ -294,6 +334,7 @@ end_date: "2024-09-30"
 seed: 2024
 calltaker_pool_size: 16
 dispatcher_pool_size: 12
+shift_preset: "4x10h-4shift"
 ```
 
 ### Key Reference
@@ -312,6 +353,8 @@ dispatcher_pool_size: 12
 | `seed` | | int | Random seed |
 | `calltaker_pool_size` | | int | Unique calltaker names |
 | `dispatcher_pool_size` | | int | Unique dispatcher names |
+| `shift_preset` | | str | Shift structure preset name |
+| `max_memory_bytes` | | int | Per-chunk memory budget for CSV/Parquet streaming |
 | `realism_config_path` | `config` | str | Path to YAML realism config |
 
 ### Precedence
@@ -367,6 +410,31 @@ Two ready-made examples are included in the repo: `config/example_params.json` a
 
 When using `pandas` or `polars` format, no files are written. The generator returns DataFrame objects directly to the calling code.
 
+### Memory Budget & Chunked Export
+
+For very large CSV/Parquet runs, the incident generator avoids holding the full
+frame in memory by **streaming records in chunks**. The per-chunk budget
+(`max_memory_bytes`) defaults to 2 GiB and can be set via the CLI
+(`--max-memory-bytes`), TUI, or a params file. Only the *incidents* dataset is
+chunked; the hourly phone-metrics dataset is tiny and always built in one pass.
+
+- When the estimated full frame fits in the budget, a single chunk is written and
+  the file is byte-for-byte identical to a non-chunked run.
+- When it does not fit, chunks are written incrementally: CSV writes a header on
+  the first chunk and appends the rest; Parquet streams row groups through one
+  `ParquetWriter`. Only one chunk's DataFrame is materialized at a time.
+- `id_number` stays globally sequential (or globally unique for `guid`) and
+  `internal_reference_number` remains unique per agency across chunk boundaries.
+- Chunked output is reproducible for a given seed and chunk plan, but chunk
+  boundaries cause per-chunk time sorting, so a chunked export may differ in row
+  order from a non-chunked export of the same seed. In-memory formats
+  (`pandas`/`polars`) always build the full frame.
+
+```bash
+# Stream a 5M-row run under a 1 GiB per-chunk budget
+uv run synth911gen3 generate --rows 5000000 --format parquet --max-memory-bytes 1073741824
+```
+
 ---
 
 ## Generated Data Schema
@@ -378,6 +446,9 @@ When using `pandas` or `polars` format, no files are written. The generator retu
 | `id_number` | int or str | Incident ID: sequential integer (1 to N), or UUID v4 string when `id_format` is `guid` |
 | `internal_reference_number` | str | Agency-specific reference: `{AGENCY}-{YYMMDD}-{SEQ:06d}` |
 | `agency` | str | Responding agency: LAW, FIRE, EMS |
+| `shift` | str | Shift on duty at `call_start_time` (e.g., A, B, C, D) |
+| `shift_label` | str | Shift label (e.g., DAY, NIGHT) |
+| `shift_group` | int | Crew rotation group the shift belongs to (1, 2, …) |
 | `problem_nature` | str | Call type (e.g., "Traffic Crash", "Chest Pain") |
 | `priority` | int | Priority level 1-5 (1=highest) |
 | `prefix_directional` | str | Directional prefix (N/S/E/W/NE/…) or empty |
@@ -514,6 +585,9 @@ uv run synth911gen3 generate --output-dir /data/exports --output-stem kc_911_202
 ```bash
 # 1 million incidents in Parquet (efficient for large datasets)
 uv run synth911gen3 generate --rows 1000000 --format parquet --output-dir /big/data
+
+# 5 million incidents with a tighter per-chunk memory budget
+uv run synth911gen3 generate --rows 5000000 --format parquet --max-memory-bytes 536870912
 ```
 
 ### Realism Configuration
@@ -563,6 +637,8 @@ request = GenerationRequest(
     start_date=date(2024, 1, 1),
     end_date=date(2024, 12, 31),
     seed=12345,
+    shift_preset="2x12h-4shift-14day",
+    max_memory_bytes=2 * 1024**3,  # per-chunk budget for CSV/Parquet streaming
 )
 
 # Generate (returns GenerationResult with DataFrames and file paths)
@@ -636,6 +712,7 @@ disable TLS verification.
 - Use `--format parquet` for large datasets (faster I/O)
 - First run fetches OSM addresses; subsequent runs use cache
 - Consider reducing `rows` for testing
+- For runs that would exceed available RAM, lower `--max-memory-bytes` so CSV/Parquet export streams in chunks instead of holding the full frame
 
 #### TUI won't launch
 - Ensure `textual` is installed: `uv add textual`

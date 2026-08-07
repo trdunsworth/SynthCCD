@@ -24,6 +24,7 @@ TUI_INPUT_IDS = {
     "end_date",
     "calltaker_pool_size",
     "dispatcher_pool_size",
+    "max_memory_bytes",
     "params",
     "config",
 }
@@ -88,6 +89,7 @@ def test_tui_build_request_custom_values() -> None:
             app.query_one("#end_date", Input).value = "2024-03-31"
             app.query_one("#calltaker_pool_size", Input).value = "8"
             app.query_one("#dispatcher_pool_size", Input).value = "9"
+            app.query_one("#max_memory_bytes", Input).value = "1048576"
 
             request = app._build_request()
             assert request.rows == 500
@@ -102,6 +104,7 @@ def test_tui_build_request_custom_values() -> None:
             assert request.end_date == date(2024, 3, 31)
             assert request.calltaker_pool_size == 8
             assert request.dispatcher_pool_size == 9
+            assert request.max_memory_bytes == 1_048_576
 
     _run(scenario())
 

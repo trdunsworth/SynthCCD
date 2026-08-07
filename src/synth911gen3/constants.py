@@ -8,6 +8,12 @@ DEFAULT_OUTPUT_DIR = "output"
 DEFAULT_OUTPUT_STEM = "synthetic_911"
 DEFAULT_LOCALE = "en_US"
 
+# When ``max_memory_bytes`` is unset, incident CSV/Parquet generation is
+# chunked once the estimated in-memory DataFrame would exceed this budget.
+DEFAULT_MAX_MEMORY_BYTES = 2 * 1024**3
+# Probe rows used to estimate per-row memory for the budget guard.
+MEMORY_PROBE_ROWS = 10_000
+
 AGENCY_WEIGHTS = {
     "LAW": 0.52,
     "FIRE": 0.20,

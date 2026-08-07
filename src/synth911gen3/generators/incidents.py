@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import random as _random
 import uuid as _uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 
 import numpy as np
 import pandas as pd
@@ -10,7 +10,7 @@ from faker import Faker
 
 from synth911gen3.addresses import AddressProvider
 from synth911gen3.config import GenerationRequest, IdFormat
-from synth911gen3.constants import DEFAULT_LOCALE
+from synth911gen3.constants import DEFAULT_LOCALE, DEFAULT_MAX_MEMORY_BYTES, MEMORY_PROBE_ROWS
 from synth911gen3.exceptions import ValidationError
 from synth911gen3.logging_conf import ProgressReporter, get_logger
 from synth911gen3.realism_config import RealismConfig
@@ -137,13 +137,15 @@ def _lognormal_seconds(
     return np.clip(values, minimum, upper).astype(np.int64)
 
 
-def _event_time_offsets(rng: np.random.Generator, request: GenerationRequest, realism: RealismConfig) -> np.ndarray:
+def _event_time_offsets(
+    rng: np.random.Generator, request: GenerationRequest, realism: RealismConfig, n: int
+) -> np.ndarray:
     """Vectorized call-start times as seconds since the start date."""
     total_days = (request.resolved_end_date() - request.resolved_start_date()).days + 1
-    day_offsets = rng.integers(0, max(total_days, 1), size=request.rows)
-    hours = rng.choice(np.arange(24), size=request.rows, p=realism.hourly_weights)
-    minutes = rng.integers(0, 60, size=request.rows)
-    seconds = rng.integers(0, 60, size=request.rows)
+    day_offsets = rng.integers(0, max(total_days, 1), size=n)
+    hours = rng.choice(np.arange(24), size=n, p=realism.hourly_weights)
+    minutes = rng.integers(0, 60, size=n)
+    seconds = rng.integers(0, 60, size=n)
     return day_offsets * 86400 + hours * 3600 + minutes * 60 + seconds
 
 
@@ -179,7 +181,10 @@ def _active_shift_index(shift_config: ShiftConfig, event_times: np.ndarray) -> n
 
 
 def _build_reference_numbers(
-    agency: np.ndarray, agency_codes: np.ndarray, times_series: pd.Series
+    agency: np.ndarray,
+    agency_codes: np.ndarray,
+    times_series: pd.Series,
+    start_counts: np.ndarray | None = None,
 ) -> np.ndarray:
     ymd = (
         (times_series.dt.year % 100) * 10000
@@ -188,11 +193,19 @@ def _build_reference_numbers(
     )
     ymd_str = np.char.zfill(ymd.to_numpy().astype("U6"), 6)
 
+    counters = np.zeros(int(agency_codes.max()) + 1, dtype=np.int64)
+    if start_counts is not None:
+        counters = np.zeros(len(start_counts), dtype=np.int64)
+        counters += np.asarray(start_counts, dtype=np.int64)
     counter = np.empty(len(agency_codes), dtype=np.int64)
-    for agency_index in range(agency_codes.max() + 1):
+    for agency_index in range(int(agency_codes.max()) + 1):
         mask = agency_codes == agency_index
-        counter[mask] = np.arange(1, int(mask.sum()) + 1)
+        count = int(mask.sum())
+        counter[mask] = counters[agency_index] + np.arange(1, count + 1)
+        counters[agency_index] += count
     counter_str = np.char.zfill(counter.astype("U6"), 6)
+    if start_counts is not None:
+        start_counts[:] = counters
 
     prefix = np.char.add(np.char.add(agency, "-"), ymd_str)
     return np.char.add(np.char.add(prefix, "-"), counter_str)
@@ -203,11 +216,9 @@ class IncidentGenerator:
         self._address_provider = address_provider
         self._faker_locale = faker_locale
 
-    def generate(
-        self,
-        request: GenerationRequest,
-        on_progress: Callable[[int, int], None] | None = None,
-    ) -> pd.DataFrame:
+    def _prepare(
+        self, request: GenerationRequest
+    ) -> tuple[RealismConfig, ShiftConfig, dict[str, dict[str, list[str]]], list, np.random.Generator, Faker]:
         request.validate()
         realism = request.get_realism_config()
         shift_config = apply_shift_preset(realism.shift_config, request.shift_preset)
@@ -228,7 +239,14 @@ class IncidentGenerator:
         logger.info("Loaded %d addresses for sampling", len(addresses))
         if not addresses:
             raise ValidationError("Address provider returned no addresses for the requested area.")
+        return realism, shift_config, shift_pools, addresses, rng, faker
 
+    def generate(
+        self,
+        request: GenerationRequest,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> pd.DataFrame:
+        realism, shift_config, shift_pools, addresses, rng, faker = self._prepare(request)
         records = self._build_records(request, realism, shift_config, shift_pools, addresses, rng, faker)
 
         progress = ProgressReporter(request.rows, logger)
@@ -237,6 +255,101 @@ class IncidentGenerator:
         if on_progress is not None:
             on_progress(request.rows, request.rows)
         return pd.DataFrame(records)
+
+    def resolve_chunk_rows(self, request: GenerationRequest) -> int:
+        """Row count per chunk that keeps a chunk's DataFrame under the memory budget.
+
+        Prepares addresses and personnel pools on demand, so callers that only
+        need the plan (e.g. sizing checks) can call it standalone. Uses an
+        independent probe run (separate RNG) so the estimate does not consume
+        the seeded generation stream. Returns ``request.rows`` when the whole
+        dataset fits in one chunk.
+        """
+        realism, shift_config, shift_pools, addresses, _rng, faker = self._prepare(request)
+        return self._resolve_chunk_rows(
+            request, realism, shift_config, shift_pools, addresses, faker
+        )
+
+    def _resolve_chunk_rows(
+        self,
+        request: GenerationRequest,
+        realism: RealismConfig,
+        shift_config: ShiftConfig,
+        shift_pools: dict[str, dict[str, list[str]]],
+        addresses: list,
+        faker: Faker,
+    ) -> int:
+        budget = (
+            request.max_memory_bytes
+            if request.max_memory_bytes is not None
+            else DEFAULT_MAX_MEMORY_BYTES
+        )
+        if budget <= 0:
+            return request.rows
+        probe_rng = np.random.default_rng(request.seed + 1001)
+        probe_guid = _random.Random(request.seed + 1001)
+        probe_n = min(request.rows, MEMORY_PROBE_ROWS)
+        records = self._build_records(
+            request,
+            realism,
+            shift_config,
+            shift_pools,
+            addresses,
+            probe_rng,
+            faker,
+            n=probe_n,
+            guid_rng=probe_guid,
+        )
+        bytes_per_row = pd.DataFrame(records).memory_usage(deep=True).sum() / probe_n
+        chunk_rows = max(1, int(budget / max(bytes_per_row, 1.0)))
+        return min(request.rows, chunk_rows)
+
+    def generate_chunks(
+        self,
+        request: GenerationRequest,
+        chunk_rows: int | None = None,
+        on_progress: Callable[[int, int], None] | None = None,
+    ) -> Iterator[pd.DataFrame]:
+        """Yield one ``pd.DataFrame`` per chunk, keeping peak memory bounded.
+
+        ``chunk_rows`` defaults to the memory-budget-derived chunk size (see
+        :meth:`resolve_chunk_rows`). Records are generated on a single shared
+        RNG across chunks so the stream is deterministic for a given seed and
+        chunk plan; ``internal_reference_number`` counters continue across
+        chunks and ``id_number`` values stay globally sequential.
+        """
+        realism, shift_config, shift_pools, addresses, rng, faker = self._prepare(request)
+        if chunk_rows is None:
+            chunk_rows = self._resolve_chunk_rows(request, realism, shift_config, shift_pools, addresses, faker)
+        chunk_rows = max(1, min(chunk_rows, request.rows))
+
+        guid_rng = _random.Random(request.seed)
+        agency_counts = np.zeros(len(realism.agency_weights), dtype=np.int64)
+        progress = ProgressReporter(request.rows, logger)
+        done = 0
+        start_index = 0
+        while start_index < request.rows:
+            n = min(chunk_rows, request.rows - start_index)
+            records = self._build_records(
+                request,
+                realism,
+                shift_config,
+                shift_pools,
+                addresses,
+                rng,
+                faker,
+                n=n,
+                start_index=start_index,
+                guid_rng=guid_rng,
+                start_counts=agency_counts,
+            )
+            yield pd.DataFrame(records)
+            done += n
+            progress.update(done)
+            if on_progress is not None:
+                on_progress(done, request.rows)
+            start_index += n
+        progress.finish()
 
     def _build_records(
         self,
@@ -247,11 +360,15 @@ class IncidentGenerator:
         addresses: list,
         rng: np.random.Generator,
         faker: Faker,
+        n: int | None = None,
+        start_index: int = 0,
+        guid_rng: _random.Random | None = None,
+        start_counts: np.ndarray | None = None,
     ) -> dict[str, np.ndarray]:
-        n = request.rows
+        n = request.rows if n is None else n
 
         start = np.datetime64(request.resolved_start_date().isoformat()).astype("datetime64[s]")
-        event_offsets = _event_time_offsets(rng, request, realism)
+        event_offsets = _event_time_offsets(rng, request, realism, n)
         event_offsets.sort()
         event_times = start + event_offsets.astype("timedelta64[s]")
         times = pd.DatetimeIndex(event_times)
@@ -366,15 +483,15 @@ class IncidentGenerator:
             )
 
         if request.id_format is IdFormat.GUID:
-            guid_rng = _random.Random(request.seed)
+            guid_rng = guid_rng if guid_rng is not None else _random.Random(request.seed)
             id_number: np.ndarray = np.asarray(
                 [str(_uuid.UUID(int=guid_rng.getrandbits(128), version=4)) for _ in range(n)],
                 dtype=object,
             )
         else:
-            id_number = np.arange(1, n + 1)
+            id_number = np.arange(start_index + 1, start_index + n + 1)
 
-        reference_numbers = _build_reference_numbers(agency, agency_codes, times_series)
+        reference_numbers = _build_reference_numbers(agency, agency_codes, times_series, start_counts)
 
         street_address = address_columns["street_address"]
         location = np.char.add(street_address.astype("U"), ", ")
