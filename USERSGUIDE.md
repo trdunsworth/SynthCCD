@@ -92,6 +92,8 @@ uv run synth911gen3 generate [OPTIONS]
 | `--shift-preset` | | *(realism config)* | Shift structure preset: `2x12h-4shift-14day`, `2x12h-2shift`, `3x8h-3shift`, or `4x10h-4shift` |
 | `--max-memory-bytes` | | `2147483648` | Approximate in-memory budget per incident chunk in bytes; CSV/Parquet exports stream in chunks to stay under it |
 | `--config` | | *(none)* | Path to YAML realism configuration file |
+| `--schema` | | *(off)* | Print the generated schema (columns + types) for the selected datasets; no data is generated and no addresses are fetched |
+| `--dry-run` | | *(off)* | Print the schema plus a few sample rows; no files are written and no addresses are fetched |
 
 ### Global Options
 
@@ -112,6 +114,35 @@ uv run synth911gen3 --help          # Show all commands and options
 uv run synth911gen3 generate --help # Show generate-specific options
 uv run synth911gen3 --verbose generate --rows 50000 --format parquet
 ```
+
+### Schema Preview and Dry Run
+
+Both flags inspect what would be generated **without** writing files, running a
+long generation, or fetching addresses from OpenStreetMap.
+
+| Flag | Output |
+|------|--------|
+| `--schema` | Column names and data types for each selected dataset (respects `--dataset`, `--id-format`, and `--config`) |
+| `--dry-run` | Same schema output plus a handful of sample rows |
+
+```bash
+# Show the incident schema (1-row probe, static addresses)
+uv run synth911gen3 generate --schema --dataset incidents
+
+# Show the phone-metrics schema
+uv run synth911gen3 generate --schema --dataset phone
+
+# Show both schemas plus sample rows
+uv run synth911gen3 generate --dry-run
+
+# Preview with a realism config and GUID ids
+uv run synth911gen3 generate --dry-run --config my_center.yaml --id-format guid
+```
+
+Sample rows use a small static address pool (never the OSM network) and a
+single-day phone range, so previews are instant and deterministic for a given
+`--seed`. Sample addresses are illustrative only — they are not the addresses a
+full run would produce.
 
 ---
 
@@ -735,6 +766,21 @@ OpenStreetMap addresses are cached in:
 ```
 
 Delete cache files to force re-fetch for updated area boundaries.
+
+---
+
+## Development and Testing
+
+```bash
+uv run pytest tests/              # Run the test suite (enforces >= 80% coverage)
+uv run ruff check .               # Lint
+uv run ty check src               # Type-check
+```
+
+Coverage is enforced on every test run: `pyproject.toml` configures `--cov`
+with a `fail_under = 80` threshold, so a run that drops below 80% exits non-zero.
+CI also runs an explicit coverage check. Run just the summary without failing
+with `uv run pytest tests/ -q --no-cov`.
 
 ---
 

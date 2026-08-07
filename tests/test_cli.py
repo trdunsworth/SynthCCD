@@ -1,13 +1,23 @@
+import re
+import subprocess
+import sys
 from datetime import date
 from pathlib import Path
-import re
 
 import pytest
 import typer
 from typer.testing import CliRunner
 
-from synth911gen3.cli import _coerce_param, app, build_request_from_params, load_params_file
+from synth911gen3.addresses import Address, StaticAddressProvider
+from synth911gen3.cli import (
+    _coerce_param,
+    _parse_date,
+    app,
+    build_request_from_params,
+    load_params_file,
+)
 from synth911gen3.config import DatasetKind, IdFormat, OutputFormat
+from synth911gen3.exceptions import ExportError
 
 runner = CliRunner()
 
@@ -20,6 +30,21 @@ def _write(tmp_path: Path, name: str, content: str) -> Path:
     path = tmp_path / name
     path.write_text(content, encoding="utf-8")
     return path
+
+
+def _install_static_provider(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "synth911gen3.cli.OpenStreetMapAddressProvider",
+        lambda: StaticAddressProvider(
+            [
+                Address("101 N Main St", "Kansas City", "Missouri"),
+                Address("204 E 12th St", "Kansas City", "Missouri"),
+                Address("55 W 39th St", "Kansas City", "Missouri"),
+                Address("777 S Broadway Blvd", "Kansas City", "Missouri"),
+                Address("890 N Oak Trafficway", "Kansas City", "Missouri"),
+            ]
+        ),
+    )
 
 
 def test_load_params_file_json(tmp_path: Path) -> None:
@@ -183,3 +208,210 @@ def test_cli_help_lists_verbosity_flags() -> None:
     output = _strip_ansi(result.output)
     assert "--verbose" in output
     assert "--quiet" in output
+
+
+def test_cli_help_lists_schema_and_dry_run_flags() -> None:
+    result = runner.invoke(app, ["generate", "--help"])
+    assert result.exit_code == 0
+    output = _strip_ansi(result.output)
+    assert "--schema" in output
+    assert "--dry-run" in output
+
+
+def test_cli_schema_prints_schema_without_writing_files(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--schema",
+            "--dataset",
+            "incidents",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0
+    output = _strip_ansi(result.output)
+    assert "id_number" in output
+    assert "int64" in output
+    assert "call_start_time" in output
+    assert "sample rows" not in output
+    assert not list(tmp_path.iterdir())
+
+
+def test_cli_dry_run_prints_schema_and_sample_rows(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--dry-run",
+            "--dataset",
+            "incidents",
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    assert result.exit_code == 0
+    output = _strip_ansi(result.output)
+    assert "id_number" in output
+    assert "sample rows" in output
+    assert not list(tmp_path.iterdir())
+
+
+def test_cli_dry_run_respects_dataset_selection() -> None:
+    result = runner.invoke(
+        app, ["generate", "--dry-run", "--dataset", "phone"]
+    )
+    assert result.exit_code == 0
+    output = _strip_ansi(result.output)
+    assert "hourly_call_counts" in output
+    assert "incidents schema" not in output
+
+
+def test_parse_date_converts_iso_string() -> None:
+    assert _parse_date("2024-03-01") == date(2024, 3, 1)
+    assert _parse_date(None) is None
+
+
+def test_cli_maps_all_flag_branches_to_params(tmp_path: Path) -> None:
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--dry-run",
+            "--dataset",
+            "incidents",
+            "--rows",
+            "3",
+            "--area",
+            "Denver, CO",
+            "--format",
+            "parquet",
+            "--id-format",
+            "guid",
+            "--output-dir",
+            str(tmp_path),
+            "--output-stem",
+            "custom",
+            "--start-date",
+            "2024-01-01",
+            "--end-date",
+            "2024-01-05",
+            "--seed",
+            "7",
+            "--calltaker-pool-size",
+            "4",
+            "--dispatcher-pool-size",
+            "5",
+            "--shift-preset",
+            "3x8h-3shift",
+            "--max-memory-bytes",
+            "1048576",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "id_number" in _strip_ansi(result.output)
+
+
+def test_cli_generate_csv_writes_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_static_provider(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--rows",
+            "5",
+            "--dataset",
+            "incidents",
+            "--output-dir",
+            str(tmp_path),
+            "--output-stem",
+            "sample",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "incidents: " in _strip_ansi(result.output)
+    assert (tmp_path / "sample_incidents.csv").exists()
+
+
+def test_cli_generate_pandas_prints_frame_summary(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_static_provider(monkeypatch)
+    result = runner.invoke(
+        app,
+        ["generate", "--rows", "5", "--dataset", "incidents", "--format", "pandas"],
+    )
+    assert result.exit_code == 0
+    assert "incidents: 5 rows x" in _strip_ansi(result.output)
+
+
+def test_cli_generate_polars_prints_frame_summary(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_static_provider(monkeypatch)
+    result = runner.invoke(
+        app,
+        ["generate", "--rows", "5", "--dataset", "incidents", "--format", "polars"],
+    )
+    assert result.exit_code == 0
+    assert "incidents: 5 rows x" in _strip_ansi(result.output)
+
+
+def test_cli_generate_validation_error_exits_1(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_static_provider(monkeypatch)
+    result = runner.invoke(
+        app,
+        ["generate", "--rows", "5", "--dataset", "incidents", "--area", "  "],
+    )
+    assert result.exit_code == 1
+    assert "area_query must not be empty" in _strip_ansi(result.output)
+
+
+def test_cli_generate_export_error_exits_1(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FailingApp:
+        def __init__(self, address_provider=None) -> None:
+            self._address_provider = address_provider
+
+        def generate(self, request, on_progress=None):
+            raise ExportError("boom")
+
+    monkeypatch.setattr("synth911gen3.cli.Synth911Application", _FailingApp)
+    result = runner.invoke(
+        app,
+        ["generate", "--rows", "5", "--dataset", "incidents", "--output-dir", str(tmp_path)],
+    )
+    assert result.exit_code == 1
+    assert "boom" in _strip_ansi(result.output)
+
+
+def test_cli_generate_with_config_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _install_static_provider(monkeypatch)
+    config_path = _write(
+        tmp_path,
+        "center.yaml",
+        "agency_names:\n  LAW: POLICE\n  FIRE: FIRE\n  EMS: EMS\n",
+    )
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--rows",
+            "5",
+            "--dataset",
+            "incidents",
+            "--output-dir",
+            str(tmp_path),
+            "--config",
+            str(config_path),
+        ],
+    )
+    assert result.exit_code == 0
+    assert "incidents: " in _strip_ansi(result.output)
+
+
+def test_module_entrypoint_prints_help() -> None:
+    result = subprocess.run(
+        [sys.executable, "-m", "synth911gen3", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0
+    assert "Synthetic 911" in result.stdout

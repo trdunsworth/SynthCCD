@@ -118,7 +118,7 @@ recommendation docs in `docs/`, and direct code review.
       already exposed seed, date range, pool sizes, output dir, and the realism-config path.
 - [ ] **P2 — Implement the PyQt6 GUI** (AGENTS.md goal: "TUI or a GUI"). Requires re-adding
       the `pyqt6` dependency (removed in the dependency trim); a desktop GUI would serve
-      non-technical operators.
+      non-technical operators. **Deferred** — not being pursued for now.
 - [x] **P2 — Document/reconcile env vars.** `USERSGUIDE.md` previously documented `SYNTH911_SEED` and
       `SYNTH911_OUTPUT_DIR`, but neither is read anywhere in `src/` (verified). Removed both rows from
       the env-var table, leaving only the implemented `SYNTH911_LOG_LEVEL` (and the documented
@@ -128,15 +128,25 @@ recommendation docs in `docs/`, and direct code review.
       new companion `REALISMGUIDE.md` and kept the user guide to quick-start, CLI reference,
       params files, output formats, schema, examples, and troubleshooting, with cross-links
       between the two documents.
-- [ ] **P2 — Provide a `--schema`/`--dry-run` CLI flag** to print the generated schema and a
-      few sample rows without a full OSM fetch or long generation run.
+- [x] **P2 — Provide a `--schema`/`--dry-run` CLI flag** to print the generated schema and a
+      few sample rows without a full OSM fetch or long generation run. Added
+      `synth911gen3.describe.build_preview_datasets` (probes the incident pipeline against a
+      static address pool and restricts phone metrics to a single day) plus `--schema` and
+      `--dry-run` flags on `generate` that short-circuit before generation and respect
+      `--dataset`/`--id-format`/`--config`. Covered by `tests/test_describe.py` and
+      `tests/test_cli.py`.
 
 ---
 
 ## Testing / Quality
 
-- [ ] **P1 — Enforce the 80% coverage requirement.** Add `pytest-cov` to dev deps and a
-      `--cov` threshold; no coverage config exists despite the AGENTS.md requirement.
+- [x] **P1 — Enforce the 80% coverage requirement.** Added `pytest-cov` to the dev group and
+      wired it into `pyproject.toml`: `addopts = "--cov --cov-report=term-missing"` plus a
+      `[tool.coverage]` section with `fail_under = 80`. Coverage is enforced on every
+      `uv run pytest` run and explicitly in CI (`--cov-fail-under=80`). Added tests for the
+      previously-lightly-covered `cli.py` (flag mapping, error exits, real generation,
+      entrypoint) and `exporters.py` (JSON/YAML/PANDAS/PARQUET, chunked-format rejection),
+      plus a new `tests/test_tls.py`. Suite is at ~94% coverage (190 tests).
 - [ ] **P1 — Add tests for `realism_config.py` round-trip (`to_yaml`/`from_yaml`) and
       weight-validation error paths.** Currently untested.
 - [x] **P1 — Add tests for `tui.py` request building and `addresses.py` cache

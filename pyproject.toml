@@ -34,6 +34,7 @@ build-backend = "uv_build"
 dev = [
     "pip-audit>=2.10.1",
     "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
     "ruff>=0.15.10",
     "truststore>=0.10.4",
     "ty>=0.0.31",
@@ -41,6 +42,14 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov --cov-report=term-missing"
+
+[tool.coverage.run]
+source = ["synth911gen3"]
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
 
 [tool.ruff]
 line-length = 100

@@ -9,7 +9,7 @@ import typer
 
 from .addresses import OpenStreetMapAddressProvider
 from .app import Synth911Application
-from .config import DatasetKind, IdFormat, OutputFormat
+from .config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
 from .exceptions import AddressLookupError, ExportError, ValidationError
 from .logging_conf import configure_logging, get_logger
 from .params import (
@@ -45,6 +45,35 @@ def configure(
 
 def _describe_frame(name: str, frame: pd.DataFrame) -> str:
     return f"{name}: {len(frame):,} rows x {len(frame.columns)} columns"
+
+
+def _print_schema(name: str, frame: pd.DataFrame) -> None:
+    typer.echo(f"{name} schema ({len(frame.columns)} columns):")
+    for column in frame.columns:
+        typer.echo(f"  {column:<28} {frame[column].dtype}")
+    typer.echo()
+
+
+def _print_samples(name: str, frame: pd.DataFrame, rows: int) -> None:
+    typer.echo(f"{name} sample rows ({min(len(frame), rows)}):")
+    typer.echo(frame.head(rows).to_string(index=False))
+    typer.echo()
+
+
+def _describe(request: GenerationRequest, *, dry_run: bool) -> None:
+    from .describe import SAMPLE_ROWS, build_preview_datasets
+
+    preview = build_preview_datasets(request, schema_only=not dry_run)
+    mode = "Dry run" if dry_run else "Schema preview"
+    typer.echo(
+        f"{mode}: no files written, no OpenStreetMap fetch "
+        f"(illustrative sample addresses)."
+    )
+    typer.echo()
+    for name, frame in preview.items():
+        _print_schema(name, frame)
+        if dry_run:
+            _print_samples(name, frame, SAMPLE_ROWS)
 
 
 @app.command()
@@ -163,6 +192,16 @@ def generate(
         readable=True,
         help="Path to YAML realism configuration file.",
     ),
+    schema: bool = typer.Option(
+        False,
+        "--schema",
+        help="Print the generated schema (columns and types) without generating data or fetching addresses.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Print the schema plus a few sample rows without writing files or fetching addresses.",
+    ),
 ) -> None:
     cli_params: dict[str, Any] = {}
     if rows is not None:
@@ -201,6 +240,9 @@ def generate(
 
     logger.info("Generating %d rows (%s, %s)", request.rows, request.dataset.value, request.output_format.value)
     try:
+        if dry_run or schema:
+            _describe(request, dry_run=dry_run)
+            return
         result = Synth911Application(address_provider=OpenStreetMapAddressProvider()).generate(request)
     except (AddressLookupError, ExportError, ValidationError) as exc:
         logger.error("%s: %s", type(exc).__name__, exc)
