@@ -133,6 +133,16 @@ def generate(
         show_default=False,
         help="Number of unique dispatcher names (default: 10).",
     ),
+    shift_preset: str | None = typer.Option(
+        None,
+        "--shift-preset",
+        case_sensitive=False,
+        show_default=False,
+        help=(
+            "Shift structure preset: 2x12h-4shift-14day, 2x12h-2shift, "
+            "3x8h-3shift, or 4x10h-4shift (default: realism config)."
+        ),
+    ),
     config: Path | None = typer.Option(
         None,
         "--config",
@@ -168,6 +178,8 @@ def generate(
         cli_params["calltaker_pool_size"] = calltaker_pool_size
     if dispatcher_pool_size is not None:
         cli_params["dispatcher_pool_size"] = dispatcher_pool_size
+    if shift_preset is not None:
+        cli_params["shift_preset"] = shift_preset
     if config is not None:
         cli_params["realism_config_path"] = config
 

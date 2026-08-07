@@ -28,6 +28,7 @@ from .constants import DEFAULT_AREA_QUERY, DEFAULT_OUTPUT_DIR, DEFAULT_OUTPUT_ST
 from .domain import GenerationResult
 from .exceptions import AddressLookupError, ExportError, ValidationError
 from .params import build_request_from_params, load_params_file
+from .shifts import DEFAULT_SHIFT_PRESET, SHIFT_PRESETS
 from .tls import maybe_inject_system_trust
 
 
@@ -93,6 +94,8 @@ _HELP_TEXT = (
     "  End date           Inclusive end date, YYYY-MM-DD (optional).\n"
     "  Calltaker pool     Unique calltaker name count (default: 12).\n"
     "  Dispatcher pool    Unique dispatcher name count (default: 10).\n"
+    "  Shift preset       Shift structure: 2x12h-4shift-14day (default),\n"
+    "                     2x12h-2shift, 3x8h-3shift, or 4x10h-4shift.\n"
     "  Params file        JSON/YAML/TOML preset; Load Params fills the fields above.\n"
     "  Config file        YAML realism configuration file (optional).\n\n"
     "KEYS\n"
@@ -306,6 +309,19 @@ class Synth911Tui(App[None]):
                                         id="dispatcher_pool_size",
                                     ),
                                 )
+                                yield _field(
+                                    "Shift preset",
+                                    "shift_preset",
+                                    Select(
+                                        [
+                                            (label, name)
+                                            for name, label in SHIFT_PRESETS.items()
+                                        ]
+                                        + [("Custom (via realism config)", "")],
+                                        value=DEFAULT_SHIFT_PRESET,
+                                        id="shift_preset",
+                                    ),
+                                )
                             yield _section_title("Configuration Files")
                             with Grid(classes="fields"):
                                 yield _field(
@@ -382,6 +398,7 @@ class Synth911Tui(App[None]):
         )
         self.query_one("#calltaker_pool_size", Input).value = str(request.calltaker_pool_size)
         self.query_one("#dispatcher_pool_size", Input).value = str(request.dispatcher_pool_size)
+        self.query_one("#shift_preset", Select).value = request.shift_preset or DEFAULT_SHIFT_PRESET
         self.query_one("#config", Input).value = (
             str(request.realism_config_path) if request.realism_config_path else ""
         )
@@ -466,6 +483,8 @@ class Synth911Tui(App[None]):
         output_stem = self.query_one("#output_stem", Input).value.strip() or DEFAULT_OUTPUT_STEM
         config_raw = self.query_one("#config", Input).value.strip()
         realism_config_path = Path(config_raw) if config_raw else None
+        shift_preset_value = self.query_one("#shift_preset", Select).value
+        shift_preset: str | None = str(shift_preset_value) if shift_preset_value else None
 
         return GenerationRequest(
             rows=rows,
@@ -480,6 +499,7 @@ class Synth911Tui(App[None]):
             seed=seed,
             calltaker_pool_size=calltaker_pool_size,
             dispatcher_pool_size=dispatcher_pool_size,
+            shift_preset=shift_preset,
             realism_config_path=realism_config_path,
         )
 

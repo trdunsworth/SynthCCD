@@ -19,6 +19,7 @@ from .constants import (
     TIME_PROFILES as DEFAULT_TIME_PROFILES,
 )
 from .exceptions import ValidationError
+from .shifts import ShiftConfig, get_default_shift_config
 
 
 @dataclass(slots=True)
@@ -33,6 +34,7 @@ class RealismConfig:
     phone_metrics: dict[str, float] = field(default_factory=dict)
     hourly_weights: np.ndarray = field(default_factory=lambda: np.array([]))
     agency_names: dict[str, str] = field(default_factory=dict)
+    shift_config: ShiftConfig = field(default_factory=ShiftConfig)
 
     def __post_init__(self) -> None:
         if not self.agency_weights:
@@ -57,6 +59,8 @@ class RealismConfig:
             self.hourly_weights = DEFAULT_HOURLY_WEIGHTS.copy()
         if not self.agency_names:
             self.agency_names = {"LAW": "LAW", "FIRE": "FIRE", "EMS": "EMS"}
+        if not self.shift_config.shifts and not self.shift_config.rotation:
+            self.shift_config = get_default_shift_config()
 
     @classmethod
     def from_yaml(cls, path: Path) -> RealismConfig:
@@ -116,6 +120,9 @@ class RealismConfig:
 
         if "agency_names" in data:
             config.agency_names = data["agency_names"]
+
+        if "shift_config" in data:
+            config.shift_config = ShiftConfig.from_dict(data["shift_config"])
 
         config._validate()
         return config
@@ -194,6 +201,8 @@ class RealismConfig:
             if agency not in self.agency_names:
                 raise ValidationError(f"Agency name mapping missing for: {agency}")
 
+        self.shift_config.validate()
+
     def to_yaml(self, path: Path) -> None:
         data = {
             "agency_weights": self.agency_weights,
@@ -209,6 +218,7 @@ class RealismConfig:
             "phone_metrics": self.phone_metrics,
             "hourly_weights": self.hourly_weights.tolist(),
             "agency_names": self.agency_names,
+            "shift_config": self.shift_config.to_dict(),
         }
         with path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(data, f, sort_keys=False, default_flow_style=None)

@@ -8,6 +8,7 @@ from pathlib import Path
 from .constants import DEFAULT_AREA_QUERY, DEFAULT_OUTPUT_DIR, DEFAULT_OUTPUT_STEM, DEFAULT_ROWS
 from .exceptions import ValidationError
 from .realism_config import RealismConfig
+from .shifts import SHIFT_PRESETS
 
 _WINDOWS_RESERVED_NAMES = frozenset(
     {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
@@ -48,6 +49,7 @@ class GenerationRequest:
     seed: int = 911
     calltaker_pool_size: int = 12
     dispatcher_pool_size: int = 10
+    shift_preset: str | None = None
     realism_config: RealismConfig | None = None
     realism_config_path: Path | None = None
 
@@ -78,6 +80,11 @@ class GenerationRequest:
             raise ValidationError("dispatcher_pool_size must be greater than zero.")
         if self.resolved_start_date() > self.resolved_end_date():
             raise ValidationError("start_date must be on or before end_date.")
+        if self.shift_preset is not None and self.shift_preset not in SHIFT_PRESETS:
+            raise ValidationError(
+                f"Unknown shift_preset {self.shift_preset!r}. Available presets: "
+                f"{', '.join(sorted(SHIFT_PRESETS))}."
+            )
         # Validate realism config if provided
         self.get_realism_config()
 

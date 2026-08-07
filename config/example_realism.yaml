@@ -394,3 +394,54 @@ hourly_weights:
   - 0.042
   - 0.038
   - 0.034
+
+# Shift structure: crew rotation pattern plus the shifts on the clock.
+# rotation: one crew-group id per calendar day, repeating. Day 1 is the weekday
+#   given by cycle_start_weekday (0 = Monday). This example mirrors a 2x12h
+#   center with 4 shifts (A/B day, C/D night) on a 14-day rotation where group 1
+#   (A day + C night) and group 2 (B day + D night) alternate:
+#   1,1,2,2,1,1,1,2,2,1,1,2,2,2  (14 days, starting Monday).
+# shifts: each entry lists a shift name, a human label, its on-duty hours, its
+#   crew rotation group, and staffing. Omit calltakers/dispatchers to fall back
+#   to the global --calltaker-pool-size / --dispatcher-pool-size split.
+shift_config:
+  name: "2x12h-4shift-14day"
+  cycle_start_weekday: 0
+  rotation: [1, 1, 2, 2, 1, 1, 1, 2, 2, 1, 1, 2, 2, 2]
+  shifts:
+    - name: A
+      label: DAY
+      start_hour: 6
+      start_minute: 0
+      end_hour: 18
+      end_minute: 0
+      rotation: 1
+      calltakers: 3
+      dispatchers: 2
+    - name: B
+      label: DAY
+      start_hour: 6
+      start_minute: 0
+      end_hour: 18
+      end_minute: 0
+      rotation: 2
+      calltakers: 3
+      dispatchers: 2
+    - name: C
+      label: NIGHT
+      start_hour: 18
+      start_minute: 0
+      end_hour: 6
+      end_minute: 0
+      rotation: 1
+      calltakers: 3
+      dispatchers: 2
+    - name: D
+      label: NIGHT
+      start_hour: 18
+      start_minute: 0
+      end_hour: 6
+      end_minute: 0
+      rotation: 2
+      calltakers: 3
+      dispatchers: 2
