@@ -67,6 +67,7 @@ uv run synth911gen3 tui
 |---------|-------------|
 | `generate` | Generate synthetic datasets |
 | `tui` | Launch the Textual TUI |
+| `serve` | Launch the FastAPI REST API server |
 
 ### Generate Command Options
 
@@ -191,6 +192,127 @@ The status panel and help tab explain each field.
 | Max memory (bytes) | Per-chunk memory budget for CSV/Parquet streaming (blank = 2 GiB default) |
 | Params file | JSON/YAML/TOML preset; Load Params fills the fields |
 | Realism config file | YAML realism configuration (optional) |
+
+
+
+---
+
+## FastAPI REST API Server
+
+Launch the REST API server for programmatic access:
+
+```bash
+uv run synth911gen3 serve
+```
+
+The server runs on `http://0.0.0.0:8000` by default and provides:
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/schema` | GET | Schema preview (no OSM fetch, no data generation) |
+| `/generate` | POST | Generate data (returns JSON summary or file download) |
+| `/generate/stream` | POST | Stream CSV/Parquet for large datasets |
+
+### Schema Preview (GET `/schema`)
+
+```bash
+# Basic schema preview
+curl "http://localhost:8000/schema?rows=100&dataset=all"
+
+# With custom parameters
+curl "http://localhost:8000/schema?rows=1000&dataset=incidents&area_query=Seattle,WA&seed=42&config=config/example_realism.yaml"
+```
+
+Query parameters:
+- `rows` (int, default 100): Number of rows for schema probe
+- `dataset` (str, default "all"): incidents, phone, or all
+- `output_format` (str, default "pandas"): Output format for probe
+- `area_query` (str, default "Kansas City, MO"): Area for addresses
+- `seed` (int, default 911): Random seed
+- `config` (str, optional): Path to realism config YAML
+
+### Generate Data (POST `/generate`)
+
+```bash
+# Generate with JSON body, return summary
+curl -X POST "http://localhost:8000/generate"   -H "Content-Type: application/json"   -d '{
+    "rows": 50000,
+    "area_query": "Denver, CO",
+    "output_format": "parquet",
+    "dataset": "all",
+    "seed": 12345
+  }'
+
+# Generate and download single file
+curl -X POST "http://localhost:8000/generate?download=true"   -H "Content-Type: application/json"   -d '{"rows": 1000, "output_format": "json", "dataset": "incidents"}'   -o incidents.json
+```
+
+Request body fields (all optional, matching CLI options):
+- `params_file`, `rows`, `area_query`, `output_format`, `dataset`, `id_format`
+- `output_dir`, `output_stem`, `start_date`, `end_date`, `seed`
+- `calltaker_pool_size`, `dispatcher_pool_size`, `shift_preset`
+- `max_memory_bytes`, `realism_config_path`
+
+Query parameters:
+- `download` (bool, default false): If true, return file download for single-file formats
+
+### Stream Large Datasets (POST `/generate/stream`)
+
+For very large datasets, stream the output to avoid loading entire files in memory:
+
+```bash
+curl -X POST "http://localhost:8000/generate/stream?dataset=incidents"   -H "Content-Type: application/json"   -d '{"rows": 1000000, "output_format": "parquet"}'   -o incidents.parquet
+```
+
+Query parameters:
+- `dataset` (str, default "incidents"): incidents or phone
+
+---
+
+## Docker Deployment
+
+### Using Docker Compose (Recommended)
+
+```bash
+# Start the API server
+docker compose up -d synth911gen3
+
+# Check health
+curl http://localhost:8000/health
+
+# Run a one-off generation job
+docker compose --profile generate run synth911gen3-generate
+```
+
+### Using Docker Directly
+
+```bash
+# Build the image
+docker build -t synth911gen3:0.1.0 .
+
+# Run the API server
+docker run -d   -p 8000:8000   -v synth911gen3-cache:/home/synth911/.cache/synth911gen3   -v synth911gen3-output:/app/output   --name synth911gen3-api   synth911gen3:0.1.0
+
+# Run a one-off generation
+docker run --rm   -v synth911gen3-cache:/home/synth911/.cache/synth911gen3   -v synth911gen3-output:/app/output   synth911gen3:0.1.0   synth911gen3 generate --rows 50000 --format parquet
+```
+
+### Persistent Volumes
+
+| Volume | Purpose |
+|--------|---------|
+| `synth911gen3-cache` | OSM address cache (speeds up subsequent runs) |
+| `synth911gen3-output` | Generated output files |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SYNTH911_LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
+| `SYNTH911_SYSTEM_TRUST` | `0` | Set to `1` to use OS trust store for TLS (corporate proxies) |
+
+---
 
 ---
 
@@ -531,6 +653,14 @@ uv run synth911gen3 generate --rows 5000000 --format parquet --max-memory-bytes 
 | `non_emergency_calls_received` | int | Non-emergency calls received |
 | `non_emergency_calls_abandoned` | int | Non-emergency calls abandoned |
 | `outbound_calls_placed` | int | Outbound calls placed |
+| `nine_one_one_answered_10s_pct` | float | % of 9-1-1 calls answered within 10 seconds |
+| `nine_one_one_answered_15s_pct` | float | % of 9-1-1 calls answered within 15 seconds |
+| `nine_one_one_answered_20s_pct` | float | % of 9-1-1 calls answered within 20 seconds |
+| `nine_one_one_answered_40s_pct` | float | % of 9-1-1 calls answered within 40 seconds |
+| `non_emergency_answered_10s_pct` | float | % of non-emergency calls answered within 10 seconds |
+| `non_emergency_answered_15s_pct` | float | % of non-emergency calls answered within 15 seconds |
+| `non_emergency_answered_20s_pct` | float | % of non-emergency calls answered within 20 seconds |
+| `non_emergency_answered_40s_pct` | float | % of non-emergency calls answered within 40 seconds |
 
 ---
 
@@ -818,3 +948,59 @@ MIT License - see LICENSE file for details.
 
 - Issues: [GitHub Issues](https://github.com/trdunsworth/synth911gen3/issues)
 - Documentation: This guide + inline code docstrings
+
+---
+
+
+## Docker Deployment
+
+### Using Docker Compose (Recommended)
+
+```bash
+# Start the API server
+docker compose up -d synth911gen3
+
+# Check health
+curl http://localhost:8000/health
+
+# Run a one-off generation job
+docker compose --profile generate run synth911gen3-generate
+```
+
+### Using Docker Directly
+
+```bash
+# Build the image
+docker build -t synth911gen3:0.1.0 .
+
+# Run the API server
+docker run -d \
+  -p 8000:8000 \
+  -v synth911gen3-cache:/home/synth911/.cache/synth911gen3 \
+  -v synth911gen3-output:/app/output \
+  --name synth911gen3-api \
+  synth911gen3:0.1.0
+
+# Run a one-off generation
+docker run --rm \
+  -v synth911gen3-cache:/home/synth911/.cache/synth911gen3 \
+  -v synth911gen3-output:/app/output \
+  synth911gen3:0.1.0 \
+  synth911gen3 generate --rows 50000 --format parquet
+```
+
+### Persistent Volumes
+
+| Volume | Purpose |
+|--------|---------|
+| `synth911gen3-cache` | OSM address cache (speeds up subsequent runs) |
+| `synth911gen3-output` | Generated output files |
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SYNTH911_LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
+| `SYNTH911_SYSTEM_TRUST` | `0` | Set to `1` to use OS trust store for TLS (corporate proxies) |
+
+---

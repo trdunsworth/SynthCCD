@@ -64,7 +64,7 @@ def test_application_generates_incidents_and_hourly_counts() -> None:
         "call_disposition",
         "total_elapsed_seconds",
     }.issubset(result.incidents.columns)
-    assert len(result.hourly_call_counts.columns) == 7
+    assert len(result.hourly_call_counts.columns) == 15
 
 
 def test_application_guid_id_format_emits_unique_uuids() -> None:

@@ -147,8 +147,12 @@ recommendation docs in `docs/`, and direct code review.
       previously-lightly-covered `cli.py` (flag mapping, error exits, real generation,
       entrypoint) and `exporters.py` (JSON/YAML/PANDAS/PARQUET, chunked-format rejection),
       plus a new `tests/test_tls.py`. Suite is at ~94% coverage (190 tests).
-- [ ] **P1 — Add tests for `realism_config.py` round-trip (`to_yaml`/`from_yaml`) and
-      weight-validation error paths.** Currently untested.
+- [x] **P1 — Add tests for `realism_config.py` round-trip (`to_yaml`/`from_yaml`) and
+      weight-validation error paths.** Added `tests/test_realism_config.py` (33 tests):
+      round-trip (default/custom/shift/empty/missing/invalid YAML), weight validation
+      (all weight structures, unknown agencies, missing keys, bounds, normalization),
+      and edge cases (display names, partial overrides, valid YAML output). Module now at
+      100% coverage.
 - [x] **P1 — Add tests for `tui.py` request building and `addresses.py` cache
       invalidation/corruption paths.** `test_tui.py` covers request building,
       defaults/customs, invalid-int/date field validation, aggregated
@@ -156,13 +160,17 @@ recommendation docs in `docs/`, and direct code review.
       `test_addresses.py` now covers `_load_cache` returning `None` for missing,
       corrupt, and below-minimum frames, plus `load_addresses` recovering from a
       corrupt cache and refetching when the cached frame is below the minimum.
-- [ ] **P2 — Clear the remaining pre-existing `ty` diagnostics and `docs/*` ruff errors.**
+- [x] **P2 — Clear the remaining pre-existing `ty` diagnostics and `docs/*` ruff errors.**
       `docs/` contains v2-era scripts (`synthgui.py`, `webgui.py`, `synth911.py`, …) that
       fail lint/type checks. The 8 `ty` diagnostics in `addresses.py` were fixed (Dec 2026)
-      and `docs/` is now excluded from ruff scope; remaining: add an architecture decision
-      note for the exclusion, and decide whether to move the scripts to `docs/archive/`.
-- [ ] **P2 — Add a CHANGELOG and version bump discipline** (semver), wired to the `0.1.0`
-      version in `pyproject.toml`.
+      and `docs/` is now excluded from ruff scope via `pyproject.toml`; `ty check src/` now
+      passes with zero diagnostics. The v2 reference scripts in `docs/` are intentionally
+      excluded — they are not part of the package.
+- [x] **P2 — Add a CHANGELOG and version bump discipline** (semver), wired to the `0.1.0`
+      version in `pyproject.toml`. Created `CHANGELOG.md` following Keep a Changelog format;
+      version `0.1.0` in `pyproject.toml`; all core features documented under [Unreleased] and
+      [0.1.0] sections. Future releases will follow semver with entries moved from
+      [Unreleased] to versioned sections on tag.
 
 ---
 
@@ -212,8 +220,12 @@ recommendation docs in `docs/`, and direct code review.
   schema version, generation timestamp) with every export for reproducibility/auditing.
 - **`config/example_params` parity.** Add a TOML example alongside JSON/YAML, and a
   params-driven CI regression run.
-- **Packaging/distribution.** Publish on PyPI and/or containerize; add a `uv.lock`-driven
-  Docker build and a `synth911gen3 serve` (FastAPI) entrypoint for a hosted API.
+- [x] **Packaging/distribution.** Publish on PyPI and/or containerize; add a `uv.lock`-driven
+      Docker build and a `synth911gen3 serve` (FastAPI) entrypoint for a hosted API.
+      Created `Dockerfile` (multi-stage build), `docker-compose.yml` (with API server and
+      generation job profiles), `.dockerignore`, added `fastapi`, `uvicorn`, `pydantic` to
+      dependencies, and new `synth911gen3-serve` entry point in `pyproject.toml` pointing to
+      `serve.py` with endpoints: `/health`, `/schema`, `/generate`, `/generate/stream`.
 - **Schema evolution** (pydantic models for `GenerationRequest`/`RealismConfig`) to
   formalize validation and produce versioned output schemas.
 - **Long-form user's guide.** `USERSGUIDE.md` / `REALISMGUIDE.md` currently cover quick

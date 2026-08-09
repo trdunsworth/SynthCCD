@@ -31,7 +31,7 @@ class RealismConfig:
     disposition_profiles: dict[str, list[tuple[str, float]]] = field(default_factory=dict)
     time_profiles: dict[str, dict[int, dict[str, int]]] = field(default_factory=dict)
     dispatch_init_fraction: dict[int, tuple[float, float]] = field(default_factory=dict)
-    phone_metrics: dict[str, float] = field(default_factory=dict)
+    phone_metrics: dict[str, float | list[float]] = field(default_factory=dict)
     hourly_weights: np.ndarray = field(default_factory=lambda: np.array([]))
     agency_names: dict[str, str] = field(default_factory=dict)
     shift_config: ShiftConfig = field(default_factory=ShiftConfig)
@@ -110,7 +110,12 @@ class RealismConfig:
                 )
 
         if "phone_metrics" in data:
-            config.phone_metrics = {str(k): float(v) for k, v in data["phone_metrics"].items()}
+            config.phone_metrics = {}
+            for k, v in data["phone_metrics"].items():
+                if isinstance(v, list):
+                    config.phone_metrics[str(k)] = [float(x) for x in v]
+                else:
+                    config.phone_metrics[str(k)] = float(v)
 
         if "hourly_weights" in data:
             hw = np.array(data["hourly_weights"], dtype=float)
@@ -188,13 +193,20 @@ class RealismConfig:
             "non_emergency_abandonment_rate",
             "max_abandonment_rate",
             "weekend_multiplier",
+            "nine_one_one_answer_time_mu",
+            "nine_one_one_answer_time_sigma",
+            "non_emergency_answer_time_mu",
+            "non_emergency_answer_time_sigma",
+            "answer_time_thresholds",
         }
         missing_phone_keys = required_phone_keys - set(self.phone_metrics)
         if missing_phone_keys:
             raise ValidationError(f"phone_metrics missing keys: {missing_phone_keys}")
-        if self.phone_metrics.get("max_abandonment_rate", 1.0) < 0 or self.phone_metrics.get("max_abandonment_rate", 1.0) > 1.0:
+        max_abandon = self.phone_metrics.get("max_abandonment_rate", 1.0)
+        if isinstance(max_abandon, (int, float)) and (max_abandon < 0 or max_abandon > 1.0):
             raise ValidationError("phone_metrics.max_abandonment_rate must be between 0 and 1")
-        if self.phone_metrics.get("min_hourly_volume", 0) < 0:
+        min_vol = self.phone_metrics.get("min_hourly_volume", 0)
+        if isinstance(min_vol, (int, float)) and min_vol < 0:
             raise ValidationError("phone_metrics.min_hourly_volume must be non-negative")
 
         for agency in self.agency_weights:

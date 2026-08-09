@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import httpx
 import overpy
@@ -27,7 +28,7 @@ class _FakeResponse:
 
     def raise_for_status(self) -> None:
         if self.status_code >= 400:
-            raise httpx.HTTPStatusError("error", request=httpx.Request("GET", "http://fake"), response=self)
+            raise httpx.HTTPStatusError("error", request=httpx.Request("GET", "http://fake"), response=self)  # type: ignore[arg-type]
 
 
 class _FakeClient:
@@ -37,14 +38,14 @@ class _FakeClient:
         self.search_calls = 0
         self.reverse_calls = 0
 
-    def get(self, url: str, **kwargs):
+    def get(self, url: str, **kwargs: Any):
         if "reverse" in url:
             self.reverse_calls += 1
             return _FakeResponse(self._reverse_payload)
         self.search_calls += 1
         return _FakeResponse(self._search_payload)
 
-    def post(self, url: str, **kwargs):
+    def post(self, url: str, **kwargs: Any):
         return _FakeResponse({}, 500)
 
 
@@ -57,7 +58,7 @@ class _SequencedClient:
         self.search_calls = 0
         self.reverse_calls = 0
 
-    def get(self, url: str, **kwargs):
+    def get(self, url: str, **kwargs: Any):
         if "reverse" in url:
             self.reverse_calls += 1
             return _FakeResponse(self._reverse_payload)
@@ -66,7 +67,7 @@ class _SequencedClient:
             return self._responses.pop(0)
         return _FakeResponse([], 200)
 
-    def post(self, url: str, **kwargs):
+    def post(self, url: str, **kwargs: Any):
         return _FakeResponse({}, 500)
 
 
@@ -210,7 +211,7 @@ def test_load_addresses_uses_real_addresses(tmp_path: Path) -> None:
         return _result_from_xml(elements)
 
     provider = OpenStreetMapAddressProvider(
-        client=_FakeClient(search_payload=search_payload),
+        client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
         cache_dir=tmp_path,
         query_runner=runner,
     )
@@ -235,7 +236,7 @@ def test_load_addresses_falls_back_to_named_streets(tmp_path: Path) -> None:
         return _result_from_xml(_way(1, name="Capitol Road") + _way(2, name="Main Street"))
 
     provider = OpenStreetMapAddressProvider(
-        client=_FakeClient(search_payload=search_payload),
+        client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
         cache_dir=tmp_path,
         query_runner=runner,
     )
@@ -258,7 +259,7 @@ def test_load_addresses_raises_when_too_few(tmp_path: Path) -> None:
         return _result_from_xml("")
 
     provider = OpenStreetMapAddressProvider(
-        client=_FakeClient(search_payload=search_payload),
+        client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
         cache_dir=tmp_path,
         query_runner=runner,
     )
@@ -283,7 +284,7 @@ def test_load_addresses_caches_results(tmp_path: Path) -> None:
         return _result_from_xml(elements)
 
     provider = OpenStreetMapAddressProvider(
-        client=_FakeClient(search_payload=search_payload),
+        client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
         cache_dir=tmp_path,
         query_runner=runner,
     )
@@ -401,14 +402,14 @@ def test_load_addresses_with_bbox_query(tmp_path: Path) -> None:
         return _result_from_xml(elements)
 
     provider = OpenStreetMapAddressProvider(
-        client=_FakeClient(reverse_payload=reverse_payload),
+        client=_FakeClient(reverse_payload=reverse_payload),  # type: ignore[arg-type]
         cache_dir=tmp_path,
         query_runner=runner,
     )
     addresses = provider.load_addresses("39.0,-94.7,39.15,-94.5")
 
     assert Address("201 Main St", "Midtown", "Kansas") in addresses
-    assert provider._client.reverse_calls == 1
+    assert provider._client.reverse_calls == 1  # type: ignore[attr-defined]
 
 
 def test_nominatim_retries_on_rate_limit(tmp_path: Path, monkeypatch) -> None:
@@ -432,7 +433,7 @@ def test_nominatim_retries_on_rate_limit(tmp_path: Path, monkeypatch) -> None:
         return _result_from_xml(elements)
 
     provider = OpenStreetMapAddressProvider(
-        client=client,
+        client=client,  # type: ignore[arg-type]
         cache_dir=tmp_path,
         query_runner=runner,
         nominatim_min_interval=0.0,
@@ -453,7 +454,7 @@ def test_nominatim_fails_after_exhausting_retries(tmp_path: Path, monkeypatch) -
         return _result_from_xml("")
 
     provider = OpenStreetMapAddressProvider(
-        client=client,
+        client=client,  # type: ignore[arg-type]
         cache_dir=tmp_path,
         query_runner=runner,
         max_retries=3,
@@ -476,14 +477,14 @@ def test_nominatim_enforces_min_request_interval(tmp_path: Path, monkeypatch) ->
         }
     ]
     provider = OpenStreetMapAddressProvider(
-        client=_FakeClient(search_payload=search_payload),
+        client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
         cache_dir=tmp_path,
         nominatim_min_interval=5.0,
     )
     provider._geocode_area("Kansas City, MO")
     provider._geocode_area("Kansas City, MO")
 
-    assert provider._client.search_calls == 2
+    assert provider._client.search_calls == 2  # type: ignore[attr-defined]
     assert any(sleep == pytest.approx(5.0, abs=1.0) for sleep in sleeps)
 
 

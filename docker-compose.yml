@@ -1,0 +1,58 @@
+version: "3.8"
+
+services:
+  synth911gen3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: synth911gen3:0.1.0
+    container_name: synth911gen3
+    ports:
+      - "8000:8000"
+    environment:
+      - SYNTH911_LOG_LEVEL=INFO
+      - SYNTH911_SYSTEM_TRUST=1
+    volumes:
+      # Persist OSM address cache
+      - synth911gen3-cache:/home/synth911/.cache/synth911gen3
+      # Persist generated output
+      - synth911gen3-output:/app/output
+      # Mount config files if needed
+      - ./config:/app/config:ro
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8000/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Optional: Run a one-off generation job
+  synth911gen3-generate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: synth911gen3:0.1.0
+    container_name: synth911gen3-generate
+    command: >
+      synth911gen3 generate
+      --rows 10000
+      --area "Kansas City, MO"
+      --format parquet
+      --output-dir /app/output
+      --output-stem kc_911
+    environment:
+      - SYNTH911_LOG_LEVEL=INFO
+      - SYNTH911_SYSTEM_TRUST=1
+    volumes:
+      - synth911gen3-cache:/home/synth911/.cache/synth911gen3
+      - synth911gen3-output:/app/output
+      - ./config:/app/config:ro
+    profiles:
+      - generate
+
+volumes:
+  synth911gen3-cache:
+    driver: local
+  synth911gen3-output:
+    driver: local

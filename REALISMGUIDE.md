@@ -136,7 +136,7 @@ dispatch_init_fraction:
   5: [1.00, 1.30]
 
 # Phone-metric factors for hourly call counts (volume fractions of base hourly
-# volume, abandonment rates, weekend multiplier)
+# volume, abandonment rates, weekend multiplier, and answer-time distributions)
 phone_metrics:
   min_hourly_volume: 2.0
   nine_one_one_received_fraction: 0.48
@@ -147,6 +147,11 @@ phone_metrics:
   non_emergency_abandonment_rate: 0.05
   max_abandonment_rate: 0.12
   weekend_multiplier: 1.12
+  nine_one_one_answer_time_mu: 1.80
+  nine_one_one_answer_time_sigma: 0.80
+  non_emergency_answer_time_mu: 1.70
+  non_emergency_answer_time_sigma: 0.80
+  answer_time_thresholds: [10, 15, 20, 40]
 
 # Diurnal call volume pattern (24 values for hours 0-23, will be normalized)
 hourly_weights:
@@ -215,7 +220,7 @@ shift_config:
 | `disposition_profiles` | Outcome codes per agency | Each agency sums to 1.0 |
 | `time_profiles` | Mean seconds for 7 time intervals per agency/priority | All 7 intervals required per priority |
 | `dispatch_init_fraction` | (lo, hi) fraction of the phone window before dispatch can begin, per priority | All 5 priorities, lo >= 0 and hi >= lo |
-| `phone_metrics` | Volume fractions, abandonment rates, and weekend multiplier for hourly call counts | All required keys; max_abandonment_rate in [0, 1] |
+| `phone_metrics` | Volume fractions, abandonment rates, weekend multiplier, and answer-time distributions for hourly call counts | All required keys; max_abandonment_rate in [0, 1] |
 | `hourly_weights` | 24-hour call volume pattern | 24 values, auto-normalized |
 | `shift_config` | Crew rotation pattern and per-shift hours/rotation/staffing | Unique shift names, every rotation group covers all 24 hours |
 
@@ -430,6 +435,32 @@ binomial on the received counts:
 | `non_emergency_abandonment_rate` | 0.05 | Non-emergency abandonment rate |
 | `max_abandonment_rate` | 0.12 | Cap applied to abandonment draws |
 | `weekend_multiplier` | 1.12 | Volume multiplier on Fri/Sat |
+| `nine_one_one_answer_time_mu` | 1.80 | Lognormal μ for 9-1-1 answer time (seconds) |
+| `nine_one_one_answer_time_sigma` | 0.80 | Lognormal σ for 9-1-1 answer time |
+| `non_emergency_answer_time_mu` | 1.70 | Lognormal μ for non-emergency answer time (seconds) |
+| `non_emergency_answer_time_sigma` | 0.80 | Lognormal σ for non-emergency answer time |
+| `answer_time_thresholds` | [10, 15, 20, 40] | Seconds thresholds for % answered columns |
+
+### Answer Time Percentages
+
+For each hour the generator computes the cumulative probability of a call being
+answered within the configured thresholds using the lognormal CDF. Defaults
+produce approximately these answer rates:
+
+| Threshold | Default 9-1-1 % | Default Non-Emergency % |
+|-----------|-----------------|-------------------------|
+| 10 s | 74% | 77% |
+| 15 s | 87% | 90% |
+| 20 s | 93% | 95% |
+| 40 s | 99% | 99% |
+
+These defaults target ≥87% of 9-1-1 calls answered within 15 seconds and ≥77%
+of non-emergency calls answered within 10 seconds. National standards
+recommend ≥90% of 9-1-1 calls answered within 15 seconds and ≥95% within
+20 seconds; the 9-1-1 default is slightly below the 15-second standard but
+exceeds it at 20 seconds. Adjust `nine_one_one_answer_time_mu`/`sigma` to
+match your center's performance. Non-emergency standards are in development;
+the defaults model a faster answer profile than previous versions.
 
 ### Call Reception Methods
 
