@@ -24,8 +24,9 @@ from textual.widgets import (
 from .addresses import OpenStreetMapAddressProvider
 from .app import Synth911Application
 from .config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
-from .constants import DEFAULT_AREA_QUERY, DEFAULT_MAX_MEMORY_BYTES, DEFAULT_OUTPUT_DIR, DEFAULT_OUTPUT_STEM
+from .constants import DEFAULT_AREA_QUERY, DEFAULT_COUNTRY, DEFAULT_MAX_MEMORY_BYTES, DEFAULT_OUTPUT_DIR, DEFAULT_OUTPUT_STEM
 from .domain import GenerationResult
+from .emergency_numbers import SUPPORTED_COUNTRIES
 from .exceptions import AddressLookupError, ExportError, ValidationError
 from .params import build_request_from_params, load_params_file
 from .shifts import DEFAULT_SHIFT_PRESET, SHIFT_PRESETS
@@ -98,6 +99,10 @@ _HELP_TEXT = (
     "                     2x12h-2shift, 3x8h-3shift, or 4x10h-4shift.\n"
     "  Max memory         Per-chunk memory budget in bytes for CSV/Parquet\n"
     "                     streaming (blank uses the 2 GiB default).\n"
+    "  Country            ISO country code selecting emergency numbers (default: US).\n"
+    "  Emergency numbers  Comma-separated override of the emergency lines to model\n"
+    "                     (blank uses the country registry, e.g. 999,112).\n"
+    "  10-digit lines     Include 10-digit direct-dial emergency lines.\n"
     "  Params file        JSON/YAML/TOML preset; Load Params fills the fields above.\n"
     "  Config file        YAML realism configuration file (optional).\n\n"
     "KEYS\n"
@@ -302,6 +307,35 @@ class Synth911Tui(App[None]):
                                     "end_date",
                                     Input("", id="end_date", placeholder="optional"),
                                 )
+                            yield _section_title("Emergency Numbers")
+                            with Grid(classes="fields"):
+                                yield _field(
+                                    "Country",
+                                    "country",
+                                    Select(
+                                        [(code, code) for code in SUPPORTED_COUNTRIES],
+                                        value=DEFAULT_COUNTRY,
+                                        id="country",
+                                    ),
+                                )
+                                yield _field(
+                                    "Emergency numbers",
+                                    "emergency_numbers",
+                                    Input(
+                                        "",
+                                        id="emergency_numbers",
+                                        placeholder="override, e.g. 999,112",
+                                    ),
+                                )
+                                yield _field(
+                                    "Include 10-digit lines",
+                                    "include_10_digit_emergency",
+                                    Select(
+                                        [("No", "0"), ("Yes", "1")],
+                                        value="0",
+                                        id="include_10_digit_emergency",
+                                    ),
+                                )
                             yield _section_title("Personnel")
                             with Grid(classes="fields"):
                                 yield _field(
@@ -413,6 +447,13 @@ class Synth911Tui(App[None]):
         self.query_one("#max_memory_bytes", Input).value = (
             str(request.max_memory_bytes) if request.max_memory_bytes is not None else ""
         )
+        self.query_one("#country", Select).value = request.country
+        self.query_one("#emergency_numbers", Input).value = (
+            request.emergency_numbers if request.emergency_numbers else ""
+        )
+        self.query_one("#include_10_digit_emergency", Select).value = (
+            "1" if request.include_10_digit_emergency else "0"
+        )
         self.query_one("#config", Input).value = (
             str(request.realism_config_path) if request.realism_config_path else ""
         )
@@ -508,6 +549,13 @@ class Synth911Tui(App[None]):
         realism_config_path = Path(config_raw) if config_raw else None
         shift_preset_value = self.query_one("#shift_preset", Select).value
         shift_preset: str | None = str(shift_preset_value) if shift_preset_value else None
+        country_value = self.query_one("#country", Select).value
+        country = str(country_value) if country_value else DEFAULT_COUNTRY
+        emergency_numbers_raw = self.query_one("#emergency_numbers", Input).value.strip()
+        emergency_numbers: str | None = emergency_numbers_raw or None
+        include_10_digit_emergency = (
+            str(self.query_one("#include_10_digit_emergency", Select).value) == "1"
+        )
 
         return GenerationRequest(
             rows=rows,
@@ -525,6 +573,9 @@ class Synth911Tui(App[None]):
             shift_preset=shift_preset,
             realism_config_path=realism_config_path,
             max_memory_bytes=max_memory_bytes,
+            country=country,
+            emergency_numbers=emergency_numbers,
+            include_10_digit_emergency=include_10_digit_emergency,
         )
 
     def _generate(self) -> None:

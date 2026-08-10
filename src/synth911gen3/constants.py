@@ -7,6 +7,7 @@ DEFAULT_AREA_QUERY = "Kansas City, MO"
 DEFAULT_OUTPUT_DIR = "output"
 DEFAULT_OUTPUT_STEM = "synthetic_911"
 DEFAULT_LOCALE = "en_US"
+DEFAULT_COUNTRY = "US"
 
 # When ``max_memory_bytes`` is unset, incident CSV/Parquet generation is
 # chunked once the estimated in-memory DataFrame would exceed this budget.

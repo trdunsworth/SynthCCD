@@ -102,6 +102,7 @@ def _hash_realism_config(realism: RealismConfig) -> str:
         "time_profiles": {k: {str(pk): pv for pk, pv in v.items()} for k, v in realism.time_profiles.items()},
         "dispatch_init_fraction": {str(k): [lo, hi] for k, (lo, hi) in realism.dispatch_init_fraction.items()},
         "phone_metrics": realism.phone_metrics,
+        "phone_metric_lines": realism.phone_metric_lines,
         "hourly_weights": realism.hourly_weights.tolist(),
         "agency_names": realism.agency_names,
         "shift_config": realism.shift_config.to_dict(),

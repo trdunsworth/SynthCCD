@@ -244,6 +244,28 @@ uv run synth911gen3 generate \
 
 > **Note**: The `--rows` parameter for phone metrics controls the *base hourly call volume* (calls per hour), not the number of output rows. The number of output rows is determined by the date range (`--start-date` to `--end-date`, one row per hour).
 
+**Step 7: Model non-US emergency numbers**
+
+The registry selects emergency lines by country; see [Emergency Number Registry](#emergency-number-registry). For example, model a UK center (999 + 112):
+
+```bash
+uv run synth911gen3 generate \
+  --dataset phone \
+  --country GB \
+  --start-date 2026-08-04 \
+  --end-date 2026-08-10 \
+  --format parquet
+```
+
+The output columns now use `emergency_999_*` and `emergency_112_*` prefixes instead of `nine_one_one_*`:
+
+```python
+df = pd.read_parquet("output/synthetic_911_hourly_call_counts.parquet")
+print(df.columns.tolist())
+# ['hour_start', 'hour_of_day', 'emergency_999_calls_received', 'emergency_112_calls_received',
+#  'non_emergency_calls_received', 'outbound_calls_placed', 'emergency_999_calls_abandoned', ...]
+```
+
 ---
 
 ### Tutorial 2: Tuning Realism to Your Center
@@ -534,6 +556,9 @@ uv run synth911gen3 generate [OPTIONS]
 | `--shift-preset` | | *(realism config)* | Shift structure preset: `2x12h-4shift-14day`, `2x12h-2shift`, `3x8h-3shift`, or `4x10h-4shift` |
 | `--max-memory-bytes` | | `2147483648` | Approximate in-memory budget per incident chunk in bytes; CSV/Parquet exports stream in chunks to stay under it |
 | `--config` | | *(none)* | Path to YAML realism configuration file |
+| `--country` | | `US` | ISO 3166-1 alpha-2 country code selecting the emergency-number registry (see [Emergency Number Registry](#emergency-number-registry)) |
+| `--emergency-numbers` | | *(registry)* | Comma-separated emergency numbers to model, overriding the country registry (e.g. `"999,112"`) |
+| `--include-10-digit-emergency` | | *(off)* | Include 10-digit direct-dial emergency lines from the registry |
 | `--schema` | | *(off)* | Print the generated schema (columns + types) for the selected datasets; no data is generated and no addresses are fetched |
 | `--dry-run` | | *(off)* | Print the schema plus a few sample rows; no files are written and no addresses are fetched |
 
@@ -631,6 +656,9 @@ The status panel and help tab explain each field.
 | Dispatcher pool size | Unique dispatcher names (default: 10) |
 | Shift preset | Shift structure preset (default: 2x12h-4shift-14day) |
 | Max memory (bytes) | Per-chunk memory budget for CSV/Parquet streaming (blank = 2 GiB default) |
+| Country | ISO 3166-1 alpha-2 code selecting the emergency-number registry (default: US) |
+| Emergency numbers | Comma-separated override of the emergency lines to model (blank uses the country registry, e.g. `999,112`) |
+| 10-digit lines | Include 10-digit direct-dial emergency lines from the registry |
 | Params file | JSON/YAML/TOML preset; Load Params fills the fields |
 | Realism config file | YAML realism configuration (optional) |
 
@@ -782,6 +810,38 @@ docker run --rm   -v synth911gen3-cache:/home/synth911/.cache/synth911gen3   -v 
 | `calltaker_pool_size` | int | 12 | Unique calltaker names to generate |
 | `dispatcher_pool_size` | int | 10 | Unique dispatcher names to generate |
 | `shift_preset` | str | None | Shift structure preset name (see [Shift Structures](#shift-structures)); when None the realism config's `shift_config` is used |
+
+### Emergency Number Registry
+
+The phone-metrics dataset models the phone lines that carry emergency traffic in
+a country. A built-in registry maps ISO 3166-1 alpha-2 country codes to the
+emergency short codes dialed there; US/Canada (`911`) is the default. Selecting a
+country controls which lines are modeled and how the hourly phone-metrics columns
+are named.
+
+| Parameter | CLI Flag | Default | Description |
+|-----------|----------|---------|-------------|
+| `country` | `--country` | `US` | ISO 3166-1 alpha-2 code selecting the registry entry (e.g. `GB`, `IE`, `DE`, `FR`, `AU`, `NZ`) |
+| `emergency_numbers` | `--emergency-numbers` | *(registry)* | Comma-separated emergency numbers to model; overrides the country registry entirely (e.g. `"999,112"`) |
+| `include_10_digit_emergency` | `--include-10-digit-emergency` | false | Append the country's registered 10-digit direct-dial lines alongside the short codes |
+
+```bash
+# Model UK emergency lines (999 + 112) instead of US 911
+uv run synth911gen3 generate --dataset phone --country GB --start-date 2026-01-01 --end-date 2026-01-07
+
+# Override with an explicit number set
+uv run synth911gen3 generate --dataset phone --emergency-numbers "999,112"
+
+# Add 10-digit direct-dial lines on top of the registry
+uv run synth911gen3 generate --dataset phone --country US --include-10-digit-emergency
+```
+
+The registry contains short codes for US, CA, GB, IE, FR, DE, AU, NZ, NL, IT, JP,
+KR, ES, CH, SE, NO, DK, FI, BE, IN, BR, ZA, RU, CN, and HK (see the
+[Realism Guide](REALISMGUIDE.md) for the full table). The optional 10-digit
+direct-dial entries are illustrative placeholders reserved for fictional use and
+should be replaced with real agency numbers (or an `--emergency-numbers`
+override) for production datasets.
 
 ### Shift Structures
 
@@ -950,6 +1010,9 @@ shift_preset: "4x10h-4shift"
 | `shift_preset` | | str | Shift structure preset name |
 | `max_memory_bytes` | | int | Per-chunk memory budget for CSV/Parquet streaming |
 | `realism_config_path` | `config` | str | Path to YAML realism config |
+| `country` | | str | ISO 3166-1 alpha-2 code selecting the emergency-number registry (see [Emergency Number Registry](#emergency-number-registry)) |
+| `emergency_numbers` | | str | Comma-separated emergency numbers, overriding the country registry |
+| `include_10_digit_emergency` | | bool | Include 10-digit direct-dial emergency lines |
 
 ### Precedence
 
@@ -1270,6 +1333,11 @@ uv run synth911gen3 generate --rows 5000000 --format parquet --max-memory-bytes 
 
 ### Hourly Phone Metrics Dataset
 
+The emergency-line columns are derived from the resolved emergency-number
+registry (see [Emergency Number Registry](#emergency-number-registry)): one set
+of received/abandoned/answered columns per line. With the default US registry the
+column set is:
+
 | Column | Type | Description |
 |--------|------|-------------|
 | `hour_start` | datetime | Hour interval start (UTC) |
@@ -1287,6 +1355,13 @@ uv run synth911gen3 generate --rows 5000000 --format parquet --max-memory-bytes 
 | `non_emergency_answered_15s_pct` | float | % of non-emergency calls answered within 15 seconds |
 | `non_emergency_answered_20s_pct` | float | % of non-emergency calls answered within 20 seconds |
 | `non_emergency_answered_40s_pct` | float | % of non-emergency calls answered within 40 seconds |
+
+`911` keeps the legacy `nine_one_one` column prefix for schema stability; every
+other number uses an `emergency_<digits>` prefix. For example, `--country GB`
+produces `emergency_999_calls_received`, `emergency_999_calls_abandoned`,
+`emergency_999_answered_15s_pct`, and the same set for `emergency_112`. The
+non-emergency line and the outbound counter are always present regardless of
+country.
 
 ---
 

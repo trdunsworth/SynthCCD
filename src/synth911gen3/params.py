@@ -70,6 +70,10 @@ def coerce_param(key: str, value: Any) -> Any:
         return date.fromisoformat(str(value))
     if key in ("rows", "seed", "calltaker_pool_size", "dispatcher_pool_size", "max_memory_bytes"):
         return int(value)
+    if key in ("include_10_digit_emergency",):
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in ("1", "true", "yes", "on")
     return value
 
 

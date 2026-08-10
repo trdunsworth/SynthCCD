@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 from .constants import (
     DEFAULT_AREA_QUERY,
+    DEFAULT_COUNTRY,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_OUTPUT_STEM,
     DEFAULT_ROWS,
@@ -86,6 +87,16 @@ class DispatchInitFraction(BaseModel):
         return self
 
 
+class LineMetrics(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    received_fraction: float | None = Field(default=None, ge=0, le=1)
+    abandonment_rate: float | None = Field(default=None, ge=0, le=1)
+    night_abandonment_increment: float | None = Field(default=None, ge=0, le=1)
+    answer_time_mu: float | None = None
+    answer_time_sigma: float | None = Field(default=None, gt=0)
+
+
 class PhoneMetrics(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -103,6 +114,7 @@ class PhoneMetrics(BaseModel):
     non_emergency_answer_time_mu: float
     non_emergency_answer_time_sigma: float = Field(gt=0)
     answer_time_thresholds: list[float] = Field(min_length=1)
+    lines: dict[str, LineMetrics] = Field(default_factory=dict)
 
 
 class ShiftConfig(BaseModel):
@@ -212,6 +224,9 @@ class GenerationRequest(BaseModel):
     realism_config: RealismConfig | None = Field(default=None, description="Realism configuration")
     realism_config_path: Path | None = Field(default=None, description="Path to realism config YAML")
     max_memory_bytes: int | None = Field(default=None, gt=0, description="Memory budget for chunked export")
+    country: str = Field(default=DEFAULT_COUNTRY, min_length=1, description="ISO 3166-1 alpha-2 country code")
+    emergency_numbers: str | None = Field(default=None, description="Comma-separated emergency numbers (overrides registry)")
+    include_10_digit_emergency: bool = Field(default=False, description="Include 10-digit direct-dial emergency lines")
     db_dialect: DatabaseDialect | None = Field(default=None, description="Database dialect")
     db_host: str | None = Field(default=None, description="Database host")
     db_port: int | None = Field(default=None, gt=0, lt=65536, description="Database port")

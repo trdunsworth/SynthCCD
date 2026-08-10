@@ -5,7 +5,14 @@ from datetime import date
 from enum import StrEnum
 from pathlib import Path
 
-from .constants import DEFAULT_AREA_QUERY, DEFAULT_OUTPUT_DIR, DEFAULT_OUTPUT_STEM, DEFAULT_ROWS
+from .constants import (
+    DEFAULT_AREA_QUERY,
+    DEFAULT_COUNTRY,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_OUTPUT_STEM,
+    DEFAULT_ROWS,
+)
+from .emergency_numbers import EmergencyNumber, resolve_emergency_numbers
 from .exceptions import ValidationError
 from .realism_config import RealismConfig
 from .shifts import SHIFT_PRESETS
@@ -66,6 +73,10 @@ class GenerationRequest:
     realism_config: RealismConfig | None = None
     realism_config_path: Path | None = None
     max_memory_bytes: int | None = None
+    # Emergency-number registry selection
+    country: str = DEFAULT_COUNTRY
+    emergency_numbers: str | None = None
+    include_10_digit_emergency: bool = False
     # Database export options
     db_dialect: DatabaseDialect | None = None
     db_host: str | None = None
@@ -95,6 +106,11 @@ class GenerationRequest:
             return RealismConfig.from_yaml(self.realism_config_path)
         return RealismConfig()
 
+    def resolved_emergency_numbers(self) -> list[EmergencyNumber]:
+        return resolve_emergency_numbers(
+            self.country, self.emergency_numbers, self.include_10_digit_emergency
+        )
+
     def validate(self) -> None:
         if self.rows <= 0:
             raise ValidationError("rows must be greater than zero.")
@@ -114,6 +130,10 @@ class GenerationRequest:
                 f"Unknown shift_preset {self.shift_preset!r}. Available presets: "
                 f"{', '.join(sorted(SHIFT_PRESETS))}."
             )
+        try:
+            self.resolved_emergency_numbers()
+        except ValueError as exc:
+            raise ValidationError(str(exc)) from exc
         # Validate realism config if provided
         self.get_realism_config()
 

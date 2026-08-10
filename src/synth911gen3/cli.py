@@ -192,6 +192,23 @@ def generate(
         readable=True,
         help="Path to YAML realism configuration file.",
     ),
+    country: str | None = typer.Option(
+        None,
+        "--country",
+        show_default=False,
+        help="ISO 3166-1 alpha-2 country code selecting emergency numbers (default: US).",
+    ),
+    emergency_numbers: str | None = typer.Option(
+        None,
+        "--emergency-numbers",
+        show_default=False,
+        help="Comma-separated emergency numbers to model, overriding the country registry (e.g. \"999,112\").",
+    ),
+    include_10_digit_emergency: bool = typer.Option(
+        False,
+        "--include-10-digit-emergency",
+        help="Include 10-digit direct-dial emergency lines from the registry.",
+    ),
     schema: bool = typer.Option(
         False,
         "--schema",
@@ -234,6 +251,12 @@ def generate(
         cli_params["max_memory_bytes"] = max_memory_bytes
     if config is not None:
         cli_params["realism_config_path"] = config
+    if country is not None:
+        cli_params["country"] = country
+    if emergency_numbers is not None:
+        cli_params["emergency_numbers"] = emergency_numbers
+    if include_10_digit_emergency:
+        cli_params["include_10_digit_emergency"] = True
 
     file_params = load_params_file(params) if params is not None else {}
     request = build_request_from_params(file_params, cli_params)

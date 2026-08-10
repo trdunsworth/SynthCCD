@@ -325,4 +325,4 @@ recommendation docs in `docs/`, and direct code review.
 ### Documentation
 - [ ] **P2 — Video tutorials.** Short screen-capture demos for tutorials.
 - [ ] **P2 — Architecture decision records (ADRs).** Document key design decisions (vectorization approach, pydantic vs dataclass, etc.).
-- [ ] **P2 — Contribution guide.** `CONTRIBUTING.md` with development setup, code style, PR process.
+- [x] **P2 — Contribution guide.** Added `CONTRIBUTING.md` covering development setup, TLS-proxy notes, code style (ruff/ty), testing and coverage gates, documentation maintenance, commit discipline, the PR process, and the permissions summary.

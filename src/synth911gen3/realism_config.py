@@ -33,6 +33,7 @@ class RealismConfig:
     time_profiles: dict[str, dict[int, dict[str, int]]] = field(default_factory=dict)
     dispatch_init_fraction: dict[int, tuple[float, float]] = field(default_factory=dict)
     phone_metrics: dict[str, float | list[float]] = field(default_factory=dict)
+    phone_metric_lines: dict[str, dict[str, float]] = field(default_factory=dict)
     hourly_weights: np.ndarray = field(default_factory=lambda: np.array([]))
     agency_names: dict[str, str] = field(default_factory=dict)
     shift_config: ShiftConfig = field(default_factory=ShiftConfig)
@@ -116,7 +117,12 @@ class RealismConfig:
         if "phone_metrics" in data:
             config.phone_metrics = {}
             for k, v in data["phone_metrics"].items():
-                if isinstance(v, list):
+                if k == "lines":
+                    config.phone_metric_lines = {
+                        str(num): {str(key): float(val) for key, val in lines.items()}
+                        for num, lines in v.items()
+                    }
+                elif isinstance(v, list):
                     config.phone_metrics[str(k)] = [float(x) for x in v]
                 else:
                     config.phone_metrics[str(k)] = float(v)
@@ -218,6 +224,29 @@ class RealismConfig:
         if isinstance(min_vol, (int, float)) and min_vol < 0:
             raise ValidationError("phone_metrics.min_hourly_volume must be non-negative")
 
+        _PHONE_LINE_KEYS = {
+            "received_fraction",
+            "abandonment_rate",
+            "night_abandonment_increment",
+            "answer_time_mu",
+            "answer_time_sigma",
+        }
+        for number, overrides in self.phone_metric_lines.items():
+            if not str(number).strip():
+                raise ValidationError("phone_metric_lines key must not be empty")
+            unknown = set(overrides) - _PHONE_LINE_KEYS
+            if unknown:
+                raise ValidationError(
+                    f"phone_metric_lines for {number} has unknown key(s): {', '.join(sorted(unknown))}"
+                )
+            for key, value in overrides.items():
+                if not isinstance(value, (int, float)):
+                    raise ValidationError(f"phone_metric_lines for {number}.{key} must be numeric")
+                if key in ("received_fraction", "abandonment_rate", "night_abandonment_increment") and not 0 <= float(value) <= 1:
+                    raise ValidationError(f"phone_metric_lines for {number}.{key} must be between 0 and 1")
+                if key == "answer_time_sigma" and float(value) <= 0:
+                    raise ValidationError(f"phone_metric_lines for {number}.{key} must be greater than 0")
+
         for agency in self.agency_weights:
             if agency not in self.agency_names:
                 raise ValidationError(f"Agency name mapping missing for: {agency}")
@@ -236,7 +265,7 @@ class RealismConfig:
             "disposition_profiles": {k: [[p, w] for p, w in v] for k, v in self.disposition_profiles.items()},
             "time_profiles": {k: {str(pk): pv for pk, pv in v.items()} for k, v in self.time_profiles.items()},
             "dispatch_init_fraction": {str(k): [lo, hi] for k, (lo, hi) in self.dispatch_init_fraction.items()},
-            "phone_metrics": self.phone_metrics,
+            "phone_metrics": self._phone_metrics_for_yaml(),
             "hourly_weights": self.hourly_weights.tolist(),
             "agency_names": self.agency_names,
             "shift_config": self.shift_config.to_dict(),
@@ -244,6 +273,12 @@ class RealismConfig:
         }
         with path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(data, f, sort_keys=False, default_flow_style=None)
+
+    def _phone_metrics_for_yaml(self) -> dict[str, Any]:
+        data: dict[str, Any] = dict(self.phone_metrics)
+        if self.phone_metric_lines:
+            data["lines"] = {num: dict(over) for num, over in self.phone_metric_lines.items()}
+        return data
 
     def get_agency_display_name(self, agency: str) -> str:
         return self.agency_names.get(agency, agency)
