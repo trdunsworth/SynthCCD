@@ -389,11 +389,11 @@ and 2 dispatchers. This same structure is used when no `--shift-preset` or
 
 ### Problem Natures (Weighted by Agency)
 
-**LAW** (30): Shots Fired, Burglary In Progress, Vehicle Collision w/ Injury, Assault, Reckless Driving, Weapons Violation, DUI / Impaired Driver, Domestic Disturbance, Missing Person, Burglary, Drug/Narcotic Violation, Motor Vehicle Theft, Robbery, Disorderly Conduct, Theft Report, Burglary Alarm, Traffic Crash, Fraud, Harassment, Shoplifting, Vandalism, Trespass, Suspicious Person, Welfare Check, Noise Complaint, Traffic Stop, Animal Complaint, Found Property, Animal Bite, Public Assist
+**LAW** (33): Shots Fired, Burglary In Progress, Vehicle Collision w/ Injury, Assault, Reckless Driving, Weapons Violation, DUI / Impaired Driver, Domestic Disturbance, Missing Person, Burglary, Drug/Narcotic Violation, Motor Vehicle Theft, Robbery, Disorderly Conduct, Theft Report, Burglary Alarm, Traffic Crash, Fraud, Harassment, Shoplifting, Vandalism, Trespass, Suspicious Person, Welfare Check, Noise Complaint, Traffic Stop, Animal Complaint, Found Property, Animal Bite, Public Assist, **Assist Fire**, **Assist EMS**
 
-**FIRE** (20): Fire Alarm, Smoke Investigation, Medical Assist, Structure Fire, Vehicle Fire, Cooking Fire, Brush/Grass Fire, Gas Leak, CO Investigation, Hazardous Condition, Rescue Call, Mutual Aid, Odor Investigation, Overheat Investigation, Electrical Wiring Problem, Lockout / Public Service, Water Rescue, Vehicle Extrication, Assist Police, Elevator Rescue
+**FIRE** (22): Fire Alarm, Smoke Investigation, Medical Assist, Structure Fire, Vehicle Fire, Cooking Fire, Brush/Grass Fire, Gas Leak, CO Investigation, Hazardous Condition, Rescue Call, Mutual Aid, Odor Investigation, Overheat Investigation, Electrical Wiring Problem, Lockout / Public Service, Water Rescue, Vehicle Extrication, Assist Police, Elevator Rescue, **Assist EMS**
 
-**EMS** (22): Chest Pain, Difficulty Breathing, Fall Injury, Motor Vehicle Crash, Sick Person, Unconscious Person, Seizure, Altered Mental Status, Abdominal Pain, Overdose, Psychiatric Emergency, Stroke, Diabetic Problem, Heart Problems, Allergic Reaction, Hemorrhage / Bleeding, Traumatic Injury, Head Injury, Choking, Heat/Cold Exposure, Pregnancy / Childbirth, Animal Bite
+**EMS** (24): Chest Pain, Difficulty Breathing, Fall Injury, Motor Vehicle Crash, Sick Person, Unconscious Person, Seizure, Altered Mental Status, Abdominal Pain, Overdose, Psychiatric Emergency, Stroke, Diabetic Problem, Heart Problems, Allergic Reaction, Hemorrhage / Bleeding, Traumatic Injury, Head Injury, Choking, Heat/Cold Exposure, Pregnancy / Childbirth, Animal Bite, **Assist Police**, **Assist Fire**
 
 > The problem vocabulary is keyed by agency and **priority pool**, so low-acuity
 > problems do not appear at urgent priorities (and vice versa).
@@ -488,3 +488,391 @@ the defaults model a faster answer profile than previous versions.
 | CN-Cancellation | 4% | 5% | 5% |
 | SUP-Supplement | 1% | 1% | 2% |
 | ACOR-Animal Control | 2% |   |   |
+
+### Seasonal Multipliers
+
+Problem type likelihood varies by season (Winter/Spring/Summer/Fall) through configurable multipliers applied per-incident based on call month. Default multipliers:
+
+| Problem Type | Winter | Spring | Summer | Fall |
+|--------------|--------|--------|--------|------|
+| **EMS** | | | | |
+| Heat/Cold Exposure | 1.5 | 0.8 | 2.0 | 0.8 |
+| Hypothermia | 3.0 | 0.5 | 0.1 | 1.0 |
+| Heat Exhaustion | 0.1 | 0.5 | 3.0 | 0.5 |
+| Sick Person | 1.2 | 1.0 | 0.9 | 1.1 |
+| Fall Injury | 1.3 | 0.9 | 0.8 | 1.1 |
+| Motor Vehicle Crash | 1.2 | 1.0 | 1.1 | 1.1 |
+| Cardiac Arrest | 1.1 | 1.0 | 0.9 | 1.0 |
+| **FIRE** | | | | |
+| Structure Fire | 1.3 | 0.9 | 0.8 | 1.1 |
+| Brush/Grass Fire | 0.3 | 1.2 | 2.0 | 1.5 |
+| Cooking Fire | 1.2 | 1.0 | 0.9 | 1.3 |
+| Chimney Fire | 2.5 | 0.5 | 0.1 | 1.5 |
+| Vehicle Fire | 1.1 | 1.0 | 1.1 | 1.0 |
+| Mutual Aid | 1.1 | 1.0 | 1.2 | 1.1 |
+| **LAW** | | | | |
+| DUI / Impaired Driver | 1.3 | 1.0 | 1.2 | 1.1 |
+| Domestic Disturbance | 1.1 | 1.0 | 1.0 | 1.1 |
+| Burglary | 1.1 | 0.9 | 1.0 | 1.1 |
+| Motor Vehicle Theft | 1.1 | 1.0 | 1.1 | 1.0 |
+| Reckless Driving | 1.2 | 1.0 | 1.1 | 1.1 |
+| Disorderly Conduct | 1.0 | 1.1 | 1.2 | 1.0 |
+| Noise Complaint | 0.8 | 1.0 | 1.3 | 1.1 |
+| Suspicious Person | 1.0 | 1.0 | 1.1 | 1.0 |
+| Shots Fired | 1.1 | 1.0 | 1.2 | 1.1 |
+| Shoplifting | 1.3 | 0.9 | 0.9 | 1.2 |
+| Vandalism | 0.9 | 1.1 | 1.2 | 1.1 |
+| Trespass | 0.9 | 1.0 | 1.1 | 1.2 |
+| Animal Complaint | 0.8 | 1.2 | 1.3 | 1.1 |
+| Animal Bite | 0.8 | 1.2 | 1.3 | 1.0 |
+| Welfare Check | 1.2 | 1.0 | 0.9 | 1.1 |
+| Missing Person | 1.1 | 1.0 | 1.1 | 1.0 |
+
+> Multipliers > 1.0 increase likelihood in that season; < 1.0 decrease it. The generator applies multipliers per-incident based on the call's month, then re-normalizes weights within each agency/priority pool. Override via the `seasonal_multipliers` section in the realism YAML (mapping problem name → list of 4 multipliers). Unlisted problem types default to `[1.0, 1.0, 1.0, 1.0]`.
+
+---
+
+## Geospatial Exports
+
+Incident data can be exported with geographic coordinates (latitude/longitude) derived from OpenStreetMap address data for use in GIS and mapping applications.
+
+### Coordinate Sources
+
+- **Real OSM addresses**: When Overpass returns elements with `addr:housenumber` + `addr:street`, their native lat/lon coordinates are captured (nodes have direct lat/lon; ways use their center point).
+- **Synthesized addresses**: When OSM lacks house numbers, the generator falls back to named streets with synthesized house numbers. These receive `0.0, 0.0` coordinates and are excluded from geospatial exports.
+
+### Output Formats
+
+| Format | Extension | Geometry | CRS | Notes |
+|--------|-----------|----------|-----|-------|
+| `geojson` | `.geojson` | Point | EPSG:4326 (WGS84) | Full attribute fidelity; RFC 7946 compliant |
+| `shapefile` | `.shp` + sidecars | Point | EPSG:4326 (WGS84) | Field names truncated to 10 chars; requires `geopandas` + `shapely` |
+
+### Usage
+
+```bash
+# GeoJSON (no extra dependencies)
+uv run synth911gen3 generate --format geojson --rows 50000 --area "Portland, OR"
+
+# Shapefile (requires optional deps)
+uv add geopandas shapely
+uv run synth911gen3 generate --format shapefile --rows 50000 --area "Portland, OR"
+```
+
+### Schema
+
+Each exported feature contains:
+
+- **Geometry**: Point `[longitude, latitude]` in WGS84
+- **Properties**: All incident columns except `latitude`/`longitude` (moved to geometry)
+
+The hourly phone metrics dataset has no spatial component and is exported as JSON alongside the geospatial incidents file.
+
+---
+
+## Realism Tuning Guide
+
+This section provides a systematic approach to calibrating synth911gen3 to match your specific 9-1-1 center's operational characteristics.
+
+### Tuning Workflow
+
+```
+┌─────────────────┐
+│ 1. Export real  │
+│    CAD data     │
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│ 2. Compute      │
+│    statistics   │
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│ 3. Create       │
+│    config YAML  │
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│ 4. Generate     │
+│    test data    │
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│ 5. Compare &    │
+│    iterate      │
+└────────┬────────┘
+         ▼
+┌─────────────────┐
+│ 6. Save final   │
+│    config       │
+└─────────────────┘
+```
+
+### Step 1: Export Real CAD Data
+
+Export at least 6 months of incident data (1+ year preferred for seasonal patterns) with these fields:
+
+| Field | Purpose |
+|-------|---------|
+| `incident_id` | Row count verification |
+| `agency` | Agency distribution |
+| `priority` | Priority distribution per agency |
+| `problem_nature` | Problem type frequencies |
+| `call_received_ts` | Diurnal/seasonal patterns |
+| `call_answered_ts` | Pickup delay |
+| `queue_ts` | Interview duration |
+| `dispatch_ts` | Dispatch queue time |
+| `enroute_ts` | Turnout time |
+| `arrived_ts` | Travel time |
+| `cleared_ts` | On-scene duration |
+| `closed_ts` | Closeout time |
+| `disposition` | Disposition frequencies |
+| `call_reception` | Reception method breakdown |
+| `call_taker` | Personnel workload (optional) |
+| `dispatcher` | Personnel workload (optional) |
+
+### Step 2: Compute Statistics
+
+#### Agency Distribution
+```sql
+SELECT agency, COUNT(*) * 1.0 / SUM(COUNT(*)) OVER() AS weight
+FROM incidents
+GROUP BY agency;
+```
+Target: `agency_weights` dict (sum = 1.0)
+
+#### Priority Distribution per Agency
+```sql
+SELECT agency, priority, COUNT(*) * 1.0 / SUM(COUNT(*)) OVER(PARTITION BY agency) AS weight
+FROM incidents
+GROUP BY agency, priority
+ORDER BY agency, priority;
+```
+Target: `priority_weights[agency][priority]` (each agency sum = 1.0)
+
+#### Problem Type Frequencies per Agency/Priority
+```sql
+SELECT agency, priority, problem_nature, COUNT(*) * 1.0 / SUM(COUNT(*)) OVER(PARTITION BY agency, priority) AS weight
+FROM incidents
+GROUP BY agency, priority, problem_nature
+ORDER BY agency, priority, weight DESC;
+```
+Target: `problem_profiles[agency][priority]` = list of [name, weight] (each priority pool sum = 1.0)
+
+#### Time Intervals (Mean Seconds) per Agency/Priority
+```sql
+SELECT agency, priority,
+  AVG(EXTRACT(EPOCH FROM call_answered_ts - call_received_ts)) AS pickup_delay,
+  AVG(EXTRACT(EPOCH FROM queue_ts - call_answered_ts)) AS interview,
+  AVG(EXTRACT(EPOCH FROM dispatch_ts - queue_ts)) AS dispatch_queue,
+  AVG(EXTRACT(EPOCH FROM enroute_ts - dispatch_ts)) AS turnout,
+  AVG(EXTRACT(EPOCH FROM arrived_ts - enroute_ts)) AS travel,
+  AVG(EXTRACT(EPOCH FROM cleared_ts - arrived_ts)) AS on_scene,
+  AVG(EXTRACT(EPOCH FROM closed_ts - cleared_ts)) AS closeout
+FROM incidents
+GROUP BY agency, priority;
+```
+Target: `time_profiles[agency][priority]` with 7 interval means
+
+#### Dispatch Init Fraction
+```sql
+-- Fraction of call duration when first unit dispatched
+SELECT priority,
+  MIN(EXTRACT(EPOCH FROM dispatch_ts - call_answered_ts) / 
+      NULLIF(EXTRACT(EPOCH FROM closed_ts - call_answered_ts), 0)) AS lo,
+  MAX(EXTRACT(EPOCH FROM dispatch_ts - call_answered_ts) / 
+      NULLIF(EXTRACT(EPOCH FROM closed_ts - call_answered_ts), 0)) AS hi
+FROM incidents
+WHERE closed_ts > call_answered_ts
+GROUP BY priority;
+```
+Target: `dispatch_init_fraction[priority] = [lo, hi]`
+
+#### Hourly Weights
+```sql
+SELECT EXTRACT(HOUR FROM call_received_ts) AS hour, COUNT(*)
+FROM incidents
+GROUP BY hour
+ORDER BY hour;
+```
+Normalize to sum = 1.0 → `hourly_weights`
+
+#### Seasonal Multipliers
+```sql
+SELECT 
+  problem_nature,
+  CASE WHEN EXTRACT(MONTH FROM call_received_ts) IN (12,1,2) THEN 'Winter'
+       WHEN EXTRACT(MONTH FROM call_received_ts) IN (3,4,5) THEN 'Spring'
+       WHEN EXTRACT(MONTH FROM call_received_ts) IN (6,7,8) THEN 'Summer'
+       ELSE 'Fall' END AS season,
+  COUNT(*) * 1.0 / SUM(COUNT(*)) OVER(PARTITION BY problem_nature) AS season_weight
+FROM incidents
+GROUP BY problem_nature, season;
+```
+Compute multiplier = season_weight / (1/4) → `seasonal_multipliers[problem] = [winter, spring, summer, fall]`
+
+#### Disposition Frequencies per Agency
+```sql
+SELECT agency, disposition, COUNT(*) * 1.0 / SUM(COUNT(*)) OVER(PARTITION BY agency) AS weight
+FROM incidents
+GROUP BY agency, disposition;
+```
+Target: `disposition_profiles[agency]` (sum = 1.0)
+
+#### Call Reception Methods
+```sql
+SELECT call_reception, COUNT(*) * 1.0 / COUNT(*) OVER() AS weight
+FROM incidents
+GROUP BY call_reception;
+```
+Target: `call_reception_weights` (sum = 1.0)
+
+### Step 3: Create Config YAML
+
+Copy `config/example_realism.yaml` and replace with your computed values. Key tips:
+
+1. **Start with agency_weights** — this drives the overall mix
+2. **Then priority_weights** — shapes urgency profile
+3. **Then problem_profiles** — most visible in output
+4. **Then time_profiles** — affects response time realism
+5. **Then hourly_weights & seasonal_multipliers** — temporal patterns
+6. **Finally disposition, call_reception, dispatch_init_fraction** — secondary realism
+
+### Step 4: Generate Test Data
+
+```bash
+# Small test for quick iteration
+uv run synth911gen3 generate \
+  --config config/my_center.yaml \
+  --rows 2000 \
+  --format pandas \
+  --dataset incidents
+```
+
+### Step 5: Compare & Iterate
+
+Compare key statistics between real and synthetic data:
+
+| Metric | Target Tolerance |
+|--------|------------------|
+| Agency weights | ±2% |
+| Priority weights (per agency) | ±3% |
+| Top 10 problem types (per agency) | ±5% |
+| Mean time intervals (per agency/priority) | ±20% |
+| Hourly pattern correlation | r > 0.9 |
+| Seasonal pattern (major types) | Qualitative match |
+| Disposition distribution | ±5% |
+
+Use Python for automated comparison:
+```python
+import pandas as pd
+from scipy.stats import ks_2samp
+
+real = pd.read_parquet("real_data.parquet")
+synth = pd.read_parquet("synth_data.parquet")
+
+# Agency distribution
+print("Agency:", real['agency'].value_counts(normalize=True))
+print("Agency:", synth['agency'].value_counts(normalize=True))
+
+# KS test on time intervals
+for col in ['interview_seconds', 'travel_seconds', 'on_scene_seconds']:
+    stat, p = ks_2samp(real[col], synth[col])
+    print(f"{col}: KS={stat:.3f}, p={p:.3f}")
+```
+
+### Step 6: Save Final Config
+
+Once satisfied, commit your config:
+```bash
+git add config/my_center.yaml
+git commit -m "Add realism config for My Center"
+```
+
+---
+
+## Common Tuning Scenarios
+
+### Rural Center (Low Volume, Long Travel)
+```yaml
+agency_weights:
+  LAW: 0.65
+  FIRE: 0.15
+  EMS: 0.20
+
+time_profiles:
+  LAW:
+    3:  # Typical priority
+      travel_mean: 600    # 10 min average travel
+      turnout_mean: 120   # 2 min turnout (volunteer)
+```
+
+### Urban Center (High Volume, Short Travel)
+```yaml
+agency_weights:
+  LAW: 0.55
+  FIRE: 0.20
+  EMS: 0.25
+
+time_profiles:
+  EMS:
+    2:
+      travel_mean: 180    # 3 min average travel
+      turnout_mean: 30    # 30 sec turnout (career)
+```
+
+### College Town (Seasonal Population)
+```yaml
+seasonal_multipliers:
+  "Noise Complaint": [0.8, 1.0, 1.5, 1.2]  # Summer peak
+  "Alcohol Violation": [0.7, 1.2, 1.4, 1.1]
+  "Medical Assist": [1.1, 1.0, 0.9, 1.0]
+```
+
+### Tourist Destination (Summer Peak)
+```yaml
+hourly_weights:  # Higher daytime weights in summer
+  # ... adjust seasonally via separate configs per quarter
+  
+seasonal_multipliers:
+  "Water Rescue": [0.1, 0.5, 3.0, 0.3]
+  "Heat Exhaustion": [0.1, 0.5, 3.0, 0.5]
+```
+
+---
+
+## Parameter Sensitivity Guide
+
+| Parameter | Impact | Sensitivity | Recommendation |
+|-----------|--------|-------------|----------------|
+| `agency_weights` | Overall call mix | High | Tune first, use real volume ratios |
+| `priority_weights` | Urgency profile | High | Critical for response time realism |
+| `problem_profiles` | Call type mix | High | Most visible in output |
+| `time_profiles.travel_mean` | Response time | High | Calibrate from CAD timestamps |
+| `time_profiles.turnout_mean` | Dispatch efficiency | Medium | Varies by career/volunteer mix |
+| `dispatch_init_fraction` | Parallel dispatch | Medium | Key for high-priority realism |
+| `hourly_weights` | Temporal pattern | High | 24 values, auto-normalized |
+| `seasonal_multipliers` | Seasonal variation | Medium | 4 values per problem type |
+| `disposition_profiles` | Outcome realism | Low | Fine-tune last |
+| `call_reception_weights` | Source realism | Low | Often similar across centers |
+
+---
+
+## Validation Checklist
+
+Before deploying a custom config:
+
+- [ ] All weight sections sum to 1.0 (within 0.001)
+- [ ] All 5 priorities defined for each agency in `priority_weights`
+- [ ] All 5 priorities have `time_profiles` for each agency
+- [ ] All 5 priorities have `dispatch_init_fraction` entries
+- [ ] `hourly_weights` has exactly 24 values
+- [ ] `seasonal_multipliers` entries have exactly 4 values
+- [ ] `shift_config` validates (unique names, 24hr coverage)
+- [ ] Test generation completes without errors
+- [ ] Output statistics match real data within tolerances
+- [ ] Config committed to version control
+
+---
+
+## Geospatial Exports

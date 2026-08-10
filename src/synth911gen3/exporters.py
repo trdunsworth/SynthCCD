@@ -12,6 +12,7 @@ import yaml
 from .config import OutputFormat
 from .exceptions import ExportError
 from .logging_conf import get_logger
+from .manifest import Manifest, write_manifest
 
 logger = get_logger("exporters")
 
@@ -21,6 +22,87 @@ def _records_for_serialization(frame: pd.DataFrame) -> list[dict[str, Any]]:
     for column in serializable.select_dtypes(include=["datetime64[ns]"]).columns:
         serializable[column] = serializable[column].dt.strftime("%Y-%m-%dT%H:%M:%S")
     return serializable.to_dict(orient="records")
+
+
+def _build_geojson_features(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    """Convert incident DataFrame rows to GeoJSON Feature objects."""
+    features = []
+    for _, row in frame.iterrows():
+        lon = row.get("longitude", 0.0)
+        lat = row.get("latitude", 0.0)
+        if pd.isna(lon) or pd.isna(lat) or lon == 0.0 or lat == 0.0:
+            continue
+        properties = row.to_dict()
+        # Remove lat/lon from properties since they're in geometry
+        properties.pop("latitude", None)
+        properties.pop("longitude", None)
+        # Convert datetime objects to ISO format strings
+        for key, value in properties.items():
+            if pd.isna(value):
+                properties[key] = None
+            elif hasattr(value, "isoformat"):
+                properties[key] = value.isoformat()
+        features.append({
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [float(lon), float(lat)]
+            },
+            "properties": properties
+        })
+    return features
+
+
+def export_geojson(
+    frame: pd.DataFrame,
+    output_dir: Path,
+    output_stem: str,
+    dataset_name: str,
+) -> Path:
+    """Export incidents as GeoJSON FeatureCollection."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / f"{output_stem}_{dataset_name}.geojson"
+
+    features = _build_geojson_features(frame)
+    geojson = {
+        "type": "FeatureCollection",
+        "features": features
+    }
+    path.write_text(json.dumps(geojson, indent=2), encoding="utf-8")
+    logger.info("Wrote GeoJSON: %s (%d features)", path, len(features))
+    return path
+
+
+def export_shapefile(
+    frame: pd.DataFrame,
+    output_dir: Path,
+    output_stem: str,
+    dataset_name: str,
+) -> Path:
+    """Export incidents as ESRI Shapefile (requires geopandas)."""
+    try:
+        import geopandas as gpd
+        from shapely.geometry import Point
+    except ImportError as exc:
+        raise ExportError(
+            "Shapefile export requires 'geopandas' and 'shapely'. "
+            "Install with: uv add geopandas shapely"
+        ) from exc
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    base_path = output_dir / f"{output_stem}_{dataset_name}"
+
+    # Filter rows with valid coordinates
+    valid = frame.dropna(subset=["latitude", "longitude"])
+    valid = valid[(valid["latitude"] != 0.0) & (valid["longitude"] != 0.0)]
+
+    geometry = [Point(xy) for xy in zip(valid["longitude"], valid["latitude"])]
+    gdf = gpd.GeoDataFrame(valid, geometry=geometry, crs="EPSG:4326")
+
+    # Shapefile requires all files to have same base name
+    gdf.to_file(base_path.with_suffix(".shp"), driver="ESRI Shapefile")
+    logger.info("Wrote Shapefile: %s (%d features)", base_path.with_suffix(".shp"), len(gdf))
+    return base_path.with_suffix(".shp")
 
 
 def export_chunked_generator(
@@ -101,6 +183,35 @@ def export_generated_data(
             logger.info("Wrote parquet: %s", path)
         return artifacts
 
+    if output_format is OutputFormat.GEOJSON:
+        artifacts = {}
+        for dataset_name, frame in datasets.items():
+            if dataset_name == "incidents":  # Only incidents have coordinates
+                path = export_geojson(frame, output_dir, output_stem, dataset_name)
+                artifacts[dataset_name] = path
+            else:
+                # Export phone metrics as JSON
+                path = output_dir / f"{output_stem}_{dataset_name}.json"
+                payload = _records_for_serialization(frame)
+                path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                artifacts[dataset_name] = path
+                logger.info("Wrote JSON (non-spatial): %s", path)
+        return artifacts
+
+    if output_format is OutputFormat.SHAPEFILE:
+        artifacts = {}
+        for dataset_name, frame in datasets.items():
+            if dataset_name == "incidents":
+                path = export_shapefile(frame, output_dir, output_stem, dataset_name)
+                artifacts[dataset_name] = path
+            else:
+                path = output_dir / f"{output_stem}_{dataset_name}.json"
+                payload = _records_for_serialization(frame)
+                path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+                artifacts[dataset_name] = path
+                logger.info("Wrote JSON (non-spatial): %s", path)
+        return artifacts
+
     bundled_payload = {name: _records_for_serialization(frame) for name, frame in datasets.items()}
     if output_format is OutputFormat.JSON:
         path = output_dir / f"{output_stem}_bundle.json"
@@ -118,3 +229,13 @@ def export_generated_data(
         return {"bundle": path}
 
     raise ExportError(f"Unsupported output format: {output_format}")
+
+
+def export_manifest(
+    manifest: Manifest,
+    output_dir: Path,
+    output_stem: str,
+    output_format: OutputFormat,
+) -> Path:
+    """Write the data governance manifest as a JSON sidecar file."""
+    return write_manifest(manifest, output_dir, output_stem, output_format)

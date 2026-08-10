@@ -10,7 +10,12 @@ from faker import Faker
 
 from synth911gen3.addresses import AddressProvider
 from synth911gen3.config import GenerationRequest, IdFormat
-from synth911gen3.constants import DEFAULT_LOCALE, DEFAULT_MAX_MEMORY_BYTES, MEMORY_PROBE_ROWS
+from synth911gen3.constants import (
+    DEFAULT_LOCALE,
+    DEFAULT_MAX_MEMORY_BYTES,
+    DEFAULT_SEASONAL_MULTIPLIER,
+    MEMORY_PROBE_ROWS,
+)
 from synth911gen3.exceptions import ValidationError
 from synth911gen3.logging_conf import ProgressReporter, get_logger
 from synth911gen3.realism_config import RealismConfig
@@ -37,6 +42,8 @@ _ADDRESS_FIELDS = (
     "city",
     "state",
     "postal_code",
+    "latitude",
+    "longitude",
 )
 
 logger = get_logger("incidents")
@@ -457,6 +464,14 @@ class IncidentGenerator:
             n,
         )
 
+        # Determine season for each incident (0=Winter, 1=Spring, 2=Summer, 3=Fall)
+        months = times_series.dt.month.to_numpy()
+        seasons = np.empty(n, dtype=np.int8)
+        seasons[(months == 12) | (months <= 2)] = 0      # Winter: Dec, Jan, Feb
+        seasons[(months >= 3) & (months <= 5)] = 1       # Spring: Mar, Apr, May
+        seasons[(months >= 6) & (months <= 8)] = 2       # Summer: Jun, Jul, Aug
+        seasons[(months >= 9) & (months <= 11)] = 3      # Fall: Sep, Oct, Nov
+
         problem_nature = np.empty(n, dtype=object)
         for agency_index, agency_key in enumerate(agency_keys):
             for priority in priority_key_sets[agency_key]:
@@ -464,12 +479,27 @@ class IncidentGenerator:
                 mask = (agency_codes == agency_index) & (priorities == priority)
                 if not mask.any():
                     continue
-                problem_nature[mask] = _categorical_choice(
-                    rng,
-                    [item[0] for item in pool],
-                    [item[1] for item in pool],
-                    int(mask.sum()),
-                )
+
+                problem_names = [item[0] for item in pool]
+                base_weights = np.array([item[1] for item in pool], dtype=float)
+                mask_indices = np.where(mask)[0]
+                mask_seasons = seasons[mask_indices]
+
+                # Apply seasonal multipliers per incident
+                selected = np.empty(len(mask_indices), dtype=object)
+                for i, season in enumerate(mask_seasons):
+                    # Compute weights for this incident's season
+                    incident_weights = base_weights.copy()
+                    for idx, prob_name in enumerate(problem_names):
+                        multipliers = realism.seasonal_multipliers.get(
+                            prob_name, DEFAULT_SEASONAL_MULTIPLIER
+                        )
+                        incident_weights[idx] = base_weights[idx] * multipliers[season]
+                    # Re-normalize
+                    incident_weights = incident_weights / incident_weights.sum()
+                    selected[i] = rng.choice(problem_names, p=incident_weights)
+
+                problem_nature[mask_indices] = selected
 
         disposition = np.empty(n, dtype=object)
         for agency_index, agency_key in enumerate(agency_keys):
@@ -523,6 +553,8 @@ class IncidentGenerator:
             "city": address_columns["city"],
             "state": address_columns["state"],
             "postal_code": address_columns["postal_code"],
+            "latitude": address_columns["latitude"],
+            "longitude": address_columns["longitude"],
             "location": location,
             "call_start_time": event_times,
             "hour": hour,

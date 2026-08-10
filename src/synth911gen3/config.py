@@ -22,6 +22,19 @@ class OutputFormat(StrEnum):
     YAML = "yaml"
     PANDAS = "pandas"
     POLARS = "polars"
+    GEOJSON = "geojson"
+    SHAPEFILE = "shapefile"
+    POSTGRESQL = "postgresql"
+    SQLSERVER = "sqlserver"
+    MARIADB = "mariadb"
+    DUCKDB = "duckdb"
+
+
+class DatabaseDialect(StrEnum):
+    POSTGRESQL = "postgresql"
+    SQLSERVER = "sqlserver"
+    MARIADB = "mariadb"
+    DUCKDB = "duckdb"
 
 
 class DatasetKind(StrEnum):
@@ -53,6 +66,19 @@ class GenerationRequest:
     realism_config: RealismConfig | None = None
     realism_config_path: Path | None = None
     max_memory_bytes: int | None = None
+    # Database export options
+    db_dialect: DatabaseDialect | None = None
+    db_host: str | None = None
+    db_port: int | None = None
+    db_name: str | None = None
+    db_user: str | None = None
+    db_password: str | None = None
+    db_table_incidents: str = "incidents"
+    db_table_phone: str = "hourly_call_counts"
+    db_schema: str | None = None
+    db_batch_size: int = 10000
+    db_if_exists: str = "append"  # "append", "replace", "fail"
+    db_create_indexes: bool = True
 
     def resolved_start_date(self) -> date:
         today = date.today()
@@ -90,6 +116,56 @@ class GenerationRequest:
             )
         # Validate realism config if provided
         self.get_realism_config()
+
+        # Validate database options if using database output format
+        if self.output_format in (
+            OutputFormat.POSTGRESQL,
+            OutputFormat.SQLSERVER,
+            OutputFormat.MARIADB,
+            OutputFormat.DUCKDB,
+        ):
+            self._validate_database_options()
+
+    def _validate_database_options(self) -> None:
+        # Determine dialect from output_format if not explicitly set
+        dialect_map = {
+            OutputFormat.POSTGRESQL: DatabaseDialect.POSTGRESQL,
+            OutputFormat.SQLSERVER: DatabaseDialect.SQLSERVER,
+            OutputFormat.MARIADB: DatabaseDialect.MARIADB,
+            OutputFormat.DUCKDB: DatabaseDialect.DUCKDB,
+        }
+        dialect = self.db_dialect or dialect_map.get(self.output_format)
+
+        if dialect is None:
+            raise ValidationError(f"Unknown database dialect for output format: {self.output_format}")
+
+        if dialect == DatabaseDialect.DUCKDB:
+            # DuckDB only needs a file path (can use output_dir/output_stem)
+            if not self.db_name:
+                # Use output_stem as database file name
+                self.db_name = f"{self.output_stem}.duckdb"
+            return
+
+        # For other databases, validate connection parameters
+        if not self.db_host:
+            raise ValidationError("db_host is required for database exports.")
+        if not self.db_name:
+            raise ValidationError("db_name is required for database exports.")
+        if not self.db_user:
+            raise ValidationError("db_user is required for database exports.")
+        if self.db_port is None:
+            # Set default ports per dialect
+            defaults: dict[DatabaseDialect, int] = {
+                DatabaseDialect.POSTGRESQL: 5432,
+                DatabaseDialect.SQLSERVER: 1433,
+                DatabaseDialect.MARIADB: 3306,
+            }
+            self.db_port = defaults[dialect]
+
+        if self.db_if_exists not in ("append", "replace", "fail"):
+            raise ValidationError("db_if_exists must be 'append', 'replace', or 'fail'.")
+        if self.db_batch_size <= 0:
+            raise ValidationError("db_batch_size must be greater than zero.")
 
     def _validate_output_path(self) -> None:
         if not self.output_stem.strip():

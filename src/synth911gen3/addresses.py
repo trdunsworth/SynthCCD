@@ -212,15 +212,32 @@ class OpenStreetMapAddressProvider:
             if "postal_code" in frame.columns
             else [""] * len(frame)
         )
+        latitudes = (
+            frame["latitude"]
+            if "latitude" in frame.columns
+            else [0.0] * len(frame)
+        )
+        longitudes = (
+            frame["longitude"]
+            if "longitude" in frame.columns
+            else [0.0] * len(frame)
+        )
         return [
             Address(
                 str(street),
                 str(city),
                 str(state),
                 postal_code=str(postal) if pd.notna(postal) else "",
+                latitude=float(lat) if pd.notna(lat) else 0.0,
+                longitude=float(lon) if pd.notna(lon) else 0.0,
             )
-            for street, city, state, postal in zip(
-                frame["street_address"], frame["city"], frame["state"], postal_codes
+            for street, city, state, postal, lat, lon in zip(
+                frame["street_address"],
+                frame["city"],
+                frame["state"],
+                postal_codes,
+                latitudes,
+                longitudes,
             )
         ]
 
@@ -236,6 +253,8 @@ class OpenStreetMapAddressProvider:
                 "postal_code": [address.postal_code for address in addresses],
                 "city": [address.city for address in addresses],
                 "state": [address.state for address in addresses],
+                "latitude": [address.latitude for address in addresses],
+                "longitude": [address.longitude for address in addresses],
             }
         )
         self._cache_dir.mkdir(parents=True, exist_ok=True)
@@ -381,6 +400,15 @@ class OpenStreetMapAddressProvider:
             state = _normalize_state(tags.get("addr:state") or fallback_state)
             if not city or not state:
                 continue
+            # Extract coordinates
+            lat = getattr(element, "lat", None)
+            lon = getattr(element, "lon", None)
+            # For ways, use center point if available
+            if lat is None and hasattr(element, "center"):
+                center = getattr(element, "center", None)
+                if center is not None:
+                    lat = getattr(center, "lat", None)  # type: ignore[attr-defined]
+                    lon = getattr(center, "lon", None)  # type: ignore[attr-defined]
             addresses.append(
                 Address(
                     f"{housenumber} {street}".strip(),
@@ -388,6 +416,8 @@ class OpenStreetMapAddressProvider:
                     state,
                     street_number=housenumber,
                     postal_code=tags.get("addr:postcode") or "",
+                    latitude=float(lat) if lat is not None else 0.0,
+                    longitude=float(lon) if lon is not None else 0.0,
                 )
             )
         return self._dedupe(addresses)

@@ -82,15 +82,17 @@ PROBLEM_PROFILES = {
             ("Harassment", 0.05),
         ],
         5: [
-            ("Noise Complaint", 0.20),
-            ("Welfare Check", 0.18),
-            ("Found Property", 0.13),
-            ("Animal Complaint", 0.10),
-            ("Animal Bite", 0.06),
-            ("Traffic Stop", 0.10),
-            ("Public Assist", 0.10),
-            ("Vandalism", 0.07),
-            ("Suspicious Person", 0.06),
+            ("Noise Complaint", 0.16),
+            ("Welfare Check", 0.15),
+            ("Found Property", 0.11),
+            ("Animal Complaint", 0.08),
+            ("Animal Bite", 0.05),
+            ("Traffic Stop", 0.08),
+            ("Public Assist", 0.08),
+            ("Vandalism", 0.06),
+            ("Suspicious Person", 0.05),
+            ("Assist Fire", 0.08),
+            ("Assist EMS", 0.10),
         ],
     },
     "FIRE": {
@@ -132,13 +134,15 @@ PROBLEM_PROFILES = {
             ("Mutual Aid", 0.10),
         ],
         5: [
-            ("Fire Alarm", 0.25),
-            ("Smoke Investigation", 0.15),
-            ("Odor Investigation", 0.15),
-            ("Lockout / Public Service", 0.15),
-            ("Mutual Aid", 0.15),
-            ("Assist Police", 0.10),
-            ("Overheat Investigation", 0.05),
+            ("Fire Alarm", 0.22),
+            ("Smoke Investigation", 0.13),
+            ("Odor Investigation", 0.13),
+            ("Lockout / Public Service", 0.13),
+            ("Mutual Aid", 0.13),
+            ("Assist Police", 0.09),
+            ("Assist EMS", 0.09),
+            ("Overheat Investigation", 0.04),
+            ("Medical Assist", 0.04),
         ],
     },
     "EMS": {
@@ -187,14 +191,16 @@ PROBLEM_PROFILES = {
             ("Heat/Cold Exposure", 0.05),
         ],
         5: [
-            ("Sick Person", 0.25),
-            ("Fall Injury", 0.15),
-            ("Animal Bite", 0.12),
-            ("Psychiatric Emergency", 0.12),
-            ("Heat/Cold Exposure", 0.10),
-            ("Traumatic Injury", 0.08),
-            ("Abdominal Pain", 0.08),
-            ("Diabetic Problem", 0.10),
+            ("Sick Person", 0.20),
+            ("Fall Injury", 0.12),
+            ("Animal Bite", 0.10),
+            ("Psychiatric Emergency", 0.10),
+            ("Heat/Cold Exposure", 0.08),
+            ("Traumatic Injury", 0.06),
+            ("Abdominal Pain", 0.06),
+            ("Diabetic Problem", 0.08),
+            ("Assist Police", 0.10),
+            ("Assist Fire", 0.10),
         ],
     },
 }
@@ -308,3 +314,44 @@ HOURLY_WEIGHTS = np.array(
     dtype=float,
 )
 HOURLY_WEIGHTS /= HOURLY_WEIGHTS.sum()
+
+# Seasonal multipliers for problem types
+# Multipliers > 1.0 increase likelihood in that season, < 1.0 decrease
+# Seasons: 0=Winter (Dec-Feb), 1=Spring (Mar-May), 2=Summer (Jun-Aug), 3=Fall (Sep-Nov)
+SEASONAL_MULTIPLIERS: dict[str, list[float]] = {
+    # EMS - Heat/cold related
+    "Heat/Cold Exposure": [1.5, 0.8, 2.0, 0.8],
+    "Sick Person": [1.2, 1.0, 0.9, 1.1],
+    "Fall Injury": [1.3, 0.9, 0.8, 1.1],
+    "Motor Vehicle Crash": [1.2, 1.0, 1.1, 1.1],
+    "Cardiac Arrest": [1.1, 1.0, 0.9, 1.0],
+    "Hypothermia": [3.0, 0.5, 0.1, 1.0],
+    "Heat Exhaustion": [0.1, 0.5, 3.0, 0.5],
+    # FIRE - Seasonal fire patterns
+    "Structure Fire": [1.3, 0.9, 0.8, 1.1],
+    "Brush/Grass Fire": [0.3, 1.2, 2.0, 1.5],
+    "Cooking Fire": [1.2, 1.0, 0.9, 1.3],
+    "Chimney Fire": [2.5, 0.5, 0.1, 1.5],
+    "Vehicle Fire": [1.1, 1.0, 1.1, 1.0],
+    "Mutual Aid": [1.1, 1.0, 1.2, 1.1],
+    # LAW - Seasonal crime/behavior patterns
+    "DUI / Impaired Driver": [1.3, 1.0, 1.2, 1.1],
+    "Domestic Disturbance": [1.1, 1.0, 1.0, 1.1],
+    "Burglary": [1.1, 0.9, 1.0, 1.1],
+    "Motor Vehicle Theft": [1.1, 1.0, 1.1, 1.0],
+    "Reckless Driving": [1.2, 1.0, 1.1, 1.1],
+    "Disorderly Conduct": [1.0, 1.1, 1.2, 1.0],
+    "Noise Complaint": [0.8, 1.0, 1.3, 1.1],
+    "Suspicious Person": [1.0, 1.0, 1.1, 1.0],
+    "Shots Fired": [1.1, 1.0, 1.2, 1.1],
+    "Shoplifting": [1.3, 0.9, 0.9, 1.2],
+    "Vandalism": [0.9, 1.1, 1.2, 1.1],
+    "Trespass": [0.9, 1.0, 1.1, 1.2],
+    "Animal Complaint": [0.8, 1.2, 1.3, 1.1],
+    "Animal Bite": [0.8, 1.2, 1.3, 1.0],
+    "Welfare Check": [1.2, 1.0, 0.9, 1.1],
+    "Missing Person": [1.1, 1.0, 1.1, 1.0],
+}
+
+# Default multiplier for any problem type not explicitly listed
+DEFAULT_SEASONAL_MULTIPLIER = [1.0, 1.0, 1.0, 1.0]

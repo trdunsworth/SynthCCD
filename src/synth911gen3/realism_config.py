@@ -16,6 +16,7 @@ from .constants import (
     PHONE_METRICS as DEFAULT_PHONE_METRICS,
     PRIORITY_WEIGHTS as DEFAULT_PRIORITY_WEIGHTS,
     PROBLEM_PROFILES as DEFAULT_PROBLEM_PROFILES,
+    SEASONAL_MULTIPLIERS as DEFAULT_SEASONAL_MULTIPLIERS,
     TIME_PROFILES as DEFAULT_TIME_PROFILES,
 )
 from .exceptions import ValidationError
@@ -35,6 +36,7 @@ class RealismConfig:
     hourly_weights: np.ndarray = field(default_factory=lambda: np.array([]))
     agency_names: dict[str, str] = field(default_factory=dict)
     shift_config: ShiftConfig = field(default_factory=ShiftConfig)
+    seasonal_multipliers: dict[str, list[float]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.agency_weights:
@@ -59,6 +61,8 @@ class RealismConfig:
             self.hourly_weights = DEFAULT_HOURLY_WEIGHTS.copy()
         if not self.agency_names:
             self.agency_names = {"LAW": "LAW", "FIRE": "FIRE", "EMS": "EMS"}
+        if not self.seasonal_multipliers:
+            self.seasonal_multipliers = DEFAULT_SEASONAL_MULTIPLIERS.copy()
         if not self.shift_config.shifts and not self.shift_config.rotation:
             self.shift_config = get_default_shift_config()
 
@@ -128,6 +132,11 @@ class RealismConfig:
 
         if "shift_config" in data:
             config.shift_config = ShiftConfig.from_dict(data["shift_config"])
+
+        if "seasonal_multipliers" in data:
+            config.seasonal_multipliers = {}
+            for problem, multipliers in data["seasonal_multipliers"].items():
+                config.seasonal_multipliers[problem] = [float(m) for m in multipliers]
 
         config._validate()
         return config
@@ -231,6 +240,7 @@ class RealismConfig:
             "hourly_weights": self.hourly_weights.tolist(),
             "agency_names": self.agency_names,
             "shift_config": self.shift_config.to_dict(),
+            "seasonal_multipliers": self.seasonal_multipliers,
         }
         with path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(data, f, sort_keys=False, default_flow_style=None)

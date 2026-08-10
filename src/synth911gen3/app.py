@@ -6,9 +6,11 @@ from itertools import chain
 from .addresses import AddressProvider, OpenStreetMapAddressProvider
 from .config import DatasetKind, GenerationRequest, OutputFormat
 from .domain import GenerationResult
-from .exporters import export_chunked_generator, export_generated_data
+from .exporters import export_chunked_generator, export_generated_data, export_manifest
 from .generators import HourlyCallCountGenerator, IncidentGenerator
 from .logging_conf import get_logger
+from .manifest import Manifest
+from .db_exporter import export_to_database
 
 logger = get_logger("app")
 
@@ -77,13 +79,38 @@ class Synth911Application:
 
         logger.debug("Exporting datasets (%s)", request.output_format.value)
         artifacts: dict[str, object] = dict(streamed_artifacts)
-        if datasets:
+
+        # Handle database exports separately
+        db_formats = (
+            OutputFormat.POSTGRESQL,
+            OutputFormat.SQLSERVER,
+            OutputFormat.MARIADB,
+            OutputFormat.DUCKDB,
+        )
+        if datasets and request.output_format in db_formats:
+            db_results = export_to_database(datasets, request)
+            artifacts["database"] = db_results
+            logger.info("Database export complete: %s", db_results)
+        elif datasets:
             artifacts = {**export_generated_data(
                 datasets=datasets,
                 output_format=request.output_format,
                 output_dir=request.output_dir,
                 output_stem=request.output_stem,
             ), **streamed_artifacts}
+
+            # Generate and export data governance manifest
+            if request.output_format != OutputFormat.PANDAS and request.output_format != OutputFormat.POLARS:
+                manifest = Manifest.from_request(request, datasets)
+                manifest_path = export_manifest(
+                    manifest=manifest,
+                    output_dir=request.output_dir,
+                    output_stem=request.output_stem,
+                    output_format=request.output_format,
+                )
+                artifacts["manifest"] = manifest_path
+                logger.info("Wrote manifest: %s", manifest_path)
+
         return GenerationResult(
             incidents=incidents,
             hourly_call_counts=hourly_call_counts,

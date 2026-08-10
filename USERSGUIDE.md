@@ -6,17 +6,23 @@ A synthetic data generator for 9-1-1 CAD incidents and hourly phone-center metri
 
 1. [Installation](#installation)
 2. [Quick Start](#quick-start)
-3. [Command-Line Interface (CLI)](#command-line-interface-cli)
-4. [Textual User Interface (TUI)](#textual-user-interface-tui)
-5. [Configuration Parameters](#configuration-parameters)
-   - [Personnel and Shift Parameters](#personnel-and-shift-parameters)
-   - [Shift Structures](#shift-structures)
-6. [Params Files (Bundled Options)](#params-files-bundled-options)
-7. [Output Formats](#output-formats)
-8. [Generated Data Schema](#generated-data-schema)
-9. [Examples](#examples)
-10. [Troubleshooting](#troubleshooting)
-11. [Advanced Configuration](#advanced-configuration)
+3. [Tutorials](#tutorials)
+   - [Tutorial 1: Your First 911 Dataset](#tutorial-1-your-first-911-dataset)
+   - [Tutorial 2: Tuning Realism to Your Center](#tutorial-2-tuning-realism-to-your-center)
+   - [Tutorial 3: Large-Scale Cloud Runs](#tutorial-3-large-scale-cloud-runs)
+   - [Tutorial 4: Geospatial Analysis with GeoJSON](#tutorial-4-geospatial-analysis-with-geojson)
+   - [Tutorial 5: Database Pipeline with PostgreSQL](#tutorial-5-database-pipeline-with-postgresql)
+4. [Command-Line Interface (CLI)](#command-line-interface-cli)
+5. [Textual User Interface (TUI)](#textual-user-interface-tui)
+6. [Configuration Parameters](#configuration-parameters)
+7. [Params Files (Bundled Options)](#params-files-bundled-options)
+8. [Output Formats](#output-formats)
+9. [Generated Data Schema](#generated-data-schema)
+10. [Python API Reference](#python-api-reference)
+11. [Examples](#examples)
+12. [Troubleshooting](#troubleshooting)
+13. [FAQ](#faq)
+14. [Advanced Configuration](#advanced-configuration)
 
 Statistical realism details — the default distributions and the YAML realism
 configuration — are documented in the companion [Realism Guide](REALISMGUIDE.md).
@@ -56,6 +62,312 @@ Launch the interactive TUI:
 ```bash
 uv run synth911gen3 tui
 ```
+
+---
+
+## Tutorials
+
+### Tutorial 1: Your First 911 Dataset
+
+This tutorial walks you through generating your first synthetic 911 dataset.
+
+**Step 1: Install and verify**
+```bash
+git clone https://github.com/trdunsworth/synth911gen3.git
+cd synth911gen3
+uv venv && uv sync
+uv run synth911gen3 generate --schema --dataset incidents
+```
+The `--schema` flag shows the column structure without generating data or fetching addresses.
+
+**Step 2: Generate a small dataset**
+```bash
+uv run synth911gen3 generate --rows 1000 --format parquet --area "Seattle, WA"
+```
+This generates 1,000 incidents for Seattle, WA in Parquet format. First run will fetch addresses from OpenStreetMap (cached for future runs).
+
+**Step 3: Inspect the output**
+```bash
+ls output/
+# synthetic_911_incidents.parquet  synthetic_911_hourly_call_counts.parquet  synthetic_911_manifest.json
+```
+
+**Step 4: Load in Python**
+```python
+import pandas as pd
+df = pd.read_parquet("output/synthetic_911_incidents.parquet")
+print(df.columns.tolist())
+print(df.head())
+```
+
+**Step 5: Explore the data**
+```python
+# Agency distribution
+print(df['agency'].value_counts())
+
+# Priority distribution
+print(df['priority'].value_counts().sort_index())
+
+# Top problem types
+print(df['problem_nature'].value_counts().head(10))
+
+# Time range
+print(f"Time range: {df['call_start_time'].min()} to {df['call_start_time'].max()}")
+```
+
+---
+
+### Tutorial 2: Tuning Realism to Your Center
+
+Learn how to customize the realism configuration to match your 9-1-1 center's characteristics.
+
+**Step 1: Copy the example config**
+```bash
+cp config/example_realism.yaml config/my_center.yaml
+```
+
+**Step 2: Analyze your real CAD data**
+
+Export your center's data and compute:
+- Agency call volume ratios (LAW/FIRE/EMS)
+- Priority distribution per agency
+- Top problem types and their frequencies
+- Average time intervals by priority
+- Hourly call volume pattern
+- Disposition code frequencies
+
+**Step 3: Update the config**
+
+Edit `config/my_center.yaml` with your computed values:
+```yaml
+# Adjust agency weights to match your center
+agency_weights:
+  LAW: 0.65   # If your center handles more police calls
+  FIRE: 0.20
+  EMS: 0.15
+
+# Update priority weights per agency
+priority_weights:
+  LAW:
+    1: 0.10   # Higher priority calls
+    2: 0.20
+    3: 0.30
+    4: 0.25
+    5: 0.15
+
+# Customize problem types for your jurisdiction
+problem_profiles:
+  LAW:
+    1:
+      - ["Active Shooter", 0.15]
+      - ["Shots Fired", 0.25]
+      # ... your local problem types
+
+# Adjust time intervals to match your center's performance
+time_profiles:
+  LAW:
+    1:
+      interview_mean: 15
+      dispatch_mean: 5
+      turnout_mean: 8
+      travel_mean: 180
+      scene_mean: 1200
+      closeout_mean: 200
+      phone_mean: 150
+```
+
+**Step 4: Test and iterate**
+```bash
+# Generate test data
+uv run synth911gen3 generate --config config/my_center.yaml --rows 5000 --format pandas
+
+# Compare statistics with your real data
+# Adjust config and repeat until distributions match
+```
+
+**Step 5: Save as params file for repeatability**
+```yaml
+# params_my_center.yaml
+rows: 100000
+area: "Your City, ST"
+format: parquet
+config: "config/my_center.yaml"
+seed: 2024
+```
+```bash
+uv run synth911gen3 generate --params params_my_center.yaml
+```
+
+---
+
+### Tutorial 3: Large-Scale Cloud Runs
+
+Generate millions of rows efficiently using chunked exports and cloud storage.
+
+**Prerequisites**: AWS S3 / GCS / Azure Blob access configured.
+
+**Step 1: Use Parquet with chunked export**
+```bash
+# 5 million incidents with 1 GiB memory budget
+uv run synth911gen3 generate \
+  --rows 5000000 \
+  --format parquet \
+  --max-memory-bytes 1073741824 \
+  --area "Los Angeles County, CA" \
+  --output-dir /mnt/cloud/storage/la_911_2024
+```
+
+**Step 2: Stream to cloud storage (example with AWS S3)**
+```bash
+# Using AWS CLI to sync output
+aws s3 sync /mnt/cloud/storage/la_911_2024 s3://my-bucket/synthetic-911/la_2024/
+```
+
+**Step 3: Use params file for CI/CD**
+```yaml
+# ci_large_scale.yaml
+rows: 5000000
+area: "Los Angeles County, CA"
+format: parquet
+max_memory_bytes: 1073741824
+output_dir: "/mnt/cloud/storage/la_911_2024"
+output_stem: "la_911_2024"
+seed: 20241219
+```
+```bash
+# In CI pipeline
+uv run synth911gen3 generate --params ci_large_scale.yaml
+```
+
+**Step 4: Verify at scale**
+```bash
+# Quick row count check
+uv run python -c "
+import pandas as pd
+df = pd.read_parquet('output/la_911_2024_incidents.parquet')
+print(f'Rows: {len(df):,}')
+print(f'Agencies: {df[\"agency\"].value_counts().to_dict()}')
+print(f'Date range: {df[\"call_start_time\"].min()} to {df[\"call_start_time\"].max()}')
+"
+```
+
+---
+
+### Tutorial 4: Geospatial Analysis with GeoJSON
+
+Visualize synthetic incidents on a map using GeoJSON export.
+
+**Step 1: Generate GeoJSON**
+```bash
+uv run synth911gen3 generate \
+  --format geojson \
+  --rows 20000 \
+  --area "Portland, OR" \
+  --output-dir output_portland
+```
+
+**Step 2: View in QGIS (Desktop GIS)**
+1. Open QGIS
+2. Layer → Add Layer → Add Vector Layer
+3. Select `output_portland/synthetic_911_incidents.geojson`
+4. Style by agency: Layer Properties → Symbology → Categorized → Column: `agency`
+
+**Step 3: Web map with Leaflet**
+```html
+<!DOCTYPE html>
+<html>
+<head>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+</head>
+<body>
+  <div id="map" style="height: 600px;"></div>
+  <script>
+    const map = L.map('map').setView([45.5152, -122.6784], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+    
+    fetch('synthetic_911_incidents.geojson')
+      .then(r => r.json())
+      .then(data => {
+        L.geoJSON(data, {
+          pointToLayer: (feature, latlng) => {
+            const color = feature.properties.agency === 'LAW' ? 'blue' :
+                          feature.properties.agency === 'FIRE' ? 'red' : 'green';
+            return L.circleMarker(latlng, {radius: 4, fillColor: color, color: '#fff', weight: 1, fillOpacity: 0.8});
+          },
+          onEachFeature: (feature, layer) => {
+            layer.bindPopup(`<b>${feature.properties.problem_nature}</b><br>
+              Priority: ${feature.properties.priority}<br>
+              Time: ${feature.properties.call_start_time}`);
+          }
+        }).addTo(map);
+      });
+  </script>
+</body>
+</html>
+```
+
+**Step 4: Spatial analysis in Python**
+```python
+import geopandas as gpd
+
+gdf = gpd.read_file("output_portland/synthetic_911_incidents.geojson")
+print(f"CRS: {gdf.crs}")
+print(f"Bounds: {gdf.total_bounds}")
+
+# Incidents per agency in bounding box
+print(gdf.groupby('agency').size())
+
+# Kernel density estimation for hotspots
+from geopandas.tools import sjoin
+# ... spatial analysis
+```
+
+---
+
+### Tutorial 5: Database Pipeline with PostgreSQL
+
+Stream synthetic data directly into PostgreSQL for analytics pipelines.
+
+**Step 1: Prepare PostgreSQL**
+```sql
+-- Create database and user
+CREATE DATABASE cad_warehouse;
+CREATE USER etl_user WITH PASSWORD 'secure_password';
+GRANT ALL PRIVILEGES ON DATABASE cad_warehouse TO etl_user;
+```
+
+**Step 2: Stream data directly**
+```bash
+uv run synth911gen3 generate \
+  --format postgresql \
+  --rows 100000 \
+  --area "Chicago, IL" \
+  --db-host localhost \
+  --db-name cad_warehouse \
+  --db-user etl_user \
+  --db-password secure_password \
+  --db-table-incidents chicago_incidents \
+  --db-batch-size 50000 \
+  --db-create-indexes
+```
+
+**Step 3: Verify in PostgreSQL**
+```sql
+-- Check row counts
+SELECT count(*) FROM chicago_incidents;
+SELECT agency, count(*) FROM chicago_incidents GROUP BY agency;
+
+-- Query with spatial index (if using PostGIS)
+-- ALTER TABLE chicago_incidents ADD COLUMN geom geometry(Point, 4326);
+-- UPDATE chicago_incidents SET geom = ST_SetSRID(ST_MakePoint(longitude, latitude), 4326);
+-- CREATE INDEX idx_chicago_geom ON chicago_incidents USING GIST (geom);
+```
+
+**Step 4: Connect to BI tools**
+- Tableau / Power BI / Metabase / Superset
+- Point to `cad_warehouse.chicago_incidents`
+- Build dashboards: calls by hour, agency workload, response times, hotspots
 
 ---
 
@@ -423,9 +735,9 @@ Larger areas provide more address variety but may take longer to fetch initially
 ## Realism Configuration
 
 How the generator produces realistic statistics — agency/priority/problem
-distributions, time profiles, the parallel dispatch timeline, and hourly phone
-metrics — and how to override them with a YAML realism configuration file, is
-documented in the dedicated [Realism Guide](REALISMGUIDE.md).
+distributions, time profiles, the parallel dispatch timeline, **seasonal problem
+correlations**, and hourly phone metrics — and how to override them with a YAML
+realism configuration file, is documented in the dedicated [Realism Guide](REALISMGUIDE.md).
 
 Key facts:
 
@@ -553,11 +865,196 @@ Two ready-made examples are included in the repo: `config/example_params.json` a
 | `yaml` | `_bundle.yaml` | Single YAML file with all datasets | Configuration, human-readable |
 | `pandas` | (memory) | Returns `dict[str, pd.DataFrame]` | Python notebooks, pandas workflows |
 | `polars` | (memory) | Returns `dict[str, pl.DataFrame]` | High-performance Python analytics |
+| `geojson` | `.geojson` | GeoJSON FeatureCollection with Point geometries | Web mapping, GIS, spatial analysis |
+| `shapefile` | `.shp` + sidecars | ESRI Shapefile (requires geopandas) | Desktop GIS (ArcGIS, QGIS), legacy systems |
+| `postgresql` | (database) | Streaming insert into PostgreSQL | Production data pipelines, warehouses |
+| `sqlserver` | (database) | Streaming insert into SQL Server | Enterprise Microsoft environments |
+| `mariadb` | (database) | Streaming insert into MariaDB/MySQL | Open-source stack deployments |
+| `duckdb` | (database) | Streaming insert into DuckDB file | Local analytics, embedded workloads |
+
+### Data Governance Manifest
+
+For every file-based export (CSV, Parquet, JSON, YAML), a **data governance manifest** is written as a sidecar JSON file named `{output_stem}_manifest.json`. This manifest captures the complete generation context for reproducibility and auditing:
+
+| Field | Description |
+|-------|-------------|
+| `version` | Manifest schema version (currently `1.0`) |
+| `generated_at` | ISO 8601 timestamp of generation (UTC) |
+| `package` | Package name (`synth911gen3`) |
+| `package_version` | Installed package version |
+| `python_version` | Python interpreter version |
+| `platform` | OS/platform identifier |
+| `seed` | Random seed used for generation |
+| `rows_requested` | Number of incident rows requested |
+| `dataset` | Which dataset(s) were generated (`incidents`, `phone`, `all`) |
+| `output_format` | Output format used |
+| `area_query` | OpenStreetMap area query |
+| `start_date` / `end_date` | Date range for incident timestamps |
+| `id_format` | ID format (`integer` or `guid`) |
+| `calltaker_pool_size` / `dispatcher_pool_size` | Personnel pool sizes |
+| `shift_preset` | Shift structure preset (if any) |
+| `realism_config_hash` | SHA-256 hash (first 16 chars) of the realism YAML config |
+| `max_memory_bytes` | Per-chunk memory budget for chunked exports |
+| `schema_hash` | SHA-256 hash (first 16 chars) of the output schema |
+| `datasets_generated` | List of dataset names produced |
+| `row_counts` | Row count per dataset |
+| `column_counts` | Column count per dataset |
+
+The manifest enables:
+- **Reproducibility**: Regenerate identical data by reusing the seed and parameters
+- **Audit trail**: Verify what configuration produced a given export
+- **Schema validation**: Detect schema drift across runs
+- **Config verification**: Confirm the realism config matches expectations via hash
+
+> **Note**: The manifest is not emitted for in-memory formats (`pandas`/`polars`) since no files are written.
 
 ### File Naming
 
 - **CSV/Parquet**: `{output_stem}_{dataset}.{ext}` (e.g., `synthetic_911_incidents.csv`)
 - **JSON/YAML**: `{output_stem}_bundle.{ext}` (single file containing all datasets)
+- **GeoJSON**: `{output_stem}_incidents.geojson` (FeatureCollection with Point geometries)
+- **Shapefile**: `{output_stem}_incidents.shp` + sidecars (`.shx`, `.dbf`, `.prj`, `.cpg`)
+- **Manifest**: `{output_stem}_manifest.json` (data governance sidecar; all file-based formats)
+
+### Geospatial Exports
+
+The `geojson` and `shapefile` formats export the **incidents dataset** as spatial data with Point geometries derived from the latitude/longitude coordinates fetched from OpenStreetMap.
+
+#### GeoJSON
+
+- Outputs a standard **GeoJSON FeatureCollection** (RFC 7946)
+- Each incident becomes a `Feature` with a `Point` geometry `[longitude, latitude]`
+- All incident attributes are included in `properties`
+- Coordinates use WGS84 (EPSG:4326)
+- Ideal for web mapping (Leaflet, Mapbox, OpenLayers), GIS software, and spatial databases
+
+```bash
+uv run synth911gen3 generate --format geojson --rows 10000 --area "Seattle, WA"
+```
+
+#### Shapefile (ESRI)
+
+- Outputs a traditional **ESRI Shapefile** with `.shp`, `.shx`, `.dbf`, `.prj`, `.cpg` files
+- Requires optional dependencies: `uv add geopandas shapely`
+- Geometry: Point (WGS84 / EPSG:4326)
+- **Note**: Shapefile format limits field names to 10 characters; long column names are automatically truncated (e.g., `internal_reference_number` → `internal_r`). For full fidelity, prefer GeoJSON or Parquet.
+- Compatible with ArcGIS, QGIS, and other desktop GIS software
+
+```bash
+# Install optional dependencies first
+uv add geopandas shapely
+
+# Generate shapefile
+uv run synth911gen3 generate --format shapefile --rows 10000 --area "Denver, CO"
+```
+
+#### Coordinate Availability
+
+Coordinates come from OpenStreetMap address data. When real addresses with `addr:housenumber` + `addr:street` are found via Overpass, their lat/lon are used. For synthesized addresses (fallback when OSM lacks house numbers), coordinates default to `0.0, 0.0` and are excluded from geospatial exports.
+
+> **Note**: The hourly phone metrics dataset has no spatial component and is exported as JSON alongside the geospatial incidents file when using `geojson` or `shapefile` format.
+
+### Database Exports (Streaming Insert)
+
+The generator supports direct streaming inserts into relational databases, avoiding intermediate files entirely. This is ideal for large-scale loads and production pipelines.
+
+| Format | Dialect | Required Dependencies | Default Port |
+|--------|---------|----------------------|--------------|
+| `postgresql` | PostgreSQL | `psycopg2-binary` | 5432 |
+| `sqlserver` | SQL Server | `pyodbc` + ODBC Driver 17 | 1433 |
+| `mariadb` | MariaDB/MySQL | `pymysql` | 3306 |
+| `duckdb` | DuckDB | `duckdb-engine` | (file-based) |
+
+#### Configuration
+
+Database exports require connection parameters. These can be provided via CLI flags, params file, or Python API:
+
+| Parameter | CLI Flag | Description | Required |
+|-----------|----------|-------------|----------|
+| `db_dialect` | --db-dialect | Explicit dialect (auto-detected from --format) | No |
+| `db_host` | --db-host | Database host | Yes (except DuckDB) |
+| `db_port` | --db-port | Database port | No (uses defaults) |
+| `db_name` | --db-name | Database name | Yes |
+| `db_user` | --db-user | Username | Yes (except DuckDB) |
+| `db_password` | --db-password | Password | Yes (except DuckDB) |
+| `db_table_incidents` | --db-table-incidents | Incidents table name | No (default: `incidents`) |
+| `db_table_phone` | --db-table-phone | Phone metrics table name | No (default: `hourly_call_counts`) |
+| `db_schema` | --db-schema | Database schema | No |
+| `db_batch_size` | --db-batch-size | Rows per batch insert | No (default: 10000) |
+| `db_if_exists` | --db-if-exists | `append`, `replace`, `fail` | No (default: `append`) |
+| `db_create_indexes` | --db-create-indexes | Create indexes on key columns | No (default: true) |
+
+#### Usage Examples
+
+**PostgreSQL:**
+```bash
+uv run synth911gen3 generate \
+  --format postgresql \
+  --rows 100000 \
+  --area "Seattle, WA" \
+  --db-host localhost \
+  --db-name cad_db \
+  --db-user etl_user \
+  --db-password secret \
+  --db-table-incidents cad_incidents \
+  --db-batch-size 50000
+```
+
+**DuckDB (local file, no server needed):**
+```bash
+uv run synth911gen3 generate \
+  --format duckdb \
+  --rows 500000 \
+  --area "Portland, OR" \
+  --db-name portland_cad.duckdb
+```
+
+**MariaDB with custom schema and replace mode:**
+```bash
+uv run synth911gen3 generate \
+  --format mariadb \
+  --rows 200000 \
+  --area "Denver, CO" \
+  --db-host db.example.com \
+  --db-name cad \
+  --db-user loader \
+  --db-password secret \
+  --db-schema public \
+  --db-if-exists replace
+```
+
+**Python API:**
+```python
+from synth911gen3 import Synth911Application
+from synth911gen3.addresses import OpenStreetMapAddressProvider
+from synth911gen3.config import GenerationRequest, OutputFormat, DatasetKind
+
+request = GenerationRequest(
+    rows=1000000,
+    area_query="Chicago, IL",
+    output_format=OutputFormat.POSTGRESQL,
+    dataset=DatasetKind.ALL,
+    db_host="localhost",
+    db_name="cad_warehouse",
+    db_user="loader",
+    db_password="secret",
+    db_batch_size=100000,
+    db_create_indexes=True,
+)
+
+app = Synth911Application(address_provider=OpenStreetMapAddressProvider())
+result = app.generate(request)
+# result.exported_artifacts["database"] contains row counts per table
+```
+
+#### Behavior Notes
+
+- **Streaming inserts**: Data is inserted in batches (`db_batch_size`) using pandas `to_sql` with `method="multi"` for efficiency.
+- **Schema creation**: Tables are created automatically with appropriate column types (TIMESTAMP, BIGINT, DOUBLE PRECISION, TEXT, BOOLEAN).
+- **Indexes**: By default, indexes are created on `call_start_time`, `agency`, `priority`, and `internal_reference_number` for query performance.
+- **Idempotency**: With `if_exists="append"` (default), re-running with the same seed appends data. Use `replace` to drop and recreate tables.
+- **DuckDB**: Uses a local file; `db_name` defaults to `{output_stem}.duckdb` in `output_dir`. No host/user/password needed.
+- **SQL Server**: Requires ODBC Driver 17 for SQL Server installed on the system.
 
 ### In-Memory Formats (pandas/polars)
 
@@ -602,7 +1099,7 @@ uv run synth911gen3 generate --rows 5000000 --format parquet --max-memory-bytes 
 | `shift` | str | Shift on duty at `call_start_time` (e.g., A, B, C, D) |
 | `shift_label` | str | Shift label (e.g., DAY, NIGHT) |
 | `shift_group` | int | Crew rotation group the shift belongs to (1, 2, …) |
-| `problem_nature` | str | Call type (e.g., "Traffic Crash", "Chest Pain") |
+| `problem_nature` | str | Call type (e.g., "Traffic Crash", "Chest Pain", "Assist Fire", "Assist Police", "Assist EMS") |
 | `priority` | int | Priority level 1-5 (1=highest) |
 | `prefix_directional` | str | Directional prefix (N/S/E/W/NE/…) or empty |
 | `street_number` | str | House number (e.g., "101", "204A") |
@@ -896,6 +1393,136 @@ OpenStreetMap addresses are cached in:
 ```
 
 Delete cache files to force re-fetch for updated area boundaries.
+
+---
+
+## FAQ
+
+### General
+
+**Q: What is synth911gen3?**
+A: A synthetic data generator that creates realistic 9-1-1 CAD incident data and hourly phone-center metrics. It simulates call volumes, response times, agency distributions, and geographic patterns based on configurable statistical models.
+
+**Q: What data does it generate?**
+A: Two datasets:
+- **CAD Incidents**: Individual call records with timestamps, agency, priority, problem type, location, response times, personnel, disposition
+- **Hourly Phone Metrics**: Aggregated call counts (911 received/abandoned, non-emergency received/abandoned, outbound) with answer-time percentages
+
+**Q: Is the data realistic?**
+A: Yes. Defaults are calibrated from real 9-1-1 center patterns. You can fully customize distributions via YAML realism config to match your specific center.
+
+**Q: Can I use this for production/testing?**
+A: Yes. It's designed for testing CAD systems, training dispatchers, capacity planning, and research. The data is synthetic — no real PII or sensitive information.
+
+---
+
+### Generation
+
+**Q: How many rows can I generate?**
+A: Tested up to 10M+ rows. For large runs, use `--format parquet --max-memory-bytes 1073741824` (1 GiB chunks). The generator streams data to avoid memory issues.
+
+**Q: How do I make results reproducible?**
+A: Use the same `--seed` value. With identical parameters and seed, output is byte-for-byte identical (except chunked exports which may differ in row order).
+
+**Q: How do I generate data for a specific date range?**
+A: Use `--start-date 2024-01-01 --end-date 2024-03-31`. Incidents are distributed across the range using realistic diurnal patterns.
+
+**Q: Can I generate data for multiple areas?**
+A: One run = one area. Run multiple times with different `--area` values and combine outputs.
+
+**Q: How do I get coordinates for mapping?**
+A: Use `--format geojson` or `--format shapefile`. Coordinates come from OSM address data. Synthesized addresses (fallback when OSM lacks house numbers) get 0,0 and are excluded from geospatial exports.
+
+---
+
+### Realism Configuration
+
+**Q: Do I need a realism config?**
+A: No. Built-in defaults are realistic for a typical US 9-1-1 center. Use `--config` only if you want to match a specific center.
+
+**Q: How do I create a custom realism config?**
+A: 1) Copy `config/example_realism.yaml`, 2) Analyze your real CAD data, 3) Replace values with your computed statistics, 4) Test with `--rows 1000 --format pandas`, 5) Iterate.
+
+**Q: What are the most impactful parameters to tune?**
+A: In order: `agency_weights`, `priority_weights`, `problem_profiles`, `time_profiles`, `hourly_weights`, `disposition_profiles`.
+
+**Q: Can I add custom problem types?**
+A: Yes. Add entries to `problem_profiles` in your realism YAML. Weights per priority pool must sum to 1.0.
+
+**Q: How do seasonal multipliers work?**
+A: Each problem type gets 4 multipliers [Winter, Spring, Summer, Fall]. Applied per-incident based on call month, then weights re-normalized per agency/priority pool.
+
+---
+
+### Output Formats
+
+**Q: Which format should I use?**
+| Use Case | Recommended |
+|----------|-------------|
+| Quick analysis, Excel | CSV |
+| Analytics, large data | Parquet |
+| Web APIs, JavaScript | JSON |
+| Python notebooks | pandas/polars |
+| GIS, mapping | GeoJSON |
+| Desktop GIS (ArcGIS/QGIS) | Shapefile |
+| Database pipelines | PostgreSQL, SQL Server, MariaDB, DuckDB |
+
+**Q: What's the difference between `json` and `geojson`?**
+A: `json` exports all data as a flat bundle. `geojson` exports only incidents as RFC 7946 FeatureCollection with Point geometries for mapping.
+
+**Q: Why are shapefile field names truncated?**
+A: ESRI Shapefile format limits field names to 10 characters. `internal_reference_number` becomes `internal_r`. Use GeoJSON or Parquet for full names.
+
+**Q: Can I stream directly to a database?**
+A: Yes. Use `--format postgresql` (or `sqlserver`, `mariadb`, `duckdb`) with connection parameters. Tables auto-created with indexes.
+
+---
+
+### Troubleshooting
+
+**Q: "AddressLookupError: Failed to fetch addresses"**
+A: Check internet connectivity. Try simpler area query. Addresses cached after first fetch.
+
+**Q: TLS errors behind corporate proxy**
+A: Set `UV_NATIVE_TLS=true` for `uv sync`, and `SYNTH911_SYSTEM_TRUST=1` for OSM lookups. Uses OS trust store.
+
+**Q: Generation is slow**
+A: Use Parquet format. First run fetches OSM addresses (cached). For large runs, lower `--max-memory-bytes` to stream chunks.
+
+**Q: TUI won't launch**
+A: Install `textual` (`uv add textual`). Terminal needs ANSI colors and mouse support.
+
+**Q: "ValidationError: start_date must be on or before end_date"**
+A: Ensure `--start-date` ≤ `--end-date`. Format: YYYY-MM-DD.
+
+**Q: Out of memory on large runs**
+A: Use `--max-memory-bytes` to limit chunk size (default 2 GiB). Or use database streaming export.
+
+---
+
+### Python API
+
+**Q: How do I use in a Jupyter notebook?**
+A: Use `output_format=OutputFormat.PANDAS` — returns DataFrames directly, no files written.
+
+**Q: How do I add progress reporting?**
+A: Pass `on_progress=lambda d, c, t: print(f"{d}: {c}/{t}")` to `app.generate()`.
+
+**Q: Can I use custom address data?**
+A: Yes. Implement `AddressProvider` protocol and pass to `Synth911Application(address_provider=CustomProvider())`.
+
+---
+
+### License & Support
+
+**Q: What's the license?**
+A: MIT License — free for commercial and non-commercial use.
+
+**Q: Where to report issues?**
+A: [GitHub Issues](https://github.com/trdunsworth/synth911gen3/issues)
+
+**Q: Where's the changelog?**
+A: `CHANGELOG.md` in the repository root.
 
 ---
 

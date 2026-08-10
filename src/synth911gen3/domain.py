@@ -154,6 +154,8 @@ class Address:
     prefix_directional: str = ""
     postfix_directional: str = ""
     postal_code: str = ""
+    latitude: float = 0.0
+    longitude: float = 0.0
 
     def __post_init__(self) -> None:
         if not self.street_name:

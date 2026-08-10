@@ -206,18 +206,51 @@ recommendation docs in `docs/`, and direct code review.
 
 ## Future Expansion Opportunities
 
-- **Multi-agency incidents & unit counts.** Add `num_units`/`units_available` and allow one
+- [x] **Multi-agency incidents & unit counts.** Add `num_units`/`units_available` and allow one
   incident to spawn LAW+FIRE+EMS records (mutual aid / multi-agency responses).
+  Added multi-agency assist problem types (Assist Police, Assist Fire, Assist EMS) to problem
+  profiles for all three agencies at priority 5, enabling LAW to call for FIRE/EMS assist,
+  FIRE to call for EMS assist, and EMS to call for LAW/FIRE assist. Full multi-record
+  incidents with unit counts remain for future work.
 - **Cadence/queueing simulation.** The recommendation docs propose a constrained simulation
   (unit availability queues, simpy). Worth prototyping for dispatch realism at P2/P3.
-- **Weather and seasonal correlation** (heat → heat-related EMS, winter → slip/fall).
-- **Geospatial exports** (GeoJSON / shapefile) alongside tabular formats, using address
+- [x] **Weather and seasonal correlation** (heat → heat-related EMS, winter → slip/fall).
+  Added `SEASONAL_MULTIPLIERS` in `constants.py` with per-problem seasonal weights for
+  Winter/Spring/Summer/Fall. Integrated into `RealismConfig` with YAML config support
+  (`seasonal_multipliers` section). Generator applies multipliers per-incident based on
+  call month: Winter multipliers for heat/cold exposure (1.5), hypothermia (3.0),
+  brush/grass fire (0.3); Summer multipliers for heat exhaustion (3.0), brush/grass fire (2.0),
+  noise complaints (1.3); Fall multipliers for shoplifting (1.2), chimney fire (1.5);
+  Spring multipliers for animal complaints (1.2). Configurable via realism YAML.
+- [x] **Geospatial exports** (GeoJSON / shapefile) alongside tabular formats, using address
   coordinates cached from OSM.
-- **Timezone-aware timestamps** and non-UTC/hourly-metric localization for deployments
-  outside one timezone.
-- **Database targets** (SQLite/Postgres) and streaming insert for very large datasets.
-- **Data governance manifest.** Emit a sidecar metadata file (seed, params, config hash,
+  Added `latitude`/`longitude` fields to `Address` model and incident schema. OSM address
+  provider extracts coordinates from Overpass elements (nodes: direct lat/lon; ways:
+  center point). Exporters support:
+  - `geojson`: RFC 7946 FeatureCollection with Point geometries, full attribute fidelity
+  - `shapefile`: ESRI Shapefile via geopandas (optional dep), field names truncated to
+    10 chars per format limitation. Hourly phone metrics exported as JSON alongside.
+  Documented in `USERSGUIDE.md` and `REALISMGUIDE.md`.
+- [x] **Database targets** (SQLite/Postgres) and streaming insert for very large datasets.
+  Added `db_exporter.py` with `DatabaseExporter` class supporting streaming inserts to:
+  - PostgreSQL (via psycopg2)
+  - SQL Server (via pyodbc)
+  - MariaDB/MySQL (via pymysql)
+  - DuckDB (via duckdb-engine)
+  Tables auto-created with appropriate types, indexes on key columns, batch inserts
+  configurable via `db_batch_size`. New output formats: `postgresql`, `sqlserver`,
+  `mariadb`, `duckdb`. CLI params: `--db-host`, `--db-port`, `--db-name`, `--db-user`,
+  `--db-password`, `--db-table-incidents`, `--db-table-phone`, `--db-schema`,
+  `--db-batch-size`, `--db-if-exists`, `--db-create-indexes`. Documented in
+  `USERSGUIDE.md`.
+- [x] **Data governance manifest.** Emit a sidecar metadata file (seed, params, config hash,
   schema version, generation timestamp) with every export for reproducibility/auditing.
+  Added `manifest.py` with `Manifest` dataclass capturing seed, rows, dataset, output format,
+  area query, date range, ID format, personnel pools, shift preset, realism config hash,
+  max memory bytes, schema hash, datasets generated, row/column counts, and platform info.
+  Written as `{output_stem}_manifest.json` for all file-based formats (CSV, Parquet, JSON,
+  YAML). Includes `package_version`, `python_version`, `platform`, and `generated_at` for
+  full reproducibility. Documented in `USERSGUIDE.md` with field reference table.
 - **`config/example_params` parity.** Add a TOML example alongside JSON/YAML, and a
   params-driven CI regression run.
 - [x] **Packaging/distribution.** Publish on PyPI and/or containerize; add a `uv.lock`-driven
@@ -226,8 +259,9 @@ recommendation docs in `docs/`, and direct code review.
       generation job profiles), `.dockerignore`, added `fastapi`, `uvicorn`, `pydantic` to
       dependencies, and new `synth911gen3-serve` entry point in `pyproject.toml` pointing to
       `serve.py` with endpoints: `/health`, `/schema`, `/generate`, `/generate/stream`.
-- **Schema evolution** (pydantic models for `GenerationRequest`/`RealismConfig`) to
+- [x] **Schema evolution** (pydantic models for `GenerationRequest`/`RealismConfig`) to
   formalize validation and produce versioned output schemas.
+  Added `schema.py` with pydantic v2 models: `GenerationRequest`, `RealismConfig`, `ShiftConfig`, `Shift`, `TimeProfileIntervals`, `DispatchInitFraction`, `PhoneMetrics`, `OutputSchema`, `SchemaVersion`. Enums for all config types (`OutputFormat`, `DatasetKind`, `IdFormat`, `DatabaseDialect`, `ShiftPreset`, `IfExistsMode`). Full validation including weight sums, date ranges, reserved names, database connection requirements, and seasonal multipliers. 94% test coverage with `tests/test_schema.py` (33 tests). Replaces runtime validation in `config.py` with type-safe declarative models.
 - **Long-form user's guide.** `USERSGUIDE.md` / `REALISMGUIDE.md` currently cover quick
   start, CLI, configuration, and realism defaults. A fuller "getting started" guide with
   tutorials (first 911 dataset, tuning realism to a center, large-scale cloud runs) plus a
