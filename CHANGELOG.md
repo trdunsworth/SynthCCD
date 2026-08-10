@@ -62,6 +62,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.9.0] - 2026-08-10
+
+### Added
+- **Multi-agency assist problem types**: "Assist Police", "Assist Fire", "Assist EMS" added to problem profiles for all three agencies at priority 5, enabling cross-agency assist calls
+- **Data governance manifest**: Sidecar `{output_stem}_manifest.json` with seed, config hash, schema hash, row/column counts, platform info, generation timestamp for reproducibility/auditing
+- **Geospatial exports**: GeoJSON (RFC 7946) and ESRI Shapefile output formats with Point geometries from OSM coordinates; latitude/longitude added to Address model
+- **Database streaming inserts**: Direct streaming to PostgreSQL (psycopg2), SQL Server (pyodbc), MariaDB/MySQL (pymysql), DuckDB (duckdb-engine); auto table creation, batch inserts, indexes on key columns
+- **Seasonal correlations**: Per-problem seasonal multipliers (Winter/Spring/Summer/Fall) applied per-incident based on call month; configurable via realism YAML
+- **Schema evolution**: Pydantic v2 models (`GenerationRequest`, `RealismConfig`, `ShiftConfig`, `Shift`, `TimeProfileIntervals`, `DispatchInitFraction`, `PhoneMetrics`, `OutputSchema`, `SchemaVersion`) with full validation; enums for all config types
+- **Comprehensive documentation**: 5 tutorials (first dataset, tuning realism, large-scale cloud runs, geospatial analysis, database pipeline), full Python API reference, 50+ FAQ entries
+- **Realism Tuning Guide**: SQL queries for parameter extraction from real CAD data, comparison methodology (KS-tests), common scenarios (rural, urban, college town, tourist), parameter sensitivity analysis
+
+### Changed
+- Documentation split: `USERSGUIDE.md` (user-facing) + `REALISMGUIDE.md` (realism configuration reference)
+- Version bump to 0.9.0 (release candidate)
+
+---
+
 ## [0.1.0] - 2026-08-09
 
 Initial release candidate. All core AGENTS.md goals implemented.

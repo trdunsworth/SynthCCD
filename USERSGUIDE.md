@@ -117,6 +117,135 @@ print(f"Time range: {df['call_start_time'].min()} to {df['call_start_time'].max(
 
 ---
 
+### Tutorial 1b: Building Your First 9-1-1 Call Volume Dataset
+
+This tutorial focuses on generating the **hourly phone metrics dataset** — aggregated call counts by hour (911 received/abandoned, non-emergency received/abandoned, outbound calls, answer-time percentages).
+
+**Key concept**: The phone metrics generator produces **one row per hour** based on the **date range** (`--start-date` to `--end-date`). The `--rows` parameter controls the *base hourly call volume*, not the number of output rows.
+
+**Step 1: Generate one week of hourly data (168 rows = 7 days × 24 hours)**
+```bash
+uv run synth911gen3 generate \
+  --dataset phone \
+  --start-date 2026-08-04 \
+  --end-date 2026-08-10 \
+  --format parquet \
+  --area "Seattle, WA"
+```
+This generates exactly 168 rows (7 days × 24 hours = 168 hours) of call center metrics.
+
+**Step 2: Inspect the output**
+```bash
+ls output/
+# synthetic_911_hourly_call_counts.parquet  synthetic_911_manifest.json
+```
+
+**Step 3: Load and explore in Python**
+```python
+import pandas as pd
+
+df = pd.read_parquet("output/synthetic_911_hourly_call_counts.parquet")
+print(f"Rows: {len(df)}")  # Should be 168
+print(df.columns.tolist())
+print(df.head())
+```
+
+**Step 3b: Generate a full year (8,760 rows = 365 days × 24 hours)**
+```bash
+uv run synth911gen3 generate \
+  --dataset phone \
+  --start-date 2026-01-01 \
+  --end-date 2026-12-31 \
+  --format parquet \
+  --area "Seattle, WA"
+```
+
+**Step 4: Analyze call volume patterns**
+```python
+import pandas as pd
+
+df = pd.read_parquet("output/synthetic_911_hourly_call_counts.parquet")
+print(f"Rows: {len(df)}")
+print(df.columns.tolist())
+print(df.head())
+
+# Daily call volume totals
+daily = df.resample('D', on='hour_start').sum(numeric_only=True)
+print(daily[['nine_one_one_calls_received', 'non_emergency_calls_received']].head())
+
+# Average hourly profile (across all days)
+hourly_avg = df.groupby('hour_of_day').mean(numeric_only=True)
+print(hourly_avg[['nine_one_one_calls_received', 'non_emergency_calls_received']])
+
+# 911 answer-time compliance
+print(f"911 answered within 15s: {df['nine_one_one_answered_15s_pct'].mean():.1f}%")
+print(f"Non-emergency answered within 10s: {df['non_emergency_answered_10s_pct'].mean():.1f}%")
+
+# Abandonment rates
+print(f"911 abandonment rate: {df['nine_one_one_calls_abandoned'].sum() / df['nine_one_one_calls_received'].sum() * 100:.2f}%")
+print(f"Non-emergency abandonment rate: {df['non_emergency_calls_abandoned'].sum() / df['non_emergency_calls_received'].sum() * 100:.2f}%")
+```
+
+**Step 5: Visualize daily volume**
+```python
+import matplotlib.pyplot as plt
+
+daily = df.resample('D', on='hour_start').sum(numeric_only=True)
+fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+
+axes[0,0].plot(daily.index, daily['nine_one_one_calls_received'], label='911 Received')
+axes[0,0].plot(daily.index, daily['nine_one_one_calls_abandoned'], label='911 Abandoned')
+axes[0,0].set_title('911 Daily Volume')
+axes[0,0].legend()
+
+axes[0,1].plot(daily.index, daily['non_emergency_calls_received'], label='Non-Emerg Received')
+axes[0,1].plot(daily.index, daily['non_emergency_calls_abandoned'], label='Non-Emerg Abandoned')
+axes[0,1].set_title('Non-Emergency Daily Volume')
+axes[0,1].legend()
+
+axes[1,0].plot(daily.index, daily['outbound_calls_placed'])
+axes[1,0].set_title('Outbound Calls Placed')
+
+axes[1,1].plot(df.groupby('hour_start')['nine_one_one_answered_15s_pct'].mean())
+axes[1,1].set_title('911 Answered within 15s (%)')
+
+plt.tight_layout()
+plt.show()
+```
+
+**Step 6: Generate with custom realism config (e.g., high-volume call center)**
+```bash
+# Custom config for call center with higher 911 volume
+cat > config/call_center.yaml << 'EOF'
+phone_metrics:
+  min_hourly_volume: 5.0
+  nine_one_one_received_fraction: 0.65
+  non_emergency_received_fraction: 0.40
+  outbound_calls_fraction: 0.20
+  nine_one_one_abandonment_rate: 0.015
+  non_emergency_abandonment_rate: 0.04
+  max_abandonment_rate: 0.10
+  weekend_multiplier: 1.10
+  nine_one_one_answer_time_mu: 1.60
+  nine_one_one_answer_time_sigma: 0.70
+  non_emergency_answer_time_mu: 1.80
+  non_emergency_answer_time_sigma: 0.80
+  answer_time_thresholds: [10, 15, 20, 40]
+EOF
+
+uv run synth911gen3 generate \
+  --dataset phone \
+  --config config/call_center.yaml \
+  --start-date 2026-01-01 \
+  --end-date 2026-12-31 \
+  --format parquet \
+  --area "Denver, CO"
+```
+
+> **Note**: The `--rows` parameter for phone metrics controls the *base hourly call volume* (calls per hour), not the number of output rows. The number of output rows is determined by the date range (`--start-date` to `--end-date`, one row per hour).
+
+---
+
 ### Tutorial 2: Tuning Realism to Your Center
 
 Learn how to customize the realism configuration to match your 9-1-1 center's characteristics.

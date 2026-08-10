@@ -262,7 +262,67 @@ recommendation docs in `docs/`, and direct code review.
 - [x] **Schema evolution** (pydantic models for `GenerationRequest`/`RealismConfig`) to
   formalize validation and produce versioned output schemas.
   Added `schema.py` with pydantic v2 models: `GenerationRequest`, `RealismConfig`, `ShiftConfig`, `Shift`, `TimeProfileIntervals`, `DispatchInitFraction`, `PhoneMetrics`, `OutputSchema`, `SchemaVersion`. Enums for all config types (`OutputFormat`, `DatasetKind`, `IdFormat`, `DatabaseDialect`, `ShiftPreset`, `IfExistsMode`). Full validation including weight sums, date ranges, reserved names, database connection requirements, and seasonal multipliers. 94% test coverage with `tests/test_schema.py` (33 tests). Replaces runtime validation in `config.py` with type-safe declarative models.
-- **Long-form user's guide.** `USERSGUIDE.md` / `REALISMGUIDE.md` currently cover quick
+- [x] **Long-form user's guide.** `USERSGUIDE.md` / `REALISMGUIDE.md` currently cover quick
   start, CLI, configuration, and realism defaults. A fuller "getting started" guide with
   tutorials (first 911 dataset, tuning realism to a center, large-scale cloud runs) plus a
   reference-style API section and FAQ would serve new operators end-to-end.
+  **Completed:** Added 5 tutorials (first dataset, tuning realism, large-scale cloud runs,
+  geospatial analysis, database pipeline), full Python API reference with all classes/methods/enums,
+  50+ FAQ entries, and comprehensive Realism Tuning Guide with SQL queries for parameter extraction,
+  comparison methodology, common scenarios, and sensitivity analysis.
+
+---
+## Version 0.9.0 Release Preparation
+
+- [x] Version bump to 0.9.0 in `pyproject.toml`
+- [x] CHANGELOG.md updated with 0.9.0 release notes
+- [x] All tests passing (270 tests, 81.59% coverage)
+- [x] Lint/type checks passing (`ruff check .`, `ty check src/`)
+
+---
+## Future Enhancements (Post-0.9.0 / v1.0 Roadmap)
+
+### Core Functionality
+- [ ] **P1 — Business/landmark indicator column.** AGENTS.md: "If an address is a business address or a known landmark then that should be reflected in a column on its own." Requires mapping `amenity`/`shop`/`tourism` OSM tags onto address results.
+- [ ] **P1 — Geographic zone multipliers** (URBAN/SUBURBAN/RURAL) applied to travel time. Requires geocoding addresses to zones and adding zone-based travel time multipliers to realism config.
+- [ ] **P2 — Multi-agency incidents with unit counts.** Extend current assist problem types to full multi-record incidents where one call spawns LAW+FIRE+EMS records with unit counts and availability tracking.
+- [ ] **P2 — Cadence/queueing simulation.** Constrained simulation with unit availability queues (simpy) for dispatch realism. Prototype at P2/P3.
+- [ ] **P2 — Weather and seasonal correlation enhancements.** Current seasonal multipliers are static; integrate real weather data (temperature, precipitation) to drive problem type correlations dynamically.
+- [ ] **P2 — Timezone-aware timestamps.** Support non-UTC timestamps and hourly-metric localization for deployments outside single timezone.
+- [ ] **P2 — SQLite database target.** Add SQLite as a lightweight database export option alongside PostgreSQL/SQL Server/MariaDB/DuckDB.
+
+### Usability / Developer Experience
+- [ ] **P2 — `config/example_params` parity.** Add TOML example alongside JSON/YAML, and params-driven CI regression run.
+- [ ] **P2 — PyQt6 GUI.** Requires re-adding `pyqt6` dependency; desktop GUI for non-technical operators. **Deferred** — not being pursued for now.
+- [ ] **P2 — Param file generation CLI.** Add `synth911gen3 generate --save-params my_run.yaml` to save current CLI options to a params file.
+- [ ] **P2 — Config validation CLI.** Add `synth911gen3 validate-config path/to/config.yaml` to validate realism configs without generating data.
+- [ ] **P2 — Schema export CLI.** Add `synth911gen3 schema --format json|yaml --dataset incidents` to export output schema definitions.
+- [ ] **P2 — International emergency number support.** Customize volume column names for emergency/non-emergency lines per country. Current schema hardcodes US/Canada 911 terminology (e.g., `nine_one_one_calls_received`, `non_emergency_calls_received`). Need configurable emergency number definitions per locale: US/Canada (911), UK (999/112), Ireland (999/112), France (112, 114 for hearing-impaired, 15 SAMU, 17 Police, 18 Fire, 191 Aviation, 196 Maritime), Germany (112/110), etc. Would require: configurable emergency number registry per country/region, dynamic column naming in phone metrics output, per-number volume fractions/abandonment rates/answer-time thresholds in realism config, and locale-aware CLI params (e.g., `--country IE` or `--emergency-numbers "999,112"`).
+- [ ] **P2 — Emergency number registry with US/Canada defaults.** Establish a built-in registry of emergency numbers per country with US/Canada (911) as defaults. Include a flag (e.g., `--include-10-digit-emergency`) to optionally include 10-digit emergency lines (e.g., 10-digit direct-dial numbers for specific agencies or regions) alongside the standard short codes. This would support countries where both short codes and full numbers are used, and allow modeling of legacy or transitional dialing patterns.
+
+### Performance / Scalability
+- [ ] **P2 — Incremental/streaming generation API.** Allow generating data in chunks via iterator without holding full DataFrames, for integration with streaming pipelines (Kafka, Flink, Spark).
+- [ ] **P2 — Distributed generation.** Support for horizontal scaling across multiple workers/processes for 10M+ row datasets.
+- [ ] **P2 — Columnar statistics pre-computation.** Pre-compute column statistics during generation for faster downstream analytics (min/max/null counts per column).
+
+### Data Quality / Realism
+- [ ] **P2 — Correlation between fields.** Current model treats fields independently; add correlations (e.g., high priority ↔ shorter interview time, urban zone ↔ shorter travel time).
+- [ ] **P2 — Person name diversity.** Add configurable name generators by locale/ethnicity for international deployments.
+- [ ] **P2 — Call duration correlation with problem type.** Complex problems (e.g., "Active Shooter") should have longer phone durations on average.
+- [ ] **P2 — Shift handoff effects.** Model increased response times during shift change periods.
+
+### Integration / Ecosystem
+- [ ] **P2 — Parquet metadata embedding.** Embed generation metadata (seed, config hash, schema version) directly in Parquet file metadata for self-documenting files.
+- [ ] **P2 — Cloud storage direct write.** Stream output directly to S3/GCS/Azure Blob without local staging.
+- [ ] **P2 — Delta Lake / Iceberg table format.** Support writing to modern table formats for ACID transactions and time travel.
+- [ ] **P2 — Prometheus metrics endpoint.** Expose generation metrics (rows/sec, memory usage, queue depths) for monitoring.
+
+### Testing / Quality
+- [ ] **P2 — Property-based testing.** Add hypothesis-based tests for statistical properties (distribution shapes, weight sums, temporal patterns).
+- [ ] **P2 — Regression test suite.** Automated comparison of key statistics across versions to detect realism regressions.
+- [ ] **P2 — Load testing benchmarks.** CI benchmarks for generation throughput at various scales (10K, 100K, 1M, 10M rows).
+
+### Documentation
+- [ ] **P2 — Video tutorials.** Short screen-capture demos for tutorials.
+- [ ] **P2 — Architecture decision records (ADRs).** Document key design decisions (vectorization approach, pydantic vs dataclass, etc.).
+- [ ] **P2 — Contribution guide.** `CONTRIBUTING.md` with development setup, code style, PR process.
