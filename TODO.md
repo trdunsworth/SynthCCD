@@ -326,3 +326,38 @@ recommendation docs in `docs/`, and direct code review.
 - [ ] **P2 — Video tutorials.** Short screen-capture demos for tutorials.
 - [ ] **P2 — Architecture decision records (ADRs).** Document key design decisions (vectorization approach, pydantic vs dataclass, etc.).
 - [x] **P2 — Contribution guide.** Added `CONTRIBUTING.md` covering development setup, TLS-proxy notes, code style (ruff/ty), testing and coverage gates, documentation maintenance, commit discipline, the PR process, and the permissions summary.
+
+---
+
+## Stopping Point
+
+**Timestamp:** 2026-08-11 15:44:41 -04:00
+
+**In progress:** International name support + US ethnic diversity for personnel rosters (country-matched
+names derived from the selected OSM/Nominatim region, with a weighted multi-ethnic blend for US areas).
+
+### Done today
+- Created `src/synth911gen3/names.py` (not yet linted/type-checked/tested):
+  - `COUNTRY_LOCALES` — maps ~45 ISO countries → Faker locales (e.g., `CA` → `en_CA`/`fr_CA`, `HK` → `zh_TW`/`en_GB`).
+  - `US_ETHNIC_BLEND` — weighted 14-locale mix for US deployments (en_US 0.64, es_MX 0.16, en_NG 0.07, plus CJK/Devanagari/Arabic/etc.).
+  - `PersonnelNameGenerator` — weighted multi-locale unique-name generator (avoids Faker's buggy weighted-dict form in 40.13.0), CJK native family-name-first order.
+  - `resolve_name_locales`, `normalize_name_locales`, `is_valid_faker_locale`.
+  - Verified all planned locales exist in Faker 40.13.0.
+- Key findings:
+  - Faker's weighted-locale dict (`Faker({'en_US': 3, ...})`) is **broken in 40.13.0** → must blend manually (done).
+  - Avoid broken/title-prone locales: `ar_EG`, `ar_AE`, `el_CY`, `vi_VN`, `en_KE`, `de_DE` `name()`, etc.
+  - `_geocode_area` must **not** gain caching — existing test asserts 2 Nominatim calls for 2 invocations.
+  - `schema.py` is test-only; no runtime path needs changes.
+
+### Next steps (pick up here)
+1. `addresses.py` — add `country_code` to `_GeocodedArea`, persist in a cache meta-file, add `resolved_country()` to both `StaticAddressProvider` and `OpenStreetMapAddressProvider`.
+2. `realism_config.py` — add a `name_locales` section (YAML parse/emit/validate via `names.normalize_name_locales`).
+3. `incidents.py` — resolve country → locale profile (`names.resolve_name_locales`), build shift pools via `PersonnelNameGenerator`, drop `faker` from the `_prepare`/`_build_records`/`_resolve_chunk_rows` chain.
+4. Add `name_locales` to the manifest config hash in `manifest.py`.
+5. Update `config/example_realism.yaml` with a documented `name_locales` section.
+6. Tests — `tests/test_names.py` plus additions to addresses/realism/application suites; then full `uv run pytest`, `uv run ruff check .`, `uv run ty check src/`.
+7. Docs — USERSGUIDE.md, REALISMGUIDE.md, TODO.md (mark this item done), CHANGELOG.md.
+
+### Notes
+- Nothing committed; no tests run on `names.py` yet.
+- US_ETHNIC_BLEND weights approximate a typical large American call center; overridable per-country via the realism config `name_locales` section.
