@@ -128,10 +128,16 @@ class HourlyCallCountGenerator:
             non_emergency_calls_received, _f("non_emergency_abandonment_rate")
         )
 
-        # Answer-time percentages (deterministic — no RNG draws).
+        # Answer-time percentages — vary by hour based on load (busy_factor)
+        # and add small random variation per hour.
         thresholds = _flist("answer_time_thresholds")
-        emergency_answered: dict[str, float] = {}
-        non_emergency_answered: dict[str, float] = {}
+
+        # Sensitivity of answer-time mu to load factor (0 = no sensitivity, higher = more sensitive)
+        load_sensitivity = _f("answer_time_load_sensitivity", 0.25)
+
+        emergency_answered: dict[str, np.ndarray] = {}
+        non_emergency_answered: dict[str, np.ndarray] = {}
+
         for num in numbers:
             over = _line(num)
             mu = float(over.get("answer_time_mu", _f("nine_one_one_answer_time_mu")))
@@ -139,15 +145,20 @@ class HourlyCallCountGenerator:
             prefix = column_prefix(num.number)
             for threshold in thresholds:
                 t = int(threshold)
-                p = lognorm.cdf(threshold, s=sigma, scale=np.exp(mu))
+                # Adjust mu per hour based on busy_factor: busier = higher mu = lower answer rate
+                mu_adj = mu * (1.0 + load_sensitivity * (busy_factor - 1.0))
+                # Add small per-hour random noise to mu (lognormal domain)
+                mu_noise = rng.normal(0.0, 0.02, size=len(hours))
+                p = lognorm.cdf(threshold, s=sigma, scale=np.exp(mu_adj + mu_noise))
                 emergency_answered[f"{prefix}_answered_{t}s_pct"] = np.round(p * 100, 1)
+
         for threshold in thresholds:
             t = int(threshold)
-            p = lognorm.cdf(
-                threshold,
-                s=_f("non_emergency_answer_time_sigma"),
-                scale=np.exp(_f("non_emergency_answer_time_mu")),
-            )
+            mu = _f("non_emergency_answer_time_mu")
+            sigma = _f("non_emergency_answer_time_sigma")
+            mu_adj = mu * (1.0 + load_sensitivity * (busy_factor - 1.0))
+            mu_noise = rng.normal(0.0, 0.02, size=len(hours))
+            p = lognorm.cdf(threshold, s=sigma, scale=np.exp(mu_adj + mu_noise))
             non_emergency_answered[f"non_emergency_answered_{t}s_pct"] = np.round(p * 100, 1)
 
         data: dict[str, object] = {

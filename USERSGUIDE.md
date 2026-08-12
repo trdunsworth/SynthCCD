@@ -44,7 +44,7 @@ uv sync
 source .venv/bin/activate
 
 # Activate environment (Windows PowerShell)
-.venv\Scripts\Activate.ps1
+.venv\Scripts\activate
 ```
 
 ---
@@ -649,6 +649,10 @@ Generation runs in a background worker, so the interface stays responsive. A pro
 tracks incident generation (updates ~0.1% granularity) and the status panel reflects each
 phase; invalid inputs are highlighted with a red border and reported together in the status
 panel, clearing as you edit.
+
+The Parameters tab is scrollable, and tabbing between fields auto-scrolls the form so the
+focused field is always visible — you never need to scroll manually or guess where the next
+parameter sits.
 
 ### TUI Fields
 
@@ -1651,6 +1655,18 @@ uv run synth911gen3 generate
 The runtime flag is a no-op unless set, so production behavior is unchanged. If the OS trust
 store does not trust the proxy's issuer, contact your network administrator instead — do not
 disable TLS verification.
+
+When address lookups fail because of a certificate problem, the generator now reports the
+underlying cause and points to this workaround, e.g.:
+
+```
+Unable to reach the OpenStreetMap Nominatim service: certificate verification failed
+(unable to get local issuer certificate). If you are behind a TLS-inspecting proxy, set
+SYNTH911_SYSTEM_TRUST=1 to verify against the OS trust store.
+```
+
+These connectivity failures raise `AddressConnectionError` (a subclass of
+`AddressLookupError`), so existing callers that already catch `AddressLookupError` keep working.
 
 #### "ExportError: Unsupported output format"
 - Valid formats: `csv`, `parquet`, `json`, `yaml`, `pandas`, `polars`

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import ssl
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -14,7 +15,7 @@ import pandas as pd
 
 from .domain import Address
 from .emergency_numbers import normalize_country
-from .exceptions import AddressLookupError
+from .exceptions import AddressConnectionError, AddressLookupError
 from .logging_conf import get_logger
 
 logger = get_logger("addresses")
@@ -142,6 +143,32 @@ def _parse_bbox(area_query: str) -> tuple[float, float, float, float] | None:
     if not (-90 <= south <= north <= 90 and -180 <= west <= east <= 180):
         return None
     return south, west, north, east
+
+
+def _tls_cause(exc: BaseException) -> ssl.SSLCertVerificationError | None:
+    """Return the first certificate-verification error in an exception chain."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, ssl.SSLCertVerificationError):
+            return current
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def _describe_http_error(exc: httpx.HTTPError) -> str:
+    """Human-readable description of an HTTP failure, flagging proxy TLS issues."""
+    tls = _tls_cause(exc)
+    if tls is not None:
+        message = getattr(tls, "verify_message", "") or str(tls)
+        return (
+            f"certificate verification failed ({message}). If you are behind a "
+            "TLS-inspecting proxy, set SYNTH911_SYSTEM_TRUST=1 to verify against the "
+            "OS trust store."
+        )
+    detail = str(exc.__cause__ or exc)
+    return detail or type(exc).__name__
 
 
 def _normalize_state(state: str) -> str:
@@ -336,8 +363,9 @@ class OpenStreetMapAddressProvider:
             try:
                 response = self._client.get(url, params=params)
             except httpx.HTTPError as exc:
-                raise AddressLookupError(
-                    "Unable to reach the OpenStreetMap Nominatim service."
+                raise AddressConnectionError(
+                    "Unable to reach the OpenStreetMap Nominatim service: "
+                    f"{_describe_http_error(exc)}"
                 ) from exc
             self._last_nominatim_request = time.monotonic()
 
@@ -406,7 +434,13 @@ class OpenStreetMapAddressProvider:
     def _run_overpass_query(self, query: str) -> overpy.Result:
         last_status: int | None = None
         for attempt in range(self._max_retries):
-            response = self._client.post(_OVERPASS_URL, content=query.encode("utf-8"))
+            try:
+                response = self._client.post(_OVERPASS_URL, content=query.encode("utf-8"))
+            except httpx.HTTPError as exc:
+                raise AddressConnectionError(
+                    "Unable to reach the OpenStreetMap Overpass API: "
+                    f"{_describe_http_error(exc)}"
+                ) from exc
             last_status = response.status_code
             if response.status_code == 200:
                 return overpy.Overpass().parse_xml(response.content)
@@ -422,6 +456,8 @@ class OpenStreetMapAddressProvider:
         )
         try:
             result = self._query_runner(query)
+        except AddressConnectionError:
+            raise
         except AddressLookupError:
             return []
         return self._parse_elements(result, area.city, area.state)
@@ -432,6 +468,8 @@ class OpenStreetMapAddressProvider:
         )
         try:
             result = self._query_runner(query)
+        except AddressConnectionError:
+            raise
         except AddressLookupError:
             return []
         street_names = self._named_streets(result)

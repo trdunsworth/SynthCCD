@@ -27,3 +27,6 @@ Thumbs.db
 
 # Generated output data
 output/
+
+# TUI screenshot artifacts (written on quit)
+tui_*.svg

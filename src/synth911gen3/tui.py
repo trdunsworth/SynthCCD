@@ -138,6 +138,7 @@ class Synth911Tui(App[None]):
     }
 
     #form {
+        height: auto;
         padding: 0 0 1 0;
     }
 

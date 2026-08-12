@@ -283,6 +283,32 @@ def test_tui_progress_updates_bar_and_status() -> None:
     _run(scenario())
 
 
+def test_tui_form_overflow_allows_scroll() -> None:
+    async def scenario() -> None:
+        app = Synth911Tui()
+        async with app.run_test(size=(80, 20)):
+            scroll = app.query_one("#parameters-scroll")
+            assert scroll.max_scroll_y > 0
+
+    _run(scenario())
+
+
+def test_tui_tab_scrolls_focused_field_into_view() -> None:
+    async def scenario() -> None:
+        app = Synth911Tui()
+        async with app.run_test(size=(80, 20)) as pilot:
+            targets = ["format", "emergency_numbers", "config"]
+            for target in targets:
+                for _ in range(40):
+                    await pilot.press("tab")
+                    if app.focused is not None and app.focused.id == target:
+                        break
+                assert app.focused is not None and app.focused.id == target
+                assert app.screen.can_view_entire(app.focused)
+
+    _run(scenario())
+
+
 def test_tui_input_change_clears_invalid_mark() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
@@ -290,7 +316,10 @@ def test_tui_input_change_clears_invalid_mark() -> None:
             rows = app.query_one("#rows", Input)
             rows.add_class("invalid")
             rows.post_message(Input.Changed(rows, "100"))
-            await pilot.pause()
+            for _ in range(50):
+                await pilot.pause()
+                if not rows.has_class("invalid"):
+                    break
             assert not rows.has_class("invalid")
 
     _run(scenario())

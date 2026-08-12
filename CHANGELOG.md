@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Parquet metadata embedding**: generation provenance (seed, realism config hash, schema hash, schema version, timestamps, request summary) written into each Parquet file's key-value footer metadata as namespaced `synth911:*` pairs — self-documenting files readable by any Parquet tool; embedded at write time for both full and chunked exports (chunked mode derives `schema_hash` from the first chunk); new `DATA_SCHEMA_VERSION` constant and `Manifest.schema_version`/`Manifest.to_kv_metadata()`
 
 ### Changed
+- TUI Parameters tab now auto-scrolls to keep the focused field in view while tabbing (the form
+  previously filled its scroll container, suppressing scroll overflow entirely)
+- OSM address lookups now surface the underlying network/TLS cause instead of generic "unable to
+  reach" messages; certificate failures include a hint pointing at `SYNTH911_SYSTEM_TRUST=1`.
+  Connectivity failures raise the new `AddressConnectionError` (subclass of `AddressLookupError`),
+  and Overpass network errors no longer slip through the street-name fallback uncaught
 - Personnel names now follow the OSM region's country (falling back to the request `--country`, then `US`) instead of a fixed `en_US` Faker locale
 - `IncidentGenerator` no longer takes a `faker_locale` constructor argument
 - Database exports are now configurable from the CLI: new `--db-dialect`, `--db-host`, `--db-port`, `--db-name`, `--db-user`, `--db-password`, `--db-table-incidents`, `--db-table-phone`, `--db-schema`, `--db-batch-size`, `--db-if-exists`, and `--no-db-create-indexes` flags (index creation is disabled with `--no-db-create-indexes`; previously only reachable via params files or the Python API)

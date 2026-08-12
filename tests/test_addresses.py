@@ -486,6 +486,56 @@ def test_nominatim_fails_after_exhausting_retries(tmp_path: Path, monkeypatch) -
     assert client.search_calls == 3
 
 
+def test_nominatim_tls_error_surfaces_workaround_hint(tmp_path: Path) -> None:
+    import ssl
+
+    class _TlsClient:
+        def get(self, url: str, **kwargs: Any) -> Any:
+            raise httpx.ConnectError(
+                "connection failed", request=httpx.Request("GET", url)
+            ) from ssl.SSLCertVerificationError(1, "unable to get local issuer certificate")
+
+        def post(self, url: str, **kwargs: Any) -> Any:
+            return _FakeResponse({}, 500)
+
+    provider = OpenStreetMapAddressProvider(
+        client=_TlsClient(),  # type: ignore[arg-type]
+        cache_dir=tmp_path,
+        nominatim_min_interval=0.0,
+    )
+    with pytest.raises(AddressLookupError, match="SYNTH911_SYSTEM_TRUST"):
+        provider.load_addresses("Kansas City, MO")
+
+
+def test_overpass_network_error_raises_address_lookup_error(tmp_path: Path) -> None:
+    class _NetworkClient:
+        def __init__(self) -> None:
+            self._network_error = httpx.ConnectError(
+                "connection refused", request=httpx.Request("POST", "https://overpass.example")
+            )
+
+        def get(self, url: str, **kwargs: Any) -> Any:
+            return _FakeResponse(
+                [
+                    {
+                        "boundingbox": ["38.8", "39.3", "-94.7", "-94.4"],
+                        "address": {"city": "Kansas City", "state": "Missouri"},
+                    }
+                ]
+            )
+
+        def post(self, url: str, **kwargs: Any) -> Any:
+            raise self._network_error
+
+    provider = OpenStreetMapAddressProvider(
+        client=_NetworkClient(),  # type: ignore[arg-type]
+        cache_dir=tmp_path,
+        nominatim_min_interval=0.0,
+    )
+    with pytest.raises(AddressLookupError, match="Overpass"):
+        provider.load_addresses("Kansas City, MO")
+
+
 def test_nominatim_enforces_min_request_interval(tmp_path: Path, monkeypatch) -> None:
     sleeps: list[float] = []
     monkeypatch.setattr(
