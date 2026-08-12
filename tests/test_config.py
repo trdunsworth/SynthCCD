@@ -2,7 +2,13 @@ from pathlib import Path
 
 import pytest
 
-from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
+from synth911gen3.config import (
+    DatabaseDialect,
+    DatasetKind,
+    GenerationRequest,
+    IdFormat,
+    OutputFormat,
+)
 from synth911gen3.exceptions import ValidationError
 
 
@@ -34,13 +40,17 @@ def test_generation_request_accepts_id_formats(id_format: IdFormat) -> None:
     assert GenerationRequest(id_format=id_format).id_format is id_format
 
 
-@pytest.mark.parametrize("stem", [".", "..", "a/b", "a\\b", "CON", "con.csv", "NUL", "COM1", "aux", "has\x00null"])
+@pytest.mark.parametrize(
+    "stem", [".", "..", "a/b", "a\\b", "CON", "con.csv", "NUL", "COM1", "aux", "has\x00null"]
+)
 def test_output_stem_rejects_unsafe_values(stem: str) -> None:
     with pytest.raises(ValidationError):
         GenerationRequest(output_stem=stem).validate()
 
 
-@pytest.mark.parametrize("output_dir", [Path("../outside"), Path("nested/../../escape"), Path("x\x00y")])
+@pytest.mark.parametrize(
+    "output_dir", [Path("../outside"), Path("nested/../../escape"), Path("x\x00y")]
+)
 def test_output_dir_rejects_unsafe_values(output_dir: Path) -> None:
     with pytest.raises(ValidationError):
         GenerationRequest(output_dir=output_dir).validate()
@@ -50,3 +60,66 @@ def test_output_dir_accepts_normal_paths(tmp_path: Path) -> None:
     request = GenerationRequest(output_dir=tmp_path / "exports", output_stem="kc_911")
     request.validate()
     assert request.output_dir == tmp_path / "exports"
+
+
+def test_sqlite_output_format_requires_no_connection_params() -> None:
+    request = GenerationRequest(rows=10, output_format=OutputFormat.SQLITE)
+    request.validate()
+    assert request.db_name == "synthetic_911.sqlite3"
+    assert request.db_port is None
+
+
+def test_sqlite_default_name_uses_output_stem() -> None:
+    request = GenerationRequest(
+        rows=10,
+        output_format=OutputFormat.SQLITE,
+        output_stem="kc_cad",
+    )
+    request.validate()
+    assert request.db_name == "kc_cad.sqlite3"
+
+
+def test_sqlite_explicit_db_name_is_preserved() -> None:
+    request = GenerationRequest(
+        rows=10,
+        output_format=OutputFormat.SQLITE,
+        db_name="warehouse.db",
+    )
+    request.validate()
+    assert request.db_name == "warehouse.db"
+
+
+def test_sqlite_dialect_enum_values() -> None:
+    assert DatabaseDialect.SQLITE.value == "sqlite"
+    assert OutputFormat.SQLITE.value == "sqlite"
+
+
+def test_sqlite_dialect_override_defaults_file_name() -> None:
+    request = GenerationRequest(
+        rows=10,
+        output_format=OutputFormat.DUCKDB,
+        db_dialect=DatabaseDialect.SQLITE,
+        output_stem="mixed",
+    )
+    request.validate()
+    assert request.db_name == "mixed.sqlite3"
+
+
+def test_sqlite_rejects_invalid_if_exists() -> None:
+    request = GenerationRequest(
+        rows=10,
+        output_format=OutputFormat.SQLITE,
+        db_if_exists="drop",
+    )
+    with pytest.raises(ValidationError, match="db_if_exists must be"):
+        request.validate()
+
+
+def test_sqlite_rejects_non_positive_batch_size() -> None:
+    request = GenerationRequest(
+        rows=10,
+        output_format=OutputFormat.SQLITE,
+        db_batch_size=0,
+    )
+    with pytest.raises(ValidationError, match="db_batch_size must be greater"):
+        request.validate()

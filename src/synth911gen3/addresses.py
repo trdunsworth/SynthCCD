@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -12,6 +13,7 @@ import overpy
 import pandas as pd
 
 from .domain import Address
+from .emergency_numbers import normalize_country
 from .exceptions import AddressLookupError
 from .logging_conf import get_logger
 
@@ -79,12 +81,17 @@ _US_STATE_NAMES = {
     "WY": "Wyoming",
 }
 
-_LOCAL_HIGHWAY_PATTERN = "^(residential|living_street|unclassified|service|tertiary|secondary|primary)$"
+_LOCAL_HIGHWAY_PATTERN = (
+    "^(residential|living_street|unclassified|service|tertiary|secondary|primary)$"
+)
 
 
 class AddressProvider(Protocol):
     def load_addresses(self, area_query: str) -> list[Address]:
         """Load addresses for a requested geography."""
+
+    def resolved_country(self) -> str | None:
+        """ISO 3166-1 alpha-2 country code of the loaded region, or ``None`` when unknown."""
 
 
 class StaticAddressProvider:
@@ -96,6 +103,10 @@ class StaticAddressProvider:
             raise AddressLookupError("StaticAddressProvider requires at least one address.")
         return list(self._addresses)
 
+    def resolved_country(self) -> str | None:
+        """Static address pools carry no region metadata, so the country is unknown."""
+        return None
+
 
 @dataclass(frozen=True, slots=True)
 class _GeocodedArea:
@@ -105,6 +116,18 @@ class _GeocodedArea:
     east: float
     city: str
     state: str
+    country_code: str = ""
+
+
+def _normalize_country_code(value: str) -> str:
+    """Normalize a raw country code from Nominatim (e.g. ``"us"`` -> ``"US"``)."""
+    value = value.strip()
+    if not value:
+        return ""
+    try:
+        return normalize_country(value)
+    except ValueError:
+        return ""
 
 
 def _parse_bbox(area_query: str) -> tuple[float, float, float, float] | None:
@@ -136,7 +159,9 @@ def _extract_city(components: dict[str, Any]) -> str:
     return ""
 
 
-def _build_real_address_query(south: float, west: float, north: float, east: float, limit: int) -> str:
+def _build_real_address_query(
+    south: float, west: float, north: float, east: float, limit: int
+) -> str:
     bbox = f"{south},{west},{north},{east}"
     return (
         "[out:xml][timeout:60];("
@@ -146,7 +171,9 @@ def _build_real_address_query(south: float, west: float, north: float, east: flo
     )
 
 
-def _build_named_street_query(south: float, west: float, north: float, east: float, limit: int) -> str:
+def _build_named_street_query(
+    south: float, west: float, north: float, east: float, limit: int
+) -> str:
     bbox = f"{south},{west},{north},{east}"
     return (
         "[out:xml][timeout:60];"
@@ -180,23 +207,50 @@ class OpenStreetMapAddressProvider:
         self._max_retries = max_retries
         self._nominatim_min_interval = nominatim_min_interval
         self._last_nominatim_request = 0.0
+        self._resolved_country = ""
 
     def load_addresses(self, area_query: str) -> list[Address]:
         cache_path = self._cache_path(area_query)
+        meta_path = self._meta_path(area_query)
         cached = self._load_cache(cache_path)
         if cached is not None:
             logger.debug("Cache hit for '%s' (%d addresses)", area_query, len(cached))
+            self._resolved_country = self._load_meta(meta_path)
             return cached
 
         logger.info("Fetching addresses for '%s' (no cache at %s)", area_query, cache_path)
         addresses = self._fetch_addresses(area_query)
         logger.info("Fetched %d addresses", len(addresses))
         self._write_cache(cache_path, addresses)
+        self._write_meta(meta_path, self._resolved_country)
         return addresses
 
+    def resolved_country(self) -> str | None:
+        """ISO 3166-1 alpha-2 country of the last loaded area, or ``None`` when unknown."""
+        return self._resolved_country or None
+
+    @staticmethod
+    def _digest(area_query: str) -> str:
+        return hashlib.md5(area_query.strip().lower().encode("utf-8")).hexdigest()[:12]
+
     def _cache_path(self, area_query: str) -> Path:
-        digest = hashlib.md5(area_query.strip().lower().encode("utf-8")).hexdigest()[:12]
-        return self._cache_dir / f"addresses_{digest}.parquet"
+        return self._cache_dir / f"addresses_{self._digest(area_query)}.parquet"
+
+    def _meta_path(self, area_query: str) -> Path:
+        return self._cache_dir / f"addresses_{self._digest(area_query)}.meta.json"
+
+    @staticmethod
+    def _write_meta(path: Path, country_code: str) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"country_code": country_code}), encoding="utf-8")
+
+    @staticmethod
+    def _load_meta(path: Path) -> str:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            return str(data.get("country_code") or "")
+        except (OSError, ValueError, TypeError):
+            return ""
 
     def _load_cache(self, path: Path) -> list[Address] | None:
         if not path.is_file():
@@ -207,21 +261,9 @@ class OpenStreetMapAddressProvider:
             return None
         if len(frame) < self._min_addresses:
             return None
-        postal_codes = (
-            frame["postal_code"]
-            if "postal_code" in frame.columns
-            else [""] * len(frame)
-        )
-        latitudes = (
-            frame["latitude"]
-            if "latitude" in frame.columns
-            else [0.0] * len(frame)
-        )
-        longitudes = (
-            frame["longitude"]
-            if "longitude" in frame.columns
-            else [0.0] * len(frame)
-        )
+        postal_codes = frame["postal_code"] if "postal_code" in frame.columns else [""] * len(frame)
+        latitudes = frame["latitude"] if "latitude" in frame.columns else [0.0] * len(frame)
+        longitudes = frame["longitude"] if "longitude" in frame.columns else [0.0] * len(frame)
         return [
             Address(
                 str(street),
@@ -266,6 +308,7 @@ class OpenStreetMapAddressProvider:
             area = self._geocode_area(area_query)
         else:
             area = self._geocode_bbox(bbox)
+        self._resolved_country = _normalize_country_code(area.country_code)
 
         addresses = self._query_real_addresses(area)
         if len(addresses) < self._min_addresses:
@@ -293,14 +336,16 @@ class OpenStreetMapAddressProvider:
             try:
                 response = self._client.get(url, params=params)
             except httpx.HTTPError as exc:
-                raise AddressLookupError("Unable to reach the OpenStreetMap Nominatim service.") from exc
+                raise AddressLookupError(
+                    "Unable to reach the OpenStreetMap Nominatim service."
+                ) from exc
             self._last_nominatim_request = time.monotonic()
 
             if response.status_code == 200:
                 return response.json()
             if response.status_code in _RETRYABLE_HTTP_STATUS:
                 retry_after = response.headers.get("Retry-After")
-                delay = float(retry_after) if retry_after else (2 ** attempt)
+                delay = float(retry_after) if retry_after else (2**attempt)
                 time.sleep(min(delay, 30))
                 continue
             raise AddressLookupError(
@@ -332,6 +377,7 @@ class OpenStreetMapAddressProvider:
             east=east,
             city=_extract_city(components),
             state=_normalize_state(str(components.get("state") or "")),
+            country_code=_normalize_country_code(str(components.get("country_code") or "")),
         )
 
     def _geocode_bbox(self, bbox: tuple[float, float, float, float]) -> _GeocodedArea:
@@ -354,6 +400,7 @@ class OpenStreetMapAddressProvider:
             east=east,
             city=_extract_city(components),
             state=_normalize_state(str(components.get("state") or "")),
+            country_code=_normalize_country_code(str(components.get("country_code") or "")),
         )
 
     def _run_overpass_query(self, query: str) -> overpy.Result:
@@ -370,7 +417,9 @@ class OpenStreetMapAddressProvider:
         raise AddressLookupError(f"Overpass API request failed (HTTP {last_status}).")
 
     def _query_real_addresses(self, area: _GeocodedArea) -> list[Address]:
-        query = _build_real_address_query(area.south, area.west, area.north, area.east, self._max_addresses)
+        query = _build_real_address_query(
+            area.south, area.west, area.north, area.east, self._max_addresses
+        )
         try:
             result = self._query_runner(query)
         except AddressLookupError:
@@ -378,7 +427,9 @@ class OpenStreetMapAddressProvider:
         return self._parse_elements(result, area.city, area.state)
 
     def _query_named_streets(self, area: _GeocodedArea) -> list[Address]:
-        query = _build_named_street_query(area.south, area.west, area.north, area.east, self._max_addresses)
+        query = _build_named_street_query(
+            area.south, area.west, area.north, area.east, self._max_addresses
+        )
         try:
             result = self._query_runner(query)
         except AddressLookupError:
@@ -448,7 +499,9 @@ class OpenStreetMapAddressProvider:
         while len(addresses) < count and index < count * len(street_names):
             name = street_names[index % len(street_names)]
             offset = index // len(street_names)
-            number = 100 + (int(hashlib.md5(name.encode("utf-8")).hexdigest(), 16) + offset * 97) % 8_900
+            number = (
+                100 + (int(hashlib.md5(name.encode("utf-8")).hexdigest(), 16) + offset * 97) % 8_900
+            )
             address = Address(f"{number} {name}", city, state)
             key = (address.street_address, city, state)
             if key not in seen:

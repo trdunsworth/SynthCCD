@@ -127,9 +127,7 @@ def _build_request(model: GenerationRequestModel) -> GenerationRequest:
     if model.realism_config_path is not None:
         cli_params["realism_config_path"] = Path(model.realism_config_path)
 
-    file_params = (
-        load_params_file(Path(model.params_file)) if model.params_file else {}
-    )
+    file_params = load_params_file(Path(model.params_file)) if model.params_file else {}
     return build_request_from_params(file_params, cli_params)
 
 
@@ -175,8 +173,7 @@ async def get_schema(
                 SchemaResponse(
                     dataset=name,
                     columns=[
-                        {"name": col, "type": str(dtype)}
-                        for col, dtype in frame.dtypes.items()
+                        {"name": col, "type": str(dtype)} for col, dtype in frame.dtypes.items()
                     ],
                     row_count=len(frame),
                 )
@@ -206,15 +203,19 @@ async def generate_data(
 
         with TemporaryDirectory() as tmpdir:
             request.output_dir = Path(tmpdir)
-            result = Synth911Application(
-                address_provider=OpenStreetMapAddressProvider()
-            ).generate(request)
+            result = Synth911Application(address_provider=OpenStreetMapAddressProvider()).generate(
+                request
+            )
 
             if request.output_format in (OutputFormat.PANDAS, OutputFormat.POLARS):
                 return {
                     "message": "In-memory format requested; no files written.",
-                    "incidents_shape": result.incidents.shape if result.incidents is not None else None,
-                    "hourly_call_counts_shape": result.hourly_call_counts.shape if result.hourly_call_counts is not None else None,
+                    "incidents_shape": result.incidents.shape
+                    if result.incidents is not None
+                    else None,
+                    "hourly_call_counts_shape": result.hourly_call_counts.shape
+                    if result.hourly_call_counts is not None
+                    else None,
                 }
 
             # For file-based formats, return the first artifact or all artifacts
@@ -236,7 +237,9 @@ async def generate_data(
                 "message": "Generation complete",
                 "files": {name: str(path) for name, path in artifacts.items()},
                 "incidents_shape": result.incidents.shape if result.incidents is not None else None,
-                "hourly_call_counts_shape": result.hourly_call_counts.shape if result.hourly_call_counts is not None else None,
+                "hourly_call_counts_shape": result.hourly_call_counts.shape
+                if result.hourly_call_counts is not None
+                else None,
             }
 
     except (AddressLookupError, ExportError, ValidationError) as exc:
@@ -261,9 +264,9 @@ async def generate_data_stream(
             request.output_dir = Path(tmpdir)
             request.dataset = DatasetKind(dataset.upper())
 
-            result = Synth911Application(
-                address_provider=OpenStreetMapAddressProvider()
-            ).generate(request)
+            result = Synth911Application(address_provider=OpenStreetMapAddressProvider()).generate(
+                request
+            )
 
             artifacts = result.exported_artifacts
             if not artifacts:

@@ -24,7 +24,13 @@ from textual.widgets import (
 from .addresses import OpenStreetMapAddressProvider
 from .app import Synth911Application
 from .config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
-from .constants import DEFAULT_AREA_QUERY, DEFAULT_COUNTRY, DEFAULT_MAX_MEMORY_BYTES, DEFAULT_OUTPUT_DIR, DEFAULT_OUTPUT_STEM
+from .constants import (
+    DEFAULT_AREA_QUERY,
+    DEFAULT_COUNTRY,
+    DEFAULT_MAX_MEMORY_BYTES,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_OUTPUT_STEM,
+)
 from .domain import GenerationResult
 from .emergency_numbers import SUPPORTED_COUNTRIES
 from .exceptions import AddressLookupError, ExportError, ValidationError
@@ -238,12 +244,8 @@ class Synth911Tui(App[None]):
                         with Vertical(id="form"):
                             yield _section_title("General")
                             with Grid(classes="fields"):
-                                yield _field(
-                                    "Rows", "rows", Input(str(defaults.rows), id="rows")
-                                )
-                                yield _field(
-                                    "Seed", "seed", Input(str(defaults.seed), id="seed")
-                                )
+                                yield _field("Rows", "rows", Input(str(defaults.rows), id="rows"))
+                                yield _field("Seed", "seed", Input(str(defaults.seed), id="seed"))
                                 yield _field(
                                     "Dataset",
                                     "dataset",
@@ -358,10 +360,7 @@ class Synth911Tui(App[None]):
                                     "Shift preset",
                                     "shift_preset",
                                     Select(
-                                        [
-                                            (label, name)
-                                            for name, label in SHIFT_PRESETS.items()
-                                        ]
+                                        [(label, name) for name, label in SHIFT_PRESETS.items()]
                                         + [("Custom (via realism config)", "")],
                                         value=DEFAULT_SHIFT_PRESET,
                                         id="shift_preset",
@@ -520,9 +519,7 @@ class Synth911Tui(App[None]):
         if max_memory_value:
             max_memory_bytes = parse(
                 "max_memory_bytes",
-                lambda: _parse_int(
-                    max_memory_value, "max_memory_bytes", min_value=1
-                ),
+                lambda: _parse_int(max_memory_value, "max_memory_bytes", min_value=1),
             )
         start_date = parse(
             "start_date",
@@ -601,9 +598,9 @@ class Synth911Tui(App[None]):
             self.call_from_thread(self._report_progress, dataset, done, total)
 
         try:
-            result = Synth911Application(
-                address_provider=OpenStreetMapAddressProvider()
-            ).generate(request, on_progress=on_progress)
+            result = Synth911Application(address_provider=OpenStreetMapAddressProvider()).generate(
+                request, on_progress=on_progress
+            )
         except (AddressLookupError, ExportError, ValidationError) as exc:
             self.call_from_thread(self._on_generation_error, str(exc))
             return
@@ -622,9 +619,7 @@ class Synth911Tui(App[None]):
         self.query_one("#generate", Button).disabled = False
         self._set_status(message, "error")
 
-    def _on_generation_success(
-        self, result: GenerationResult, output_format: OutputFormat
-    ) -> None:
+    def _on_generation_success(self, result: GenerationResult, output_format: OutputFormat) -> None:
         self.query_one("#progress", ProgressBar).display = False
         self.query_one("#generate", Button).disabled = False
 

@@ -138,7 +138,9 @@ class ShiftConfig:
         for pairing in set(self.rotation):
             group = [shift for shift in self.shifts if shift.rotation == pairing]
             if not group:
-                raise ValidationError(f"shift_config.shifts missing a shift for rotation group {pairing}.")
+                raise ValidationError(
+                    f"shift_config.shifts missing a shift for rotation group {pairing}."
+                )
             if not _covers_full_day(group):
                 raise ValidationError(
                     f"Shifts in rotation group {pairing} do not cover all 24 hours."

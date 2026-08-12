@@ -37,7 +37,9 @@ def build_preview_datasets(
     if request.dataset in (DatasetKind.INCIDENTS, DatasetKind.ALL):
         probe_rows = SCHEMA_ROWS if schema_only else SAMPLE_ROWS
         probe = replace(request, rows=probe_rows)
-        datasets["incidents"] = IncidentGenerator(StaticAddressProvider(_STATIC_ADDRESSES)).generate(probe)
+        datasets["incidents"] = IncidentGenerator(
+            StaticAddressProvider(_STATIC_ADDRESSES)
+        ).generate(probe)
     if request.dataset in (DatasetKind.PHONE, DatasetKind.ALL):
         today = date.today()
         probe = replace(request, start_date=today, end_date=today)

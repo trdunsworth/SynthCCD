@@ -45,18 +45,29 @@ class Synth911Application:
                 )
                 first_chunk = next(chunk_frames)
                 if len(first_chunk) < request.rows:
+                    # Embed request provenance (seed, config hash, schema version,
+                    # …) in the Parquet footer; the first chunk's columns give an
+                    # accurate schema hash for the whole incident dataset.
+                    chunk_metadata: dict[str, str] | None = None
+                    if request.output_format is OutputFormat.PARQUET:
+                        chunk_metadata = Manifest.from_request(
+                            request, {"incidents": first_chunk}
+                        ).to_kv_metadata()
                     path = export_chunked_generator(
                         chain([first_chunk], chunk_frames),
                         output_format=request.output_format,
                         output_dir=request.output_dir,
                         output_stem=request.output_stem,
                         dataset_name="incidents",
+                        parquet_metadata=chunk_metadata,
                     )
                     streamed_artifacts["incidents"] = path
                     logger.info(
                         "Incidents streamed to %s in chunks (budget: %s bytes)",
                         path,
-                        request.max_memory_bytes if request.max_memory_bytes is not None else "default",
+                        request.max_memory_bytes
+                        if request.max_memory_bytes is not None
+                        else "default",
                     )
                 else:
                     incidents = first_chunk
@@ -65,7 +76,9 @@ class Synth911Application:
                 incidents = incident_generator.generate(request, on_progress=incident_progress)
                 datasets["incidents"] = incidents
             if incidents is not None:
-                logger.info("Incidents built: %d rows x %d columns", len(incidents), len(incidents.columns))
+                logger.info(
+                    "Incidents built: %d rows x %d columns", len(incidents), len(incidents.columns)
+                )
 
         if request.dataset in (DatasetKind.PHONE, DatasetKind.ALL):
             logger.info("Building hourly phone-metrics dataset")
@@ -86,22 +99,35 @@ class Synth911Application:
             OutputFormat.SQLSERVER,
             OutputFormat.MARIADB,
             OutputFormat.DUCKDB,
+            OutputFormat.SQLITE,
         )
         if datasets and request.output_format in db_formats:
             db_results = export_to_database(datasets, request)
             artifacts["database"] = db_results
             logger.info("Database export complete: %s", db_results)
         elif datasets:
-            artifacts = {**export_generated_data(
-                datasets=datasets,
-                output_format=request.output_format,
-                output_dir=request.output_dir,
-                output_stem=request.output_stem,
-            ), **streamed_artifacts}
+            # Build the manifest before export so Parquet files can embed it in
+            # their footer metadata; the sidecar is written afterwards.
+            manifest = None
+            if (
+                request.output_format != OutputFormat.PANDAS
+                and request.output_format != OutputFormat.POLARS
+            ):
+                manifest = Manifest.from_request(request, datasets)
+
+            artifacts = {
+                **export_generated_data(
+                    datasets=datasets,
+                    output_format=request.output_format,
+                    output_dir=request.output_dir,
+                    output_stem=request.output_stem,
+                    parquet_metadata=manifest.to_kv_metadata() if manifest is not None else None,
+                ),
+                **streamed_artifacts,
+            }
 
             # Generate and export data governance manifest
-            if request.output_format != OutputFormat.PANDAS and request.output_format != OutputFormat.POLARS:
-                manifest = Manifest.from_request(request, datasets)
+            if manifest is not None:
                 manifest_path = export_manifest(
                     manifest=manifest,
                     output_dir=request.output_dir,

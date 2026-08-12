@@ -480,6 +480,10 @@ from geopandas.tools import sjoin
 
 Stream synthetic data directly into PostgreSQL for analytics pipelines.
 
+> **Tip**: For a zero-setup version of this tutorial, substitute `--format sqlite`
+> and drop the `--db-host`/`--db-user`/`--db-password` flags — the data lands in a
+> local `*.sqlite3` file you can query with any SQLite tool (no server needed).
+
 **Step 1: Prepare PostgreSQL**
 ```sql
 -- Create database and user
@@ -499,8 +503,7 @@ uv run synth911gen3 generate \
   --db-user etl_user \
   --db-password secure_password \
   --db-table-incidents chicago_incidents \
-  --db-batch-size 50000 \
-  --db-create-indexes
+  --db-batch-size 50000
 ```
 
 **Step 3: Verify in PostgreSQL**
@@ -543,7 +546,7 @@ uv run synth911gen3 generate [OPTIONS]
 | `--params` | `-p` | *(none)* | Path to a JSON/YAML/TOML file specifying multiple generation parameters at once |
 | `--rows` | `-r` | `10000` | Number of incident rows to generate (minimum: 1) |
 | `--area` | `-a` | `"Kansas City, MO"` | Area query for OpenStreetMap address lookup |
-| `--format` | `-f` | `csv` | Output format: `csv`, `parquet`, `json`, `yaml`, `pandas`, `polars` |
+| `--format` | `-f` | `csv` | Output format: `csv`, `parquet`, `json`, `yaml`, `pandas`, `polars`, `geojson`, `shapefile`, `postgresql`, `sqlserver`, `mariadb`, `duckdb`, `sqlite` |
 | `--dataset` | `-d` | `all` | Dataset to generate: `incidents`, `phone`, `all` |
 | `--id-format` | | `integer` | id_number style: `integer` or `guid` |
 | `--output-dir` | `-o` | `output` | Directory for exported files |
@@ -559,6 +562,18 @@ uv run synth911gen3 generate [OPTIONS]
 | `--country` | | `US` | ISO 3166-1 alpha-2 country code selecting the emergency-number registry (see [Emergency Number Registry](#emergency-number-registry)) |
 | `--emergency-numbers` | | *(registry)* | Comma-separated emergency numbers to model, overriding the country registry (e.g. `"999,112"`) |
 | `--include-10-digit-emergency` | | *(off)* | Include 10-digit direct-dial emergency lines from the registry |
+| `--db-dialect` | | *(auto)* | Explicit database dialect: `postgresql`, `sqlserver`, `mariadb`, `duckdb`, `sqlite` (auto-detected from `--format`) |
+| `--db-host` | | *(none)* | Database host (not needed for file-based `duckdb`/`sqlite`) |
+| `--db-port` | | *(dialect default)* | Database port (defaults: postgresql 5432, sqlserver 1433, mariadb 3306) |
+| `--db-name` | | *(none)* | Database name; for `duckdb`/`sqlite` the file path, defaulting to `{output_stem}.duckdb`/`.sqlite3` |
+| `--db-user` | | *(none)* | Database username (not needed for file-based `duckdb`/`sqlite`) |
+| `--db-password` | | *(none)* | Database password (not needed for file-based `duckdb`/`sqlite`) |
+| `--db-table-incidents` | | `incidents` | Incidents table name |
+| `--db-table-phone` | | `hourly_call_counts` | Hourly phone metrics table name |
+| `--db-schema` | | *(none)* | Database schema (ignored for SQLite) |
+| `--db-batch-size` | | `10000` | Rows per database insert batch |
+| `--db-if-exists` | | `append` | Table-exists behavior: `append`, `replace`, or `fail` |
+| `--no-db-create-indexes` | | *(create them)* | Skip creating indexes on key columns |
 | `--schema` | | *(off)* | Print the generated schema (columns + types) for the selected datasets; no data is generated and no addresses are fetched |
 | `--dry-run` | | *(off)* | Print the schema plus a few sample rows; no files are written and no addresses are fetched |
 
@@ -997,7 +1012,7 @@ shift_preset: "4x10h-4shift"
 |-----|---------------|------|-------------|
 | `rows` | | int | Number of incident rows |
 | `area_query` | `area` | str | OpenStreetMap area query |
-| `output_format` | `format` | str | csv, parquet, json, yaml, pandas, polars |
+| `output_format` | `format` | str | csv, parquet, json, yaml, pandas, polars, geojson, shapefile, postgresql, sqlserver, mariadb, duckdb, sqlite |
 | `dataset` | | str | incidents, phone, all |
 | `id_format` | | str | integer or guid |
 | `output_dir` | | str | Output directory |
@@ -1013,6 +1028,18 @@ shift_preset: "4x10h-4shift"
 | `country` | | str | ISO 3166-1 alpha-2 code selecting the emergency-number registry (see [Emergency Number Registry](#emergency-number-registry)) |
 | `emergency_numbers` | | str | Comma-separated emergency numbers, overriding the country registry |
 | `include_10_digit_emergency` | | bool | Include 10-digit direct-dial emergency lines |
+| `db_dialect` | | str | postgresql, sqlserver, mariadb, duckdb, sqlite |
+| `db_host` | | str | Database host (not needed for duckdb/sqlite) |
+| `db_port` | | int | Database port (defaults per dialect) |
+| `db_name` | | str | Database name (file path for duckdb/sqlite) |
+| `db_user` | | str | Database username (not needed for duckdb/sqlite) |
+| `db_password` | | str | Database password (not needed for duckdb/sqlite) |
+| `db_table_incidents` | | str | Incidents table name (default: `incidents`) |
+| `db_table_phone` | | str | Phone metrics table name (default: `hourly_call_counts`) |
+| `db_schema` | | str | Database schema (ignored for sqlite) |
+| `db_batch_size` | | int | Rows per insert batch (default: 10000) |
+| `db_if_exists` | | str | append, replace, or fail (default: append) |
+| `db_create_indexes` | | bool | Create indexes on key columns (default: true) |
 
 ### Precedence
 
@@ -1063,6 +1090,7 @@ Two ready-made examples are included in the repo: `config/example_params.json` a
 | `sqlserver` | (database) | Streaming insert into SQL Server | Enterprise Microsoft environments |
 | `mariadb` | (database) | Streaming insert into MariaDB/MySQL | Open-source stack deployments |
 | `duckdb` | (database) | Streaming insert into DuckDB file | Local analytics, embedded workloads |
+| `sqlite` | (database) | Streaming insert into SQLite file | Local analytics, embedded/lightweight workloads, no server |
 
 ### Data Governance Manifest
 
@@ -1088,6 +1116,7 @@ For every file-based export (CSV, Parquet, JSON, YAML), a **data governance mani
 | `realism_config_hash` | SHA-256 hash (first 16 chars) of the realism YAML config |
 | `max_memory_bytes` | Per-chunk memory budget for chunked exports |
 | `schema_hash` | SHA-256 hash (first 16 chars) of the output schema |
+| `schema_version` | Data schema version (`DATA_SCHEMA_VERSION` in `constants.py`) |
 | `datasets_generated` | List of dataset names produced |
 | `row_counts` | Row count per dataset |
 | `column_counts` | Column count per dataset |
@@ -1100,12 +1129,46 @@ The manifest enables:
 
 > **Note**: The manifest is not emitted for in-memory formats (`pandas`/`polars`) since no files are written.
 
+### Parquet Metadata Embedding
+
+Every Parquet file (incidents, hourly call counts — both full and chunked exports) embeds the generation provenance directly in the file's **key-value footer metadata**, so each file is self-documenting and readable without the sidecar manifest. Keys are namespaced with a `synth911:` prefix (plain Parquet key-value metadata — visible to any Parquet reader, not just pyarrow):
+
+| Key | Description |
+|-----|-------------|
+| `synth911:seed` | Random seed used for generation |
+| `synth911:schema_version` | Data schema version (matches manifest `schema_version`) |
+| `synth911:realism_config_hash` | Hash of the realism YAML config |
+| `synth911:schema_hash` | Hash of the output schema (from the first chunk in chunked mode) |
+| `synth911:generated_at` | ISO 8601 generation timestamp (UTC) |
+| `synth911:package` / `synth911:package_version` | Generator identity |
+| `synth911:python_version` / `synth911:platform` | Runtime environment |
+| `synth911:rows_requested` / `synth911:dataset` / `synth911:output_format` | Request summary |
+| `synth911:area_query` / `synth911:id_format` | Address area and ID scheme |
+| `synth911:calltaker_pool_size` / `synth911:dispatcher_pool_size` | Personnel pools |
+| `synth911:shift_preset` / `synth911:max_memory_bytes` | Shift structure / memory budget |
+| `synth911:datasets_generated` | JSON list of datasets produced |
+| `synth911:manifest_version` | Manifest schema version (`1.0`) |
+
+Read it back with:
+
+```python
+import pyarrow.parquet as pq
+
+pf = pq.ParquetFile("output/synthetic_911_incidents.parquet")
+metadata = pf.metadata.metadata  # {b'synth911:seed': b'31337', ...}
+```
+
+Notes:
+- `row_counts`/`column_counts` are intentionally **not** embedded (the footer row count and the sidecar manifest cover those); this keeps chunked-mode exports truthful, since final counts may be unknown at write time.
+- The embedded metadata matches the sidecar manifest values on the same run.
+
 ### File Naming
 
 - **CSV/Parquet**: `{output_stem}_{dataset}.{ext}` (e.g., `synthetic_911_incidents.csv`)
 - **JSON/YAML**: `{output_stem}_bundle.{ext}` (single file containing all datasets)
 - **GeoJSON**: `{output_stem}_incidents.geojson` (FeatureCollection with Point geometries)
 - **Shapefile**: `{output_stem}_incidents.shp` + sidecars (`.shx`, `.dbf`, `.prj`, `.cpg`)
+- **DuckDB/SQLite**: `{output_stem}.duckdb` / `{output_stem}.sqlite3` unless `--db-name` is given
 - **Manifest**: `{output_stem}_manifest.json` (data governance sidecar; all file-based formats)
 
 ### Geospatial Exports
@@ -1156,6 +1219,7 @@ The generator supports direct streaming inserts into relational databases, avoid
 | `sqlserver` | SQL Server | `pyodbc` + ODBC Driver 17 | 1433 |
 | `mariadb` | MariaDB/MySQL | `pymysql` | 3306 |
 | `duckdb` | DuckDB | `duckdb-engine` | (file-based) |
+| `sqlite` | SQLite | none (stdlib `sqlite3`) | (file-based) |
 
 #### Configuration
 
@@ -1164,17 +1228,17 @@ Database exports require connection parameters. These can be provided via CLI fl
 | Parameter | CLI Flag | Description | Required |
 |-----------|----------|-------------|----------|
 | `db_dialect` | --db-dialect | Explicit dialect (auto-detected from --format) | No |
-| `db_host` | --db-host | Database host | Yes (except DuckDB) |
+| `db_host` | --db-host | Database host | Yes (except DuckDB/SQLite) |
 | `db_port` | --db-port | Database port | No (uses defaults) |
-| `db_name` | --db-name | Database name | Yes |
-| `db_user` | --db-user | Username | Yes (except DuckDB) |
-| `db_password` | --db-password | Password | Yes (except DuckDB) |
+| `db_name` | --db-name | Database name; file path for DuckDB/SQLite | Yes (defaults to `{output_stem}.duckdb`/`.sqlite3`) |
+| `db_user` | --db-user | Username | Yes (except DuckDB/SQLite) |
+| `db_password` | --db-password | Password | Yes (except DuckDB/SQLite) |
 | `db_table_incidents` | --db-table-incidents | Incidents table name | No (default: `incidents`) |
 | `db_table_phone` | --db-table-phone | Phone metrics table name | No (default: `hourly_call_counts`) |
-| `db_schema` | --db-schema | Database schema | No |
+| `db_schema` | --db-schema | Database schema (ignored for SQLite) | No |
 | `db_batch_size` | --db-batch-size | Rows per batch insert | No (default: 10000) |
 | `db_if_exists` | --db-if-exists | `append`, `replace`, `fail` | No (default: `append`) |
-| `db_create_indexes` | --db-create-indexes | Create indexes on key columns | No (default: true) |
+| `db_create_indexes` | --no-db-create-indexes | Skip creating indexes on key columns | No (default: create them) |
 
 #### Usage Examples
 
@@ -1199,6 +1263,27 @@ uv run synth911gen3 generate \
   --rows 500000 \
   --area "Portland, OR" \
   --db-name portland_cad.duckdb
+```
+
+**SQLite (local file, no server or extra dependencies):**
+```bash
+uv run synth911gen3 generate \
+  --format sqlite \
+  --rows 500000 \
+  --area "Kansas City, MO" \
+  --output-stem kc_cad \
+  --db-name kc_cad.sqlite3 \
+  --db-if-exists replace
+```
+
+Query it with any SQLite tool:
+```bash
+sqlite3 output/kc_cad.sqlite3 "SELECT agency, priority, COUNT(*) FROM incidents GROUP BY agency, priority;"
+```
+
+**Skip index creation for faster bulk loads (all dialects):**
+```bash
+uv run synth911gen3 generate --format sqlite --rows 100000 --no-db-create-indexes
 ```
 
 **MariaDB with custom schema and replace mode:**
@@ -1245,7 +1330,8 @@ result = app.generate(request)
 - **Schema creation**: Tables are created automatically with appropriate column types (TIMESTAMP, BIGINT, DOUBLE PRECISION, TEXT, BOOLEAN).
 - **Indexes**: By default, indexes are created on `call_start_time`, `agency`, `priority`, and `internal_reference_number` for query performance.
 - **Idempotency**: With `if_exists="append"` (default), re-running with the same seed appends data. Use `replace` to drop and recreate tables.
-- **DuckDB**: Uses a local file; `db_name` defaults to `{output_stem}.duckdb` in `output_dir`. No host/user/password needed.
+- **DuckDB/SQLite**: Use a local file; `db_name` defaults to `{output_stem}.duckdb` / `{output_stem}.sqlite3` in `output_dir`. No host/user/password needed.
+- **SQLite**: Uses the Python standard library `sqlite3` driver — no extra dependencies. Has no schema concept, so `db_schema` is ignored (a warning is logged). Because SQLite caps bound parameters at 999 per statement, the effective batch size is capped at `999 // columns` regardless of `db_batch_size`.
 - **SQL Server**: Requires ODBC Driver 17 for SQL Server installed on the system.
 
 ### In-Memory Formats (pandas/polars)
@@ -1462,6 +1548,10 @@ uv run synth911gen3 generate --config config/example_realism.yaml --rows 50000 -
 uv run synth911gen3 generate --config my_center.yaml --rows 100000 --output-dir /data/exports --output-stem my_center_2024
 ```
 
+See `REALISMGUIDE.md` for the full YAML reference, including the `name_locales`
+section that controls the personnel-name locale blend (by default, personnel
+names follow the country of the geocoded OSM area).
+
 ### Params Files
 
 ```bash
@@ -1594,9 +1684,12 @@ disable TLS verification.
 OpenStreetMap addresses are cached in:
 ```
 ~/.cache/synth911gen3/addresses_{area_hash}.parquet
+~/.cache/synth911gen3/addresses_{area_hash}.meta.json   # country code sidecar
 ```
 
-Delete cache files to force re-fetch for updated area boundaries.
+The `.meta.json` sidecar stores the ISO country code of the geocoded area (used
+to select personnel name locales); it is written on fetch and read back on
+cache hits. Delete both files to force a re-fetch for updated area boundaries.
 
 ---
 
@@ -1669,7 +1762,7 @@ A: Each problem type gets 4 multipliers [Winter, Spring, Summer, Fall]. Applied 
 | Python notebooks | pandas/polars |
 | GIS, mapping | GeoJSON |
 | Desktop GIS (ArcGIS/QGIS) | Shapefile |
-| Database pipelines | PostgreSQL, SQL Server, MariaDB, DuckDB |
+| Database pipelines | PostgreSQL, SQL Server, MariaDB, DuckDB, SQLite |
 
 **Q: What's the difference between `json` and `geojson`?**
 A: `json` exports all data as a flat bundle. `geojson` exports only incidents as RFC 7946 FeatureCollection with Point geometries for mapping.
@@ -1678,7 +1771,7 @@ A: `json` exports all data as a flat bundle. `geojson` exports only incidents as
 A: ESRI Shapefile format limits field names to 10 characters. `internal_reference_number` becomes `internal_r`. Use GeoJSON or Parquet for full names.
 
 **Q: Can I stream directly to a database?**
-A: Yes. Use `--format postgresql` (or `sqlserver`, `mariadb`, `duckdb`) with connection parameters. Tables auto-created with indexes.
+A: Yes. Use `--format postgresql` (or `sqlserver`, `mariadb`, `duckdb`, `sqlite`) with connection parameters. Tables auto-created with indexes. `sqlite` is the simplest option — it writes a local file with no server or extra dependencies.
 
 ---
 
@@ -1713,7 +1806,11 @@ A: Use `output_format=OutputFormat.PANDAS` — returns DataFrames directly, no f
 A: Pass `on_progress=lambda d, c, t: print(f"{d}: {c}/{t}")` to `app.generate()`.
 
 **Q: Can I use custom address data?**
-A: Yes. Implement `AddressProvider` protocol and pass to `Synth911Application(address_provider=CustomProvider())`.
+A: Yes. Implement the `AddressProvider` protocol and pass to
+`Synth911Application(address_provider=CustomProvider())`. Implementing
+`resolved_country()` (ISO 3166-1 alpha-2, or `None` when unknown) is optional —
+when it is absent, personnel name locales fall back to the request's `--country`
+flag, then to `US`.
 
 ---
 
@@ -1763,6 +1860,11 @@ class CustomAddressProvider(AddressProvider):
     def load_addresses(self, area_query: str) -> list[Address]:
         # Return list of Address objects
         return [...]
+
+    def resolved_country(self) -> str | None:
+        # Optional: ISO 3166-1 alpha-2 code of the region (e.g. "IE"), or None
+        # when unknown so the request's --country flag is used instead.
+        return None
 
 app = Synth911Application(address_provider=CustomAddressProvider())
 ```

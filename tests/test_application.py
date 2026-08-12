@@ -1,5 +1,7 @@
 from uuid import UUID
 
+import sqlite3
+
 from synth911gen3.addresses import StaticAddressProvider
 from synth911gen3.app import Synth911Application
 from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
@@ -65,6 +67,49 @@ def test_application_generates_incidents_and_hourly_counts() -> None:
         "total_elapsed_seconds",
     }.issubset(result.incidents.columns)
     assert len(result.hourly_call_counts.columns) == 15
+
+
+def test_application_sqlite_export_persists_both_tables(tmp_path) -> None:
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=10,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.SQLITE,
+        output_dir=tmp_path,
+        output_stem="cad",
+        db_name="cad.sqlite3",
+        seed=42,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert "database" in result.exported_artifacts
+    db_results = result.exported_artifacts["database"]
+    assert db_results["incidents"] == 10
+    assert db_results["hourly_call_counts"] > 0
+
+    db_path = tmp_path / "cad.sqlite3"
+    assert db_path.exists()
+    con = sqlite3.connect(db_path)
+    try:
+        cur = con.execute("SELECT COUNT(*) FROM incidents")
+        assert cur.fetchone()[0] == 10
+        cur = con.execute("SELECT COUNT(*) FROM hourly_call_counts")
+        assert cur.fetchone()[0] > 0
+        # Indexes should exist on key incident columns
+        cur = con.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' AND tbl_name='incidents'"
+        )
+        index_names = {row[0] for row in cur.fetchall()}
+        assert "idx_incidents_agency" in index_names
+        assert "idx_incidents_priority" in index_names
+    finally:
+        con.close()
 
 
 def test_application_guid_id_format_emits_unique_uuids() -> None:
@@ -235,12 +280,12 @@ def test_application_incident_start_time_within_three_seconds_of_call_start() ->
         result.incidents["incident_start_time"] - result.incidents["call_start_time"]
     ).dt.total_seconds()
     assert offsets.between(0, 3).all()
-    assert (
-        result.incidents["pre_cad_offset_seconds"].tolist() == offsets.astype(int).tolist()
-    )
+    assert result.incidents["pre_cad_offset_seconds"].tolist() == offsets.astype(int).tolist()
 
 
-def test_application_incident_start_time_on_or_before_answer_when_pickup_at_least_three_seconds() -> None:
+def test_application_incident_start_time_on_or_before_answer_when_pickup_at_least_three_seconds() -> (
+    None
+):
     provider = StaticAddressProvider(
         [
             Address("101 N Main St", "Kansas City", "Missouri"),
@@ -258,9 +303,7 @@ def test_application_incident_start_time_on_or_before_answer_when_pickup_at_leas
 
     assert result.incidents is not None
     rows = result.incidents[result.incidents["pickup_delay_seconds"] >= 3]
-    deltas = (
-        rows["time_phone_pickup"] - rows["incident_start_time"]
-    ).dt.total_seconds()
+    deltas = (rows["time_phone_pickup"] - rows["incident_start_time"]).dt.total_seconds()
     assert (deltas >= 0).all()
 
 
@@ -373,10 +416,125 @@ def test_application_phone_metrics_config_changes_abandonment() -> None:
     low_df = gen.generate(low)
     high_df = gen.generate(high)
 
-    low_rate = low_df["nine_one_one_calls_abandoned"].sum() / low_df[
-        "nine_one_one_calls_received"
-    ].sum()
-    high_rate = high_df["nine_one_one_calls_abandoned"].sum() / high_df[
-        "nine_one_one_calls_received"
-    ].sum()
+    low_rate = (
+        low_df["nine_one_one_calls_abandoned"].sum() / low_df["nine_one_one_calls_received"].sum()
+    )
+    high_rate = (
+        high_df["nine_one_one_calls_abandoned"].sum() / high_df["nine_one_one_calls_received"].sum()
+    )
     assert high_rate > low_rate * 2, (high_rate, low_rate)
+
+
+def test_application_personnel_names_from_us_ethnic_blend() -> None:
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=400,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=77,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.incidents is not None
+    calltakers = result.incidents["calltaker"].dropna().astype(str)
+    dispatchers = result.incidents["dispatcher"].dropna().astype(str)
+    assert (calltakers.str.len() > 0).all()
+    assert (dispatchers.str.len() > 0).all()
+    # The US blend mixes Spanish, CJK, Cyrillic and other scripts; the default
+    # 20-name pool should still surface at least one non-ASCII name.
+    all_names = set(calltakers) | set(dispatchers)
+    assert any(any(ord(ch) > 127 for ch in name) for name in all_names), (
+        "expected non-ASCII names from the US ethnic blend"
+    )
+
+
+def test_application_personnel_names_reproducible_with_seed() -> None:
+    provider = StaticAddressProvider([Address("101 N Main St", "Kansas City", "Missouri")])
+    request = GenerationRequest(
+        rows=120,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=88,
+    )
+
+    first = Synth911Application(address_provider=provider).generate(request).incidents
+    second = Synth911Application(address_provider=provider).generate(request).incidents
+
+    assert first is not None and second is not None
+    assert first["calltaker"].tolist() == second["calltaker"].tolist()
+    assert first["dispatcher"].tolist() == second["dispatcher"].tolist()
+
+
+def test_application_personnel_names_respect_realism_override() -> None:
+    provider = StaticAddressProvider([Address("101 N Main St", "Kansas City", "Missouri")])
+    config = RealismConfig()
+    config.name_locales = {"US": [("ja_JP", 1.0)]}
+    request = GenerationRequest(
+        rows=150,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=9,
+        realism_config=config,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.incidents is not None
+    names = set(result.incidents["calltaker"]) | set(result.incidents["dispatcher"])
+    # ja_JP names are written family-name-first (native order); at least one
+    # token per name must be a CJK character.
+    cjk = any(any("\u4e00" <= ch <= "\u9fff" for ch in name) for name in names)
+    assert cjk, "expected CJK personnel names from the ja_JP override"
+
+
+def test_application_personnel_names_follow_request_country_fallback() -> None:
+    provider = StaticAddressProvider([Address("101 N Main St", "Kansas City", "Missouri")])
+    request = GenerationRequest(
+        rows=150,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=12,
+        country="IE",
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.incidents is not None
+    names = set(result.incidents["calltaker"]) | set(result.incidents["dispatcher"])
+    # Irish fallback names should not be the default US blend; check a few
+    # distinctly Irish surnames are plausible to have appeared.
+    irish = [n for n in names if any(s in n for s in ("O'", "Mc", "Mac"))]
+    assert irish, "expected Irish-coded personnel names for country=IE"
+
+
+def test_application_name_locales_in_manifest_hash() -> None:
+    base = RealismConfig()
+    tweaked = RealismConfig()
+    tweaked.name_locales = {"US": [("en_US", 1.0)]}
+
+    request_a = GenerationRequest(
+        rows=10,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=3,
+        realism_config=base,
+    )
+    request_b = GenerationRequest(
+        rows=10,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=3,
+        realism_config=tweaked,
+    )
+
+    from synth911gen3.manifest import Manifest
+
+    a = Manifest.from_request(request_a)
+    b = Manifest.from_request(request_b)
+    assert a.realism_config_hash != b.realism_config_hash

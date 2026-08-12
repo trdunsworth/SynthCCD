@@ -109,11 +109,7 @@ def test_animal_control_disposition_has_matching_problems() -> None:
     for agency, dispositions in DISPOSITION_PROFILES.items():
         if not any("ACOR" in label for label, _ in dispositions):
             continue
-        problems = {
-            name
-            for pool in PROBLEM_PROFILES[agency].values()
-            for name, _ in pool
-        }
+        problems = {name for pool in PROBLEM_PROFILES[agency].values() for name, _ in pool}
         assert any(term in name.lower() for name in problems for term in animal_terms), (
             f"{agency} has ACOR disposition but no animal-related problems"
         )

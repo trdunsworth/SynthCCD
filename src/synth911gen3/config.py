@@ -18,7 +18,14 @@ from .realism_config import RealismConfig
 from .shifts import SHIFT_PRESETS
 
 _WINDOWS_RESERVED_NAMES = frozenset(
-    {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
+    {
+        "CON",
+        "PRN",
+        "AUX",
+        "NUL",
+        *(f"COM{i}" for i in range(1, 10)),
+        *(f"LPT{i}" for i in range(1, 10)),
+    }
 )
 
 
@@ -35,6 +42,7 @@ class OutputFormat(StrEnum):
     SQLSERVER = "sqlserver"
     MARIADB = "mariadb"
     DUCKDB = "duckdb"
+    SQLITE = "sqlite"
 
 
 class DatabaseDialect(StrEnum):
@@ -42,6 +50,7 @@ class DatabaseDialect(StrEnum):
     SQLSERVER = "sqlserver"
     MARIADB = "mariadb"
     DUCKDB = "duckdb"
+    SQLITE = "sqlite"
 
 
 class DatasetKind(StrEnum):
@@ -143,6 +152,7 @@ class GenerationRequest:
             OutputFormat.SQLSERVER,
             OutputFormat.MARIADB,
             OutputFormat.DUCKDB,
+            OutputFormat.SQLITE,
         ):
             self._validate_database_options()
 
@@ -153,17 +163,26 @@ class GenerationRequest:
             OutputFormat.SQLSERVER: DatabaseDialect.SQLSERVER,
             OutputFormat.MARIADB: DatabaseDialect.MARIADB,
             OutputFormat.DUCKDB: DatabaseDialect.DUCKDB,
+            OutputFormat.SQLITE: DatabaseDialect.SQLITE,
         }
         dialect = self.db_dialect or dialect_map.get(self.output_format)
 
         if dialect is None:
-            raise ValidationError(f"Unknown database dialect for output format: {self.output_format}")
+            raise ValidationError(
+                f"Unknown database dialect for output format: {self.output_format}"
+            )
 
-        if dialect == DatabaseDialect.DUCKDB:
-            # DuckDB only needs a file path (can use output_dir/output_stem)
+        # Common option validation applies to every dialect
+        if self.db_if_exists not in ("append", "replace", "fail"):
+            raise ValidationError("db_if_exists must be 'append', 'replace', or 'fail'.")
+        if self.db_batch_size <= 0:
+            raise ValidationError("db_batch_size must be greater than zero.")
+
+        if dialect in (DatabaseDialect.DUCKDB, DatabaseDialect.SQLITE):
+            # File-based databases only need a file path (resolved against output_dir)
             if not self.db_name:
-                # Use output_stem as database file name
-                self.db_name = f"{self.output_stem}.duckdb"
+                suffix = ".duckdb" if dialect == DatabaseDialect.DUCKDB else ".sqlite3"
+                self.db_name = f"{self.output_stem}{suffix}"
             return
 
         # For other databases, validate connection parameters
@@ -181,11 +200,6 @@ class GenerationRequest:
                 DatabaseDialect.MARIADB: 3306,
             }
             self.db_port = defaults[dialect]
-
-        if self.db_if_exists not in ("append", "replace", "fail"):
-            raise ValidationError("db_if_exists must be 'append', 'replace', or 'fail'.")
-        if self.db_batch_size <= 0:
-            raise ValidationError("db_batch_size must be greater than zero.")
 
     def _validate_output_path(self) -> None:
         if not self.output_stem.strip():

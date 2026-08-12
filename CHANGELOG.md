@@ -41,9 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Multi-stage Docker build with non-root user, health checks, and persistent volumes
 - Docker Compose for API server and one-off generation jobs
 - Pydantic models for request validation
+- **International personnel names**: country-matched name locales derived from the geocoded OSM region (`resolved_country()` on address providers, cached in a `.meta.json` sidecar), weighted multi-ethnic blend for US deployments, per-country overrides via the realism config `name_locales` section, CJK family-name-first ordering, and `PersonnelNameGenerator` replacing single-locale Faker rosters
+- **SQLite database target**: `sqlite` output format/dialect using the stdlib `sqlite3` driver (no extra dependencies); file-based engine with `db_name` defaulting to `{output_stem}.sqlite3` in `output_dir`; SQLite-aware table-exists/drop/index/type handling; `db_schema` ignored with a warning (SQLite has no schemas); per-statement batch cap (`999 // columns`) honoring SQLite's bound-parameter limit; full CLI `--db-*` flag set, params-file keys, and Python API support
+- **Parquet metadata embedding**: generation provenance (seed, realism config hash, schema hash, schema version, timestamps, request summary) written into each Parquet file's key-value footer metadata as namespaced `synth911:*` pairs — self-documenting files readable by any Parquet tool; embedded at write time for both full and chunked exports (chunked mode derives `schema_hash` from the first chunk); new `DATA_SCHEMA_VERSION` constant and `Manifest.schema_version`/`Manifest.to_kv_metadata()`
 
 ### Changed
-- N/A (initial release)
+- Personnel names now follow the OSM region's country (falling back to the request `--country`, then `US`) instead of a fixed `en_US` Faker locale
+- `IncidentGenerator` no longer takes a `faker_locale` constructor argument
+- Database exports are now configurable from the CLI: new `--db-dialect`, `--db-host`, `--db-port`, `--db-name`, `--db-user`, `--db-password`, `--db-table-incidents`, `--db-table-phone`, `--db-schema`, `--db-batch-size`, `--db-if-exists`, and `--no-db-create-indexes` flags (index creation is disabled with `--no-db-create-indexes`; previously only reachable via params files or the Python API)
 
 ### Deprecated
 - N/A
@@ -55,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Path traversal validation for `output_dir`/`output_stem`
 - OSM Nominatim rate limiting with retry/backoff
 - Type safety across source code (`ty check src/` passes)
+- `config/example_realism.yaml` was missing the required phone-metrics answer-time keys and failed validation; the example now matches `RealismConfig._validate` expectations
 
 ### Security
 - Dependency audit with pip-audit in CI

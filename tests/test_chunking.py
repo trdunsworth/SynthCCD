@@ -72,9 +72,9 @@ def test_generate_chunks_id_numbers_stay_globally_sequential() -> None:
     provider = _provider()
     request = _request(rows=50, seed=5, chunk_rows=6)
 
-    ids = pd.concat(
-        list(IncidentGenerator(provider).generate_chunks(request, chunk_rows=6))
-    )["id_number"].tolist()
+    ids = pd.concat(list(IncidentGenerator(provider).generate_chunks(request, chunk_rows=6)))[
+        "id_number"
+    ].tolist()
 
     assert sorted(ids) == list(range(1, 51))
 
@@ -83,9 +83,9 @@ def test_generate_chunks_guid_ids_unique_across_chunks() -> None:
     provider = _provider()
     request = _request(rows=30, seed=8, chunk_rows=5, id_format=IdFormat.GUID)
 
-    ids = pd.concat(
-        list(IncidentGenerator(provider).generate_chunks(request, chunk_rows=5))
-    )["id_number"].tolist()
+    ids = pd.concat(list(IncidentGenerator(provider).generate_chunks(request, chunk_rows=5)))[
+        "id_number"
+    ].tolist()
 
     assert len(ids) == len(set(ids)) == 30
 
@@ -94,9 +94,7 @@ def test_generate_chunks_reference_numbers_unique_per_agency() -> None:
     provider = _provider()
     request = _request(rows=60, seed=11, chunk_rows=4)
 
-    frame = pd.concat(
-        list(IncidentGenerator(provider).generate_chunks(request, chunk_rows=4))
-    )
+    frame = pd.concat(list(IncidentGenerator(provider).generate_chunks(request, chunk_rows=4)))
 
     for _, group in frame.groupby("agency"):
         assert group["internal_reference_number"].nunique() == len(group), (
@@ -109,9 +107,7 @@ def test_generate_chunks_is_deterministic_for_same_seed() -> None:
 
     def run() -> pd.DataFrame:
         request = _request(rows=60, seed=42, chunk_rows=5)
-        return pd.concat(
-            list(IncidentGenerator(provider).generate_chunks(request, chunk_rows=5))
-        )
+        return pd.concat(list(IncidentGenerator(provider).generate_chunks(request, chunk_rows=5)))
 
     assert run().equals(run())
 
@@ -208,14 +204,13 @@ def test_app_chunked_parquet_matches_generated_chunks(tmp_path: Path) -> None:
     Synth911Application(address_provider=provider).generate(request)
 
     written = pd.read_parquet(tmp_path / "sample_incidents.parquet")
-    chunks = pd.concat(
-        list(IncidentGenerator(provider).generate_chunks(request, chunk_rows=1))
-    )
+    chunks = pd.concat(list(IncidentGenerator(provider).generate_chunks(request, chunk_rows=1)))
     assert list(written.columns) == list(chunks.columns)
     assert len(written) == len(chunks)
-    assert written["internal_reference_number"].tolist() == chunks[
-        "internal_reference_number"
-    ].tolist()
+    assert (
+        written["internal_reference_number"].tolist()
+        == chunks["internal_reference_number"].tolist()
+    )
 
 
 def test_app_non_chunked_csv_keeps_incidents_in_result(tmp_path: Path) -> None:

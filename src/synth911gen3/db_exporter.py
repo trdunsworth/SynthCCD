@@ -30,6 +30,8 @@ class DatabaseExporter:
         dialect = self._get_dialect()
         if dialect == DatabaseDialect.DUCKDB:
             return self._create_duckdb_engine()
+        elif dialect == DatabaseDialect.SQLITE:
+            return self._create_sqlite_engine()
         elif dialect == DatabaseDialect.POSTGRESQL:
             return self._create_postgresql_engine()
         elif dialect == DatabaseDialect.SQLSERVER:
@@ -45,6 +47,7 @@ class DatabaseExporter:
             OutputFormat.SQLSERVER: DatabaseDialect.SQLSERVER,
             OutputFormat.MARIADB: DatabaseDialect.MARIADB,
             OutputFormat.DUCKDB: DatabaseDialect.DUCKDB,
+            OutputFormat.SQLITE: DatabaseDialect.SQLITE,
         }
         return self.request.db_dialect or dialect_map[self.request.output_format]
 
@@ -68,6 +71,20 @@ class DatabaseExporter:
         except Exception as exc:
             raise ExportError(f"Failed to create DuckDB engine: {exc}") from exc
 
+    def _create_sqlite_engine(self) -> Engine:
+        """Create a SQLite engine backed by a local file (stdlib sqlite3 driver)."""
+        db_path: str = self.request.db_name or f"{self.request.output_stem}.sqlite3"
+        path_obj = Path(db_path)
+        if not path_obj.is_absolute():
+            path_obj = self.request.output_dir / path_obj
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            # Absolute path so the file lands in output_dir regardless of CWD
+            return sa.create_engine(f"sqlite:///{path_obj}")
+        except Exception as exc:
+            raise ExportError(f"Failed to create SQLite engine: {exc}") from exc
+
     def _create_postgresql_engine(self) -> Engine:
         try:
             import psycopg2  # noqa: F401
@@ -90,6 +107,7 @@ class DatabaseExporter:
         pyodbc_module = None
         try:
             import pyodbc
+
             pyodbc_module = pyodbc
         except ImportError:
             pass
@@ -154,8 +172,28 @@ class DatabaseExporter:
 
         dialect = self._get_dialect()
         schema = self.request.db_schema
+        if dialect == DatabaseDialect.SQLITE:
+            # SQLite has no schema concept; ignore any requested schema
+            if self.request.db_schema:
+                logger.warning(
+                    "SQLite has no schemas; ignoring db_schema=%r", self.request.db_schema
+                )
+            schema = None
         if_exists = self.request.db_if_exists
         batch_size = self.request.db_batch_size
+        if dialect == DatabaseDialect.SQLITE and len(frame.columns) > 0:
+            # SQLite caps bound parameters per statement at 999
+            # (SQLITE_MAX_VARIABLE_NUMBER); cap the batch so that
+            # rows * columns stays under the limit.
+            max_rows_per_statement = max(1, 999 // len(frame.columns))
+            if batch_size > max_rows_per_statement:
+                logger.debug(
+                    "Capping SQLite batch size from %d to %d for %d columns",
+                    batch_size,
+                    max_rows_per_statement,
+                    len(frame.columns),
+                )
+                batch_size = max_rows_per_statement
 
         # Prepare column types for better schema control
         dtype = self._get_column_types(frame, dialect)
@@ -202,6 +240,11 @@ class DatabaseExporter:
                 text("SELECT 1 FROM information_schema.tables WHERE table_name = :name"),
                 {"name": table_name},
             ).fetchone()
+        elif dialect == DatabaseDialect.SQLITE:
+            result = conn.execute(
+                text("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = :name"),
+                {"name": table_name},
+            ).fetchone()
         elif dialect == DatabaseDialect.POSTGRESQL:
             result = conn.execute(
                 text(
@@ -233,6 +276,8 @@ class DatabaseExporter:
     def _drop_table(self, conn: Connection, table_name: str, schema: str | None) -> None:
         dialect = self._get_dialect()
         if dialect == DatabaseDialect.DUCKDB:
+            conn.execute(text(f'DROP TABLE IF EXISTS "{table_name}"'))
+        elif dialect == DatabaseDialect.SQLITE:
             conn.execute(text(f'DROP TABLE IF EXISTS "{table_name}"'))
         elif dialect == DatabaseDialect.POSTGRESQL:
             schema_part = f'"{schema}".' if schema else ""
@@ -295,24 +340,46 @@ class DatabaseExporter:
 
         try:
             if dialect == DatabaseDialect.DUCKDB:
-                conn.execute(text(f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON {schema_prefix}"{table_name}" ("{column}")'))
+                conn.execute(
+                    text(
+                        f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON {schema_prefix}"{table_name}" ("{column}")'
+                    )
+                )
+            elif dialect == DatabaseDialect.SQLITE:
+                conn.execute(
+                    text(
+                        f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON {schema_prefix}"{table_name}" ("{column}")'
+                    )
+                )
             elif dialect == DatabaseDialect.POSTGRESQL:
-                conn.execute(text(f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON {schema_prefix}"{table_name}" ("{column}")'))
+                conn.execute(
+                    text(
+                        f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON {schema_prefix}"{table_name}" ("{column}")'
+                    )
+                )
             elif dialect == DatabaseDialect.SQLSERVER:
-                conn.execute(text(f"CREATE INDEX [{idx_name}] ON {schema_prefix}[{table_name}] ([{column}])"))
+                conn.execute(
+                    text(f"CREATE INDEX [{idx_name}] ON {schema_prefix}[{table_name}] ([{column}])")
+                )
             elif dialect == DatabaseDialect.MARIADB:
-                conn.execute(text(f"CREATE INDEX `{idx_name}` ON {schema_prefix}`{table_name}` (`{column}`)"))
+                conn.execute(
+                    text(f"CREATE INDEX `{idx_name}` ON {schema_prefix}`{table_name}` (`{column}`)")
+                )
         except Exception as exc:
             # Index creation might fail if already exists or column type doesn't support indexing
             logger.debug("Could not create index %s on %s: %s", idx_name, table_name, exc)
 
-    def _get_column_types(self, frame: pd.DataFrame, dialect: DatabaseDialect) -> dict[str, sa.types.TypeEngine]:
+    def _get_column_types(
+        self, frame: pd.DataFrame, dialect: DatabaseDialect
+    ) -> dict[str, sa.types.TypeEngine]:
         dtype: dict[str, sa.types.TypeEngine] = {}
         for col in frame.columns:
             series = frame[col]
             if pd.api.types.is_datetime64_any_dtype(series):
                 if dialect == DatabaseDialect.DUCKDB:
                     dtype[col] = sa.TIMESTAMP()
+                elif dialect == DatabaseDialect.SQLITE:
+                    dtype[col] = sa.DateTime()
                 elif dialect == DatabaseDialect.POSTGRESQL:
                     dtype[col] = sa.TIMESTAMP(timezone=False)
                 elif dialect == DatabaseDialect.SQLSERVER:
@@ -346,7 +413,9 @@ def export_to_database(
         if "incidents" in datasets:
             results["incidents"] = exporter.export_incidents(datasets["incidents"])
         if "hourly_call_counts" in datasets:
-            results["hourly_call_counts"] = exporter.export_phone_metrics(datasets["hourly_call_counts"])
+            results["hourly_call_counts"] = exporter.export_phone_metrics(
+                datasets["hourly_call_counts"]
+            )
         return results
     finally:
         exporter.close()

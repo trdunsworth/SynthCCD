@@ -3,6 +3,7 @@ from datetime import date
 from pathlib import Path
 
 from synth911gen3.schema import (
+    DatabaseDialect,
     DispatchInitFraction,
     GenerationRequest,
     IfExistsMode,
@@ -135,8 +136,24 @@ class TestShiftConfig:
             cycle_start_weekday=0,
             rotation=[1, 2],
             shifts=[
-                Shift(name="A", label="DAY", start_hour=6, start_minute=0, end_hour=18, end_minute=0, rotation=1),
-                Shift(name="B", label="NIGHT", start_hour=18, start_minute=0, end_hour=6, end_minute=0, rotation=2),
+                Shift(
+                    name="A",
+                    label="DAY",
+                    start_hour=6,
+                    start_minute=0,
+                    end_hour=18,
+                    end_minute=0,
+                    rotation=1,
+                ),
+                Shift(
+                    name="B",
+                    label="NIGHT",
+                    start_hour=18,
+                    start_minute=0,
+                    end_hour=6,
+                    end_minute=0,
+                    rotation=2,
+                ),
             ],
         )
         assert len(config.shifts) == 2
@@ -292,6 +309,31 @@ class TestGenerationRequest:
             output_stem="test_run",
         )
         assert req.db_name == "test_run.duckdb"
+
+    def test_database_sqlite_default_name(self):
+        req = GenerationRequest(
+            output_format=OutputFormat.SQLITE,
+            output_stem="test_run",
+        )
+        assert req.db_name == "test_run.sqlite3"
+
+    def test_database_sqlite_requires_no_connection_params(self):
+        req = GenerationRequest(output_format=OutputFormat.SQLITE)
+        assert req.db_name == "synthetic_911.sqlite3"
+        assert req.db_host is None
+
+    def test_database_sqlite_dialect_enum(self):
+        assert DatabaseDialect.SQLITE.value == "sqlite"
+        assert OutputFormat.SQLITE.value == "sqlite"
+
+    def test_database_sqlite_dialect_explicit(self):
+        # db_dialect=sqlite with a server-based output_format still defaults the file
+        req = GenerationRequest(
+            output_format=OutputFormat.POSTGRESQL,
+            db_dialect=DatabaseDialect.SQLITE,
+            output_stem="mixed",
+        )
+        assert req.db_name == "mixed.sqlite3"
 
     def test_database_if_exists_validation(self):
         with pytest.raises(Exception):

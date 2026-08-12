@@ -6,18 +6,18 @@ from collections.abc import Callable, Iterator
 
 import numpy as np
 import pandas as pd
-from faker import Faker
 
 from synth911gen3.addresses import AddressProvider
 from synth911gen3.config import GenerationRequest, IdFormat
 from synth911gen3.constants import (
-    DEFAULT_LOCALE,
+    DEFAULT_COUNTRY,
     DEFAULT_MAX_MEMORY_BYTES,
     DEFAULT_SEASONAL_MULTIPLIER,
     MEMORY_PROBE_ROWS,
 )
 from synth911gen3.exceptions import ValidationError
 from synth911gen3.logging_conf import ProgressReporter, get_logger
+from synth911gen3.names import PersonnelNameGenerator, resolve_name_locales
 from synth911gen3.realism_config import RealismConfig
 from synth911gen3.shifts import ShiftConfig, apply_shift_preset
 
@@ -80,14 +80,10 @@ def _resolve_shift_staffing(
     dsp_index = 0
     plan: list[tuple[str, int, int]] = []
     for shift in shift_config.shifts:
-        calltakers = (
-            shift.calltakers if shift.calltakers is not None else ct_split[ct_index]
-        )
+        calltakers = shift.calltakers if shift.calltakers is not None else ct_split[ct_index]
         if shift.calltakers is None:
             ct_index += 1
-        dispatchers = (
-            shift.dispatchers if shift.dispatchers is not None else dsp_split[dsp_index]
-        )
+        dispatchers = shift.dispatchers if shift.dispatchers is not None else dsp_split[dsp_index]
         if shift.dispatchers is None:
             dsp_index += 1
         plan.append((shift.name, max(1, calltakers), max(1, dispatchers)))
@@ -95,14 +91,13 @@ def _resolve_shift_staffing(
 
 
 def _build_shift_pools(
-    faker: Faker, staffing: list[tuple[str, int, int]]
+    name_gen: PersonnelNameGenerator, staffing: list[tuple[str, int, int]]
 ) -> dict[str, dict[str, list[str]]]:
-    faker.unique.clear()
     pools: dict[str, dict[str, list[str]]] = {}
     for name, calltakers, dispatchers in staffing:
         pools[name] = {
-            "calltakers": [faker.unique.name() for _ in range(calltakers)],
-            "dispatchers": [faker.unique.name() for _ in range(dispatchers)],
+            "calltakers": [name_gen.unique_name() for _ in range(calltakers)],
+            "dispatchers": [name_gen.unique_name() for _ in range(dispatchers)],
         }
     return pools
 
@@ -117,9 +112,7 @@ def _zipf_pick(rng: np.random.Generator, names: list[str]) -> str:
 
 
 def _zipf_choice(rng: np.random.Generator, names: list[str], size: int) -> np.ndarray:
-    return rng.choice(
-        np.asarray(names, dtype=object), size=size, p=_zipf_weights(len(names))
-    )
+    return rng.choice(np.asarray(names, dtype=object), size=size, p=_zipf_weights(len(names)))
 
 
 def _categorical_choice(
@@ -193,11 +186,7 @@ def _build_reference_numbers(
     times_series: pd.Series,
     start_counts: np.ndarray | None = None,
 ) -> np.ndarray:
-    ymd = (
-        (times_series.dt.year % 100) * 10000
-        + times_series.dt.month * 100
-        + times_series.dt.day
-    )
+    ymd = (times_series.dt.year % 100) * 10000 + times_series.dt.month * 100 + times_series.dt.day
     ymd_str = np.char.zfill(ymd.to_numpy().astype("U6"), 6)
 
     counters = np.zeros(int(agency_codes.max()) + 1, dtype=np.int64)
@@ -219,42 +208,57 @@ def _build_reference_numbers(
 
 
 class IncidentGenerator:
-    def __init__(self, address_provider: AddressProvider, faker_locale: str = DEFAULT_LOCALE) -> None:
+    def __init__(self, address_provider: AddressProvider) -> None:
         self._address_provider = address_provider
-        self._faker_locale = faker_locale
 
     def _prepare(
         self, request: GenerationRequest
-    ) -> tuple[RealismConfig, ShiftConfig, dict[str, dict[str, list[str]]], list, np.random.Generator, Faker]:
+    ) -> tuple[
+        RealismConfig, ShiftConfig, dict[str, dict[str, list[str]]], list, np.random.Generator
+    ]:
         request.validate()
         realism = request.get_realism_config()
         shift_config = apply_shift_preset(realism.shift_config, request.shift_preset)
         rng = np.random.default_rng(request.seed)
-        faker = Faker(self._faker_locale)
-        faker.seed_instance(request.seed)
 
+        logger.info("Loading addresses for '%s'...", request.area_query.strip())
+        addresses = self._address_provider.load_addresses(request.area_query)
+        logger.info("Loaded %d addresses for sampling", len(addresses))
+        if not addresses:
+            raise ValidationError("Address provider returned no addresses for the requested area.")
+
+        # Personnel names follow the region the addresses were drawn from; the
+        # request's country acts as the fallback when the provider cannot tell.
+        resolved_country = getattr(self._address_provider, "resolved_country", None)
+        country = (
+            (resolved_country() if callable(resolved_country) else None)
+            or request.country
+            or DEFAULT_COUNTRY
+        )
+        name_locales = resolve_name_locales(country, override=realism.name_locales)
+        logger.info(
+            "Personnel name locales for country %s: %s",
+            country,
+            ", ".join(locale for locale, _ in name_locales),
+        )
+        name_gen = PersonnelNameGenerator(name_locales, seed=request.seed)
         staffing = _resolve_shift_staffing(shift_config, request)
-        shift_pools = _build_shift_pools(faker, staffing)
+        shift_pools = _build_shift_pools(name_gen, staffing)
         logger.info(
             "Personnel built for %d shifts: %d calltakers, %d dispatchers",
             len(shift_config.shifts),
             shift_config.total_calltakers(),
             shift_config.total_dispatchers(),
         )
-        logger.info("Loading addresses for '%s'...", request.area_query.strip())
-        addresses = self._address_provider.load_addresses(request.area_query)
-        logger.info("Loaded %d addresses for sampling", len(addresses))
-        if not addresses:
-            raise ValidationError("Address provider returned no addresses for the requested area.")
-        return realism, shift_config, shift_pools, addresses, rng, faker
+        return realism, shift_config, shift_pools, addresses, rng
 
     def generate(
         self,
         request: GenerationRequest,
         on_progress: Callable[[int, int], None] | None = None,
     ) -> pd.DataFrame:
-        realism, shift_config, shift_pools, addresses, rng, faker = self._prepare(request)
-        records = self._build_records(request, realism, shift_config, shift_pools, addresses, rng, faker)
+        realism, shift_config, shift_pools, addresses, rng = self._prepare(request)
+        records = self._build_records(request, realism, shift_config, shift_pools, addresses, rng)
 
         progress = ProgressReporter(request.rows, logger)
         progress.update(request.rows)
@@ -272,10 +276,8 @@ class IncidentGenerator:
         the seeded generation stream. Returns ``request.rows`` when the whole
         dataset fits in one chunk.
         """
-        realism, shift_config, shift_pools, addresses, _rng, faker = self._prepare(request)
-        return self._resolve_chunk_rows(
-            request, realism, shift_config, shift_pools, addresses, faker
-        )
+        realism, shift_config, shift_pools, addresses, _rng = self._prepare(request)
+        return self._resolve_chunk_rows(request, realism, shift_config, shift_pools, addresses)
 
     def _resolve_chunk_rows(
         self,
@@ -284,7 +286,6 @@ class IncidentGenerator:
         shift_config: ShiftConfig,
         shift_pools: dict[str, dict[str, list[str]]],
         addresses: list,
-        faker: Faker,
     ) -> int:
         budget = (
             request.max_memory_bytes
@@ -303,7 +304,6 @@ class IncidentGenerator:
             shift_pools,
             addresses,
             probe_rng,
-            faker,
             n=probe_n,
             guid_rng=probe_guid,
         )
@@ -325,9 +325,11 @@ class IncidentGenerator:
         chunk plan; ``internal_reference_number`` counters continue across
         chunks and ``id_number`` values stay globally sequential.
         """
-        realism, shift_config, shift_pools, addresses, rng, faker = self._prepare(request)
+        realism, shift_config, shift_pools, addresses, rng = self._prepare(request)
         if chunk_rows is None:
-            chunk_rows = self._resolve_chunk_rows(request, realism, shift_config, shift_pools, addresses, faker)
+            chunk_rows = self._resolve_chunk_rows(
+                request, realism, shift_config, shift_pools, addresses
+            )
         chunk_rows = max(1, min(chunk_rows, request.rows))
 
         guid_rng = _random.Random(request.seed)
@@ -344,7 +346,6 @@ class IncidentGenerator:
                 shift_pools,
                 addresses,
                 rng,
-                faker,
                 n=n,
                 start_index=start_index,
                 guid_rng=guid_rng,
@@ -366,7 +367,6 @@ class IncidentGenerator:
         shift_pools: dict[str, dict[str, list[str]]],
         addresses: list,
         rng: np.random.Generator,
-        faker: Faker,
         n: int | None = None,
         start_index: int = 0,
         guid_rng: _random.Random | None = None,
@@ -395,7 +395,10 @@ class IncidentGenerator:
             priorities[mask] = rng.choice(keys, size=int(mask.sum()), p=probs)
 
         max_priority = max(max(keys) for keys in priority_key_sets.values())
-        timing_tables = {field: self._timing_table(realism, agency_keys, max_priority, field) for field in _TIMING_FIELDS}
+        timing_tables = {
+            field: self._timing_table(realism, agency_keys, max_priority, field)
+            for field in _TIMING_FIELDS
+        }
         means = {field: timing_tables[field][agency_codes, priorities] for field in _TIMING_FIELDS}
 
         dispatch_lo = np.zeros(max_priority + 1, dtype=float)
@@ -409,19 +412,33 @@ class IncidentGenerator:
             for field in _ADDRESS_FIELDS
         }
         address_index = rng.integers(0, len(addresses), size=n)
-        address_columns = {
-            field: address_fields[field][address_index] for field in _ADDRESS_FIELDS
-        }
+        address_columns = {field: address_fields[field][address_index] for field in _ADDRESS_FIELDS}
 
         pickup_delay_seconds = _lognormal_seconds(rng, 3, sigma=0.45, size=n, maximum=20)
-        interview_seconds = _lognormal_seconds(rng, means["interview_mean"], sigma=0.65, size=n, maximum=1_800)
-        dispatch_queue_seconds = _lognormal_seconds(rng, means["dispatch_mean"], sigma=0.85, size=n, maximum=7_200)
-        turnout_seconds = _lognormal_seconds(rng, means["turnout_mean"], sigma=0.60, size=n, maximum=900)
-        travel_seconds = _lognormal_seconds(rng, means["travel_mean"], sigma=0.55, size=n, maximum=3_600)
-        on_scene_seconds = _lognormal_seconds(rng, means["scene_mean"], sigma=0.50, size=n, maximum=10_800)
-        closeout_seconds = _lognormal_seconds(rng, means["closeout_mean"], sigma=0.45, size=n, maximum=1_800)
-        phone_seconds = _lognormal_seconds(rng, means["phone_mean"], sigma=0.70, size=n, maximum=3_600)
-        phone_duration_seconds = np.maximum(interview_seconds + dispatch_queue_seconds, phone_seconds)
+        interview_seconds = _lognormal_seconds(
+            rng, means["interview_mean"], sigma=0.65, size=n, maximum=1_800
+        )
+        dispatch_queue_seconds = _lognormal_seconds(
+            rng, means["dispatch_mean"], sigma=0.85, size=n, maximum=7_200
+        )
+        turnout_seconds = _lognormal_seconds(
+            rng, means["turnout_mean"], sigma=0.60, size=n, maximum=900
+        )
+        travel_seconds = _lognormal_seconds(
+            rng, means["travel_mean"], sigma=0.55, size=n, maximum=3_600
+        )
+        on_scene_seconds = _lognormal_seconds(
+            rng, means["scene_mean"], sigma=0.50, size=n, maximum=10_800
+        )
+        closeout_seconds = _lognormal_seconds(
+            rng, means["closeout_mean"], sigma=0.45, size=n, maximum=1_800
+        )
+        phone_seconds = _lognormal_seconds(
+            rng, means["phone_mean"], sigma=0.70, size=n, maximum=3_600
+        )
+        phone_duration_seconds = np.maximum(
+            interview_seconds + dispatch_queue_seconds, phone_seconds
+        )
 
         dispatch_fraction = rng.uniform(dispatch_lo[priorities], dispatch_hi[priorities])
         dispatch_init_seconds = (phone_duration_seconds * dispatch_fraction).astype(np.int64)
@@ -430,7 +447,9 @@ class IncidentGenerator:
         incident_start_time = event_times + pre_cad_offset_seconds.astype("timedelta64[s]")
         time_phone_pickup = event_times + pickup_delay_seconds.astype("timedelta64[s]")
         time_call_enters_queue = time_phone_pickup + interview_seconds.astype("timedelta64[s]")
-        time_first_unit_assigned = time_phone_pickup + (dispatch_init_seconds + dispatch_queue_seconds).astype("timedelta64[s]")
+        time_first_unit_assigned = time_phone_pickup + (
+            dispatch_init_seconds + dispatch_queue_seconds
+        ).astype("timedelta64[s]")
         time_unit_enroute = time_first_unit_assigned + turnout_seconds.astype("timedelta64[s]")
         time_unit_arrived = time_unit_enroute + travel_seconds.astype("timedelta64[s]")
         time_last_unit_cleared = time_unit_arrived + on_scene_seconds.astype("timedelta64[s]")
@@ -467,10 +486,10 @@ class IncidentGenerator:
         # Determine season for each incident (0=Winter, 1=Spring, 2=Summer, 3=Fall)
         months = times_series.dt.month.to_numpy()
         seasons = np.empty(n, dtype=np.int8)
-        seasons[(months == 12) | (months <= 2)] = 0      # Winter: Dec, Jan, Feb
-        seasons[(months >= 3) & (months <= 5)] = 1       # Spring: Mar, Apr, May
-        seasons[(months >= 6) & (months <= 8)] = 2       # Summer: Jun, Jul, Aug
-        seasons[(months >= 9) & (months <= 11)] = 3      # Fall: Sep, Oct, Nov
+        seasons[(months == 12) | (months <= 2)] = 0  # Winter: Dec, Jan, Feb
+        seasons[(months >= 3) & (months <= 5)] = 1  # Spring: Mar, Apr, May
+        seasons[(months >= 6) & (months <= 8)] = 2  # Summer: Jun, Jul, Aug
+        seasons[(months >= 9) & (months <= 11)] = 3  # Fall: Sep, Oct, Nov
 
         problem_nature = np.empty(n, dtype=object)
         for agency_index, agency_key in enumerate(agency_keys):
@@ -521,7 +540,9 @@ class IncidentGenerator:
         else:
             id_number = np.arange(start_index + 1, start_index + n + 1)
 
-        reference_numbers = _build_reference_numbers(agency, agency_codes, times_series, start_counts)
+        reference_numbers = _build_reference_numbers(
+            agency, agency_codes, times_series, start_counts
+        )
 
         street_address = address_columns["street_address"]
         location = np.char.add(street_address.astype("U"), ", ")
@@ -530,9 +551,7 @@ class IncidentGenerator:
         location = np.char.add(location, address_columns["state"].astype("U"))
 
         hour = times_series.dt.hour.to_numpy()
-        dow = np.asarray(_DAY_ABBREVIATIONS, dtype=str)[
-            times_series.dt.dayofweek.to_numpy()
-        ]
+        dow = np.asarray(_DAY_ABBREVIATIONS, dtype=str)[times_series.dt.dayofweek.to_numpy()]
         week_no = times_series.dt.isocalendar().week.to_numpy()
 
         return {

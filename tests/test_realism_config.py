@@ -108,7 +108,9 @@ class TestRealismConfigWeightValidation:
             "LAW": {1: 0.2, 2: 0.2, 3: 0.2, 4: 0.2, 5: 0.2},
             "UNKNOWN": {1: 0.2, 2: 0.2, 3: 0.2, 4: 0.2, 5: 0.2},
         }
-        with pytest.raises(ValidationError, match="Priority weights defined for unknown agency: UNKNOWN"):
+        with pytest.raises(
+            ValidationError, match="Priority weights defined for unknown agency: UNKNOWN"
+        ):
             config._validate()
 
     def test_problem_profiles_must_sum_to_one_per_priority(self) -> None:
@@ -117,7 +119,9 @@ class TestRealismConfigWeightValidation:
         config._validate()
 
         config.problem_profiles["LAW"][1] = [("Test", 0.5), ("Test2", 0.3)]
-        with pytest.raises(ValidationError, match="Problem profiles for LAW priority 1 must sum to 1.0"):
+        with pytest.raises(
+            ValidationError, match="Problem profiles for LAW priority 1 must sum to 1.0"
+        ):
             config._validate()
 
     def test_problem_profiles_missing_priority_rejected(self) -> None:
@@ -131,7 +135,9 @@ class TestRealismConfigWeightValidation:
         """Problem profiles for unknown agency should be rejected."""
         config = RealismConfig()
         config.problem_profiles = {"UNKNOWN": {1: [("Test", 1.0)]}}
-        with pytest.raises(ValidationError, match="Problem profiles defined for unknown agency: UNKNOWN"):
+        with pytest.raises(
+            ValidationError, match="Problem profiles defined for unknown agency: UNKNOWN"
+        ):
             config._validate()
 
     def test_disposition_profiles_must_sum_to_one(self) -> None:
@@ -147,7 +153,9 @@ class TestRealismConfigWeightValidation:
         """Disposition profiles for unknown agency should be rejected."""
         config = RealismConfig()
         config.disposition_profiles = {"UNKNOWN": [("NR", 1.0)]}
-        with pytest.raises(ValidationError, match="Disposition profiles defined for unknown agency: UNKNOWN"):
+        with pytest.raises(
+            ValidationError, match="Disposition profiles defined for unknown agency: UNKNOWN"
+        ):
             config._validate()
 
     def test_time_profiles_missing_agency_rejected(self) -> None:
@@ -177,11 +185,17 @@ class TestRealismConfigWeightValidation:
         config._validate()
 
         config.dispatch_init_fraction[1] = (0.5, 0.3)
-        with pytest.raises(ValidationError, match="dispatch_init_fraction for priority 1 must satisfy 0 <= lo <= hi"):
+        with pytest.raises(
+            ValidationError,
+            match="dispatch_init_fraction for priority 1 must satisfy 0 <= lo <= hi",
+        ):
             config._validate()
 
         config.dispatch_init_fraction[1] = (-0.1, 0.5)
-        with pytest.raises(ValidationError, match="dispatch_init_fraction for priority 1 must satisfy 0 <= lo <= hi"):
+        with pytest.raises(
+            ValidationError,
+            match="dispatch_init_fraction for priority 1 must satisfy 0 <= lo <= hi",
+        ):
             config._validate()
 
     def test_dispatch_init_fraction_missing_priority_rejected(self) -> None:
@@ -204,18 +218,24 @@ class TestRealismConfigWeightValidation:
         """phone_metrics.max_abandonment_rate must be in [0, 1]."""
         config = RealismConfig()
         config.phone_metrics["max_abandonment_rate"] = 1.5
-        with pytest.raises(ValidationError, match="phone_metrics.max_abandonment_rate must be between 0 and 1"):
+        with pytest.raises(
+            ValidationError, match="phone_metrics.max_abandonment_rate must be between 0 and 1"
+        ):
             config._validate()
 
         config.phone_metrics["max_abandonment_rate"] = -0.1
-        with pytest.raises(ValidationError, match="phone_metrics.max_abandonment_rate must be between 0 and 1"):
+        with pytest.raises(
+            ValidationError, match="phone_metrics.max_abandonment_rate must be between 0 and 1"
+        ):
             config._validate()
 
     def test_phone_metrics_min_hourly_volume_non_negative(self) -> None:
         """phone_metrics.min_hourly_volume must be non-negative."""
         config = RealismConfig()
         config.phone_metrics["min_hourly_volume"] = -1
-        with pytest.raises(ValidationError, match="phone_metrics.min_hourly_volume must be non-negative"):
+        with pytest.raises(
+            ValidationError, match="phone_metrics.min_hourly_volume must be non-negative"
+        ):
             config._validate()
 
     def test_agency_names_mapping_required(self) -> None:
@@ -224,14 +244,19 @@ class TestRealismConfigWeightValidation:
         config.agency_weights["NEW"] = 0.1
         # Provide minimal valid time_profiles for NEW agency to reach agency_names check
         config.time_profiles["NEW"] = {
-            p: {"interview_mean": 10, "dispatch_mean": 5, "turnout_mean": 10, "travel_mean": 100,
-                "scene_mean": 1000, "closeout_mean": 100, "phone_mean": 100}
+            p: {
+                "interview_mean": 10,
+                "dispatch_mean": 5,
+                "turnout_mean": 10,
+                "travel_mean": 100,
+                "scene_mean": 1000,
+                "closeout_mean": 100,
+                "phone_mean": 100,
+            }
             for p in range(1, 6)
         }
         # Also need problem_profiles and disposition_profiles
-        config.problem_profiles["NEW"] = {
-            p: [("Test", 1.0)] for p in range(1, 6)
-        }
+        config.problem_profiles["NEW"] = {p: [("Test", 1.0)] for p in range(1, 6)}
         config.disposition_profiles["NEW"] = [("NR", 1.0)]
         config.priority_weights["NEW"] = {1: 0.2, 2: 0.2, 3: 0.2, 4: 0.2, 5: 0.2}
 
@@ -300,7 +325,9 @@ priority_weights:
         config.shift_config = config.shift_config  # default is valid
 
         config.shift_config.shifts = []
-        with pytest.raises(ValidationError, match="shift_config.shifts must define at least one shift"):
+        with pytest.raises(
+            ValidationError, match="shift_config.shifts must define at least one shift"
+        ):
             config._validate()
 
     def test_call_reception_weights_normalized(self, tmp_path: Path) -> None:
@@ -373,3 +400,78 @@ agency_weights:
 
         loaded = RealismConfig.from_yaml(path)
         assert loaded.agency_weights == config.agency_weights
+
+
+class TestNameLocalesConfig:
+    """Tests for the ``name_locales`` realism-config section."""
+
+    def test_default_config_has_no_name_locales(self) -> None:
+        config = RealismConfig()
+        assert config.name_locales == {}
+
+    def test_yaml_list_form_roundtrip(self, tmp_path: Path) -> None:
+        config = RealismConfig()
+        config.name_locales = {"IE": [("en_IE", 1.0), ("ga_IE", 1.0)]}
+        path = tmp_path / "names.yaml"
+        config.to_yaml(path)
+        loaded = RealismConfig.from_yaml(path)
+
+        assert loaded.name_locales == {"IE": [("en_IE", 1.0), ("ga_IE", 1.0)]}
+        # Equal weights emit as a plain list in YAML
+        assert "IE: [en_IE, ga_IE]" in path.read_text()
+
+    def test_yaml_mapping_form_roundtrip(self, tmp_path: Path) -> None:
+        config = RealismConfig()
+        config.name_locales = {"US": [("en_US", 0.64), ("es_MX", 0.16), ("en_NG", 0.07)]}
+        path = tmp_path / "names.yaml"
+        config.to_yaml(path)
+        loaded = RealismConfig.from_yaml(path)
+
+        assert loaded.name_locales == config.name_locales
+        # Unequal weights emit as a locale -> weight mapping
+        content = path.read_text()
+        assert "en_US: 0.64" in content
+        assert "es_MX: 0.16" in content
+
+    def test_yaml_accepts_country_aliases(self, tmp_path: Path) -> None:
+        path = tmp_path / "aliases.yaml"
+        path.write_text("name_locales:\n  UK:\n    - en_GB\n")
+        loaded = RealismConfig.from_yaml(path)
+        assert loaded.name_locales == {"GB": [("en_GB", 1.0)]}
+
+    def test_yaml_rejects_unknown_locale(self, tmp_path: Path) -> None:
+        path = tmp_path / "bad.yaml"
+        path.write_text("name_locales:\n  US:\n    - xx_XX\n")
+        with pytest.raises(ValidationError, match="Unknown Faker locale"):
+            RealismConfig.from_yaml(path)
+
+    def test_yaml_rejects_empty_spec(self, tmp_path: Path) -> None:
+        path = tmp_path / "bad.yaml"
+        path.write_text("name_locales:\n  US: []\n")
+        with pytest.raises(ValidationError, match="must not be empty"):
+            RealismConfig.from_yaml(path)
+
+    def test_yaml_rejects_non_positive_weight(self, tmp_path: Path) -> None:
+        path = tmp_path / "bad.yaml"
+        path.write_text("name_locales:\n  US:\n    en_US: 0\n")
+        with pytest.raises(ValidationError, match="must be positive"):
+            RealismConfig.from_yaml(path)
+
+    def test_programmatic_validation(self) -> None:
+        config = RealismConfig()
+        config.name_locales = {"us": [("en_US", 1.0)]}
+        with pytest.raises(ValidationError, match="uppercase ISO"):
+            config._validate()
+
+    def test_programmatic_validation_unknown_locale(self) -> None:
+        config = RealismConfig()
+        config.name_locales = {"US": [("xx_XX", 1.0)]}
+        with pytest.raises(ValidationError, match="Unknown Faker locale"):
+            config._validate()
+
+    def test_to_yaml_emits_name_locales_section(self, tmp_path: Path) -> None:
+        config = RealismConfig()
+        config.name_locales = {"CA": [("en_CA", 1.0), ("fr_CA", 1.0)]}
+        path = tmp_path / "out.yaml"
+        config.to_yaml(path)
+        assert "name_locales:" in path.read_text()

@@ -223,6 +223,7 @@ shift_config:
 | `phone_metrics` | Volume fractions, abandonment rates, weekend multiplier, and answer-time distributions for hourly call counts | All required keys; max_abandonment_rate in [0, 1] |
 | `hourly_weights` | 24-hour call volume pattern | 24 values, auto-normalized |
 | `shift_config` | Crew rotation pattern and per-shift hours/rotation/staffing | Unique shift names, every rotation group covers all 24 hours |
+| `name_locales` | Faker locale blend for personnel rosters, per country | Valid Faker locales, positive weights, uppercase ISO country keys |
 
 > Note: the config key is `problem_profiles` (not `problem_problems`).
 
@@ -304,6 +305,71 @@ shift_config:
       calltakers: 3
       dispatchers: 2
 ```
+
+### Personnel Name Locales
+
+The `name_locales` section controls the pool of names used for `calltaker` and
+`dispatcher` columns, so personnel rosters match the region being modeled.
+
+**Country resolution.** The country is derived from the geocoded OSM/Nominatim
+area (`resolved_country()` on the address provider, persisted in the address
+cache as a sidecar `.meta.json`). When the provider cannot determine a country
+(for example static address pools or an area with no country data), the
+request's `--country` flag is used, falling back to `US`.
+
+**Resolution order per country:**
+
+1. A `name_locales` override for that country in the realism config.
+2. The built-in country → locale map (`COUNTRY_LOCALES`; multi-language
+   countries such as Canada use `en_CA`/`fr_CA` with equal weight).
+3. For the default country (`US`), a weighted multi-ethnic blend approximating
+   a typical large American call center:
+
+```yaml
+name_locales:
+  US:
+    en_US: 0.64
+    es_MX: 0.16
+    en_NG: 0.07
+    zh_CN: 0.03
+    fil_PH: 0.03
+    fr_CA: 0.02
+    hi_IN: 0.02
+    de_DE: 0.02
+    it_IT: 0.02
+    pt_BR: 0.02
+    ja_JP: 0.01
+    ko_KR: 0.01
+    ru_RU: 0.01
+    ar_SA: 0.01
+```
+
+4. The fallback locale (`en_US`) for countries with no profile.
+
+Each value is either a **list** of Faker locales (equal weight) or a **mapping**
+of locale to positive weight (normalized at generation time):
+
+```yaml
+name_locales:
+  # Canadian center, equal English/French weight
+  CA:
+    - en_CA
+    - fr_CA
+  # Irish center, weighted English/Irish-Gaelic roster
+  IE:
+    en_IE: 0.7
+    ga_IE: 0.3
+```
+
+Names are generated per shift from a weighted, seeded multi-locale pool;
+locales are drawn proportionally to their weights and names are never repeated
+within a run. CJK locales (`zh`/`ja`/`ko`) emit names in native
+family-name-first order. The blend is deterministic for a given seed and is
+included in the manifest's `realism_config_hash`.
+
+> Note: locale choices favor Faker providers with reliable name data; a few
+> country entries intentionally use a working neighbor locale (e.g. `ar_SA`
+> for the UAE/Egypt) because the native providers fall back to English.
 
 ### Creating a Config from Your Data
 
@@ -853,6 +919,7 @@ seasonal_multipliers:
 | `dispatch_init_fraction` | Parallel dispatch | Medium | Key for high-priority realism |
 | `hourly_weights` | Temporal pattern | High | 24 values, auto-normalized |
 | `seasonal_multipliers` | Seasonal variation | Medium | 4 values per problem type |
+| `name_locales` | Personnel roster diversity | Low | Per-country locale blends |
 | `disposition_profiles` | Outcome realism | Low | Fine-tune last |
 | `call_reception_weights` | Source realism | Low | Often similar across centers |
 
@@ -868,6 +935,7 @@ Before deploying a custom config:
 - [ ] All 5 priorities have `dispatch_init_fraction` entries
 - [ ] `hourly_weights` has exactly 24 values
 - [ ] `seasonal_multipliers` entries have exactly 4 values
+- [ ] `name_locales` uses valid Faker locales with positive weights and uppercase ISO country keys
 - [ ] `shift_config` validates (unique names, 24hr coverage)
 - [ ] Test generation completes without errors
 - [ ] Output statistics match real data within tolerances

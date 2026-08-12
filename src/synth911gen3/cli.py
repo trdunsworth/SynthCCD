@@ -9,7 +9,13 @@ import typer
 
 from .addresses import OpenStreetMapAddressProvider
 from .app import Synth911Application
-from .config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
+from .config import (
+    DatabaseDialect,
+    DatasetKind,
+    GenerationRequest,
+    IdFormat,
+    OutputFormat,
+)
 from .exceptions import AddressLookupError, ExportError, ValidationError
 from .logging_conf import configure_logging, get_logger
 from .params import (
@@ -65,10 +71,7 @@ def _describe(request: GenerationRequest, *, dry_run: bool) -> None:
 
     preview = build_preview_datasets(request, schema_only=not dry_run)
     mode = "Dry run" if dry_run else "Schema preview"
-    typer.echo(
-        f"{mode}: no files written, no OpenStreetMap fetch "
-        f"(illustrative sample addresses)."
-    )
+    typer.echo(f"{mode}: no files written, no OpenStreetMap fetch (illustrative sample addresses).")
     typer.echo()
     for name, frame in preview.items():
         _print_schema(name, frame)
@@ -104,9 +107,13 @@ def generate(
     output_format: OutputFormat | None = typer.Option(
         None,
         "--format",
+        metavar="FORMAT",
         case_sensitive=False,
         show_default=False,
-        help="Output format: csv, parquet, json, yaml, pandas, polars (default: csv).",
+        help=(
+            "Output format: csv, parquet, json, yaml, pandas, polars, geojson, "
+            "shapefile, postgresql, sqlserver, mariadb, duckdb, sqlite (default: csv)."
+        ),
     ),
     dataset: DatasetKind | None = typer.Option(
         None,
@@ -202,12 +209,89 @@ def generate(
         None,
         "--emergency-numbers",
         show_default=False,
-        help="Comma-separated emergency numbers to model, overriding the country registry (e.g. \"999,112\").",
+        help='Comma-separated emergency numbers to model, overriding the country registry (e.g. "999,112").',
     ),
     include_10_digit_emergency: bool = typer.Option(
         False,
         "--include-10-digit-emergency",
         help="Include 10-digit direct-dial emergency lines from the registry.",
+    ),
+    db_dialect: DatabaseDialect | None = typer.Option(
+        None,
+        "--db-dialect",
+        metavar="DIALECT",
+        case_sensitive=False,
+        show_default=False,
+        help="Database dialect override (postgresql, sqlserver, mariadb, duckdb, sqlite).",
+    ),
+    db_host: str | None = typer.Option(
+        None,
+        "--db-host",
+        show_default=False,
+        help="Database host (not needed for file-based duckdb/sqlite).",
+    ),
+    db_port: int | None = typer.Option(
+        None,
+        "--db-port",
+        min=1,
+        max=65535,
+        show_default=False,
+        help="Database port (defaults: postgresql 5432, sqlserver 1433, mariadb 3306).",
+    ),
+    db_name: str | None = typer.Option(
+        None,
+        "--db-name",
+        show_default=False,
+        help=("Database name; for duckdb/sqlite the file path (defaults to the output stem)."),
+    ),
+    db_user: str | None = typer.Option(
+        None,
+        "--db-user",
+        show_default=False,
+        help="Database username (not needed for file-based duckdb/sqlite).",
+    ),
+    db_password: str | None = typer.Option(
+        None,
+        "--db-password",
+        show_default=False,
+        help="Database password (not needed for file-based duckdb/sqlite).",
+    ),
+    db_table_incidents: str | None = typer.Option(
+        None,
+        "--db-table-incidents",
+        show_default=False,
+        help="Incidents table name (default: incidents).",
+    ),
+    db_table_phone: str | None = typer.Option(
+        None,
+        "--db-table-phone",
+        show_default=False,
+        help="Hourly phone metrics table name (default: hourly_call_counts).",
+    ),
+    db_schema: str | None = typer.Option(
+        None,
+        "--db-schema",
+        show_default=False,
+        help="Database schema (ignored for sqlite).",
+    ),
+    db_batch_size: int | None = typer.Option(
+        None,
+        "--db-batch-size",
+        min=1,
+        show_default=False,
+        help="Rows per insert batch (default: 10000).",
+    ),
+    db_if_exists: str | None = typer.Option(
+        None,
+        "--db-if-exists",
+        case_sensitive=False,
+        show_default=False,
+        help="Table-exists behavior: append, replace, or fail (default: append).",
+    ),
+    db_create_indexes: bool | None = typer.Option(
+        None,
+        "--no-db-create-indexes",
+        help="Skip creating indexes on key columns (default: create them).",
     ),
     schema: bool = typer.Option(
         False,
@@ -257,16 +341,47 @@ def generate(
         cli_params["emergency_numbers"] = emergency_numbers
     if include_10_digit_emergency:
         cli_params["include_10_digit_emergency"] = True
+    if db_dialect is not None:
+        cli_params["db_dialect"] = db_dialect
+    if db_host is not None:
+        cli_params["db_host"] = db_host
+    if db_port is not None:
+        cli_params["db_port"] = db_port
+    if db_name is not None:
+        cli_params["db_name"] = db_name
+    if db_user is not None:
+        cli_params["db_user"] = db_user
+    if db_password is not None:
+        cli_params["db_password"] = db_password
+    if db_table_incidents is not None:
+        cli_params["db_table_incidents"] = db_table_incidents
+    if db_table_phone is not None:
+        cli_params["db_table_phone"] = db_table_phone
+    if db_schema is not None:
+        cli_params["db_schema"] = db_schema
+    if db_batch_size is not None:
+        cli_params["db_batch_size"] = db_batch_size
+    if db_if_exists is not None:
+        cli_params["db_if_exists"] = db_if_exists
+    if db_create_indexes is not None:
+        cli_params["db_create_indexes"] = False
 
     file_params = load_params_file(params) if params is not None else {}
     request = build_request_from_params(file_params, cli_params)
 
-    logger.info("Generating %d rows (%s, %s)", request.rows, request.dataset.value, request.output_format.value)
+    logger.info(
+        "Generating %d rows (%s, %s)",
+        request.rows,
+        request.dataset.value,
+        request.output_format.value,
+    )
     try:
         if dry_run or schema:
             _describe(request, dry_run=dry_run)
             return
-        result = Synth911Application(address_provider=OpenStreetMapAddressProvider()).generate(request)
+        result = Synth911Application(address_provider=OpenStreetMapAddressProvider()).generate(
+            request
+        )
     except (AddressLookupError, ExportError, ValidationError) as exc:
         logger.error("%s: %s", type(exc).__name__, exc)
         typer.secho(str(exc), fg=typer.colors.RED, err=True)

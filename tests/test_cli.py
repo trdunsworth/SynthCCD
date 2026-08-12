@@ -94,7 +94,7 @@ def test_load_params_file_invalid_json(tmp_path: Path) -> None:
 
 
 def test_load_params_file_non_mapping(tmp_path: Path) -> None:
-    path = _write(tmp_path, "params.json", '[1, 2, 3]')
+    path = _write(tmp_path, "params.json", "[1, 2, 3]")
     with pytest.raises(typer.BadParameter):
         load_params_file(path)
 
@@ -218,6 +218,89 @@ def test_cli_help_lists_schema_and_dry_run_flags() -> None:
     assert "--dry-run" in output
 
 
+def test_cli_help_lists_db_flags() -> None:
+    result = runner.invoke(app, ["generate", "--help"])
+    assert result.exit_code == 0
+    output = _strip_ansi(result.output)
+    for flag in (
+        "--db-dialect",
+        "--db-host",
+        "--db-port",
+        "--db-name",
+        "--db-user",
+        "--db-password",
+        "--db-table-incidents",
+        "--db-table-phone",
+        "--db-schema",
+        "--db-batch-size",
+        "--db-if-exists",
+        "--no-db-create-indexes",
+    ):
+        assert flag in output, f"expected {flag} in generate --help"
+
+
+def test_cli_db_flags_map_to_request(tmp_path: Path) -> None:
+    # Exercise the params merge with db flags via a dry-run (validates flag ->
+    # field wiring through the CLI).
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--dry-run",
+            "--dataset",
+            "incidents",
+            "--rows",
+            "2",
+            "--format",
+            "sqlite",
+            "--db-name",
+            "custom.db",
+            "--db-table-incidents",
+            "cad_incidents",
+            "--db-batch-size",
+            "50",
+            "--db-if-exists",
+            "replace",
+            "--no-db-create-indexes",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "id_number" in _strip_ansi(result.output)
+
+
+def test_cli_generate_sqlite_writes_database(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sqlite3
+
+    _install_static_provider(monkeypatch)
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--rows",
+            "5",
+            "--dataset",
+            "incidents",
+            "--format",
+            "sqlite",
+            "--output-dir",
+            str(tmp_path),
+            "--output-stem",
+            "cad",
+        ],
+    )
+    assert result.exit_code == 0
+    db_path = tmp_path / "cad.sqlite3"
+    assert db_path.exists()
+    con = sqlite3.connect(db_path)
+    try:
+        cur = con.execute("SELECT COUNT(*) FROM incidents")
+        assert cur.fetchone()[0] == 5
+    finally:
+        con.close()
+
+
 def test_cli_schema_prints_schema_without_writing_files(tmp_path: Path) -> None:
     result = runner.invoke(
         app,
@@ -259,9 +342,7 @@ def test_cli_dry_run_prints_schema_and_sample_rows(tmp_path: Path) -> None:
 
 
 def test_cli_dry_run_respects_dataset_selection() -> None:
-    result = runner.invoke(
-        app, ["generate", "--dry-run", "--dataset", "phone"]
-    )
+    result = runner.invoke(app, ["generate", "--dry-run", "--dataset", "phone"])
     assert result.exit_code == 0
     output = _strip_ansi(result.output)
     assert "hourly_call_counts" in output

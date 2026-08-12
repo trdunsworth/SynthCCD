@@ -41,8 +41,12 @@ def test_preview_phone_metrics_restricted_to_single_day() -> None:
 
 
 def test_preview_respects_dataset_selection() -> None:
-    assert set(build_preview_datasets(_request(DatasetKind.INCIDENTS), schema_only=True)) == {"incidents"}
-    assert set(build_preview_datasets(_request(DatasetKind.PHONE), schema_only=True)) == {"hourly_call_counts"}
+    assert set(build_preview_datasets(_request(DatasetKind.INCIDENTS), schema_only=True)) == {
+        "incidents"
+    }
+    assert set(build_preview_datasets(_request(DatasetKind.PHONE), schema_only=True)) == {
+        "hourly_call_counts"
+    }
     assert set(build_preview_datasets(_request(DatasetKind.ALL), schema_only=True)) == {
         "incidents",
         "hourly_call_counts",

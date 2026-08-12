@@ -237,11 +237,12 @@ recommendation docs in `docs/`, and direct code review.
   - SQL Server (via pyodbc)
   - MariaDB/MySQL (via pymysql)
   - DuckDB (via duckdb-engine)
+  - SQLite (via stdlib `sqlite3`, no extra dependencies)
   Tables auto-created with appropriate types, indexes on key columns, batch inserts
   configurable via `db_batch_size`. New output formats: `postgresql`, `sqlserver`,
-  `mariadb`, `duckdb`. CLI params: `--db-host`, `--db-port`, `--db-name`, `--db-user`,
+  `mariadb`, `duckdb`, `sqlite`. CLI params: `--db-host`, `--db-port`, `--db-name`, `--db-user`,
   `--db-password`, `--db-table-incidents`, `--db-table-phone`, `--db-schema`,
-  `--db-batch-size`, `--db-if-exists`, `--db-create-indexes`. Documented in
+  `--db-batch-size`, `--db-if-exists`, `--no-db-create-indexes`. Documented in
   `USERSGUIDE.md`.
 - [x] **Data governance manifest.** Emit a sidecar metadata file (seed, params, config hash,
   schema version, generation timestamp) with every export for reproducibility/auditing.
@@ -289,7 +290,20 @@ recommendation docs in `docs/`, and direct code review.
 - [ ] **P2 — Cadence/queueing simulation.** Constrained simulation with unit availability queues (simpy) for dispatch realism. Prototype at P2/P3.
 - [ ] **P2 — Weather and seasonal correlation enhancements.** Current seasonal multipliers are static; integrate real weather data (temperature, precipitation) to drive problem type correlations dynamically.
 - [ ] **P2 — Timezone-aware timestamps.** Support non-UTC timestamps and hourly-metric localization for deployments outside single timezone.
-- [ ] **P2 — SQLite database target.** Add SQLite as a lightweight database export option alongside PostgreSQL/SQL Server/MariaDB/DuckDB.
+- [x] **P2 — SQLite database target.** Add SQLite as a lightweight database export option alongside PostgreSQL/SQL Server/MariaDB/DuckDB.
+  Added `SQLITE` to `OutputFormat`/`DatabaseDialect` (config + pydantic schema), a file-based
+  `_create_sqlite_engine()` in `db_exporter.py` (stdlib `sqlite3` driver, `db_name` defaults to
+  `{output_stem}.sqlite3` in `output_dir`, no host/user/password required), SQLite branches in
+  `_table_exists`/`_drop_table`/`_create_index`/`_get_column_types`, schema-awareness (SQLite has
+  no schemas; `db_schema` is ignored with a warning), and a per-statement batch cap
+  (`999 // columns`) honoring SQLite's `SQLITE_MAX_VARIABLE_NUMBER` bound-parameter limit.
+  Full CLI support: `--format sqlite` plus the new `--db-*` flags (`--db-host`, `--db-port`,
+  `--db-name`, `--db-user`, `--db-password`, `--db-table-incidents`, `--db-table-phone`,
+  `--db-schema`, `--db-batch-size`, `--db-if-exists`, `--db-dialect`, `--no-db-create-indexes`),
+  params-file keys, and Python API (`OutputFormat.SQLITE`). End-to-end covered by
+  `tests/test_db_exporter.py` (round-trip, if-exists modes, schema ignore, indexes, engine paths),
+  `tests/test_config.py`, `tests/test_schema.py`, `tests/test_cli.py`, and
+  `tests/test_application.py`; documented in `USERSGUIDE.md`.
 
 ### Usability / Developer Experience
 - [ ] **P2 — `config/example_params` parity.** Add TOML example alongside JSON/YAML, and params-driven CI regression run.
@@ -307,12 +321,18 @@ recommendation docs in `docs/`, and direct code review.
 
 ### Data Quality / Realism
 - [ ] **P2 — Correlation between fields.** Current model treats fields independently; add correlations (e.g., high priority ↔ shorter interview time, urban zone ↔ shorter travel time).
-- [ ] **P2 — Person name diversity.** Add configurable name generators by locale/ethnicity for international deployments.
+- [x] **P2 — Person name diversity.** Added `name_locales` realism-config section and `PersonnelNameGenerator`: country-matched Faker-locale blends derived from the geocoded OSM region (with a weighted multi-ethnic US default), per-country overrides, CJK family-name-first ordering, and `resolved_country()` on address providers persisted in the address-cache `.meta.json` sidecar. Replaces the fixed `en_US` roster.
 - [ ] **P2 — Call duration correlation with problem type.** Complex problems (e.g., "Active Shooter") should have longer phone durations on average.
 - [ ] **P2 — Shift handoff effects.** Model increased response times during shift change periods.
 
 ### Integration / Ecosystem
-- [ ] **P2 — Parquet metadata embedding.** Embed generation metadata (seed, config hash, schema version) directly in Parquet file metadata for self-documenting files.
+- [x] **P2 — Parquet metadata embedding.** Embed generation metadata (seed, config hash, schema version) directly in Parquet file metadata for self-documenting files.
+  Added `DATA_SCHEMA_VERSION` (constants.py), `Manifest.schema_version` + `Manifest.to_kv_metadata()`
+  (namespaced `synth911:` string pairs, `None` dropped, counts excluded), `_write_parquet_with_metadata()`
+  and `parquet_metadata=` params on `export_generated_data`/`export_chunked_generator` (footer metadata
+  embedded at write time via `ParquetWriter` schema metadata, merged with pyarrow's `pandas` key;
+  chunked mode derives `schema_hash` from the first chunk), and app.py now builds the manifest before
+  export so Parquet footers carry the same provenance as the sidecar.
 - [ ] **P2 — Cloud storage direct write.** Stream output directly to S3/GCS/Azure Blob without local staging.
 - [ ] **P2 — Delta Lake / Iceberg table format.** Support writing to modern table formats for ACID transactions and time travel.
 - [ ] **P2 — Prometheus metrics endpoint.** Expose generation metrics (rows/sec, memory usage, queue depths) for monitoring.
@@ -361,3 +381,75 @@ names derived from the selected OSM/Nominatim region, with a weighted multi-ethn
 ### Notes
 - Nothing committed; no tests run on `names.py` yet.
 - US_ETHNIC_BLEND weights approximate a typical large American call center; overridable per-country via the realism config `name_locales` section.
+
+---
+
+## Stopping Point (Completed)
+
+**Timestamp:** 2026-08-11 (continued session)
+
+**Item:** International name support + US ethnic diversity for personnel rosters — **DONE**.
+
+### Completed
+- `names.py` now linted/type-checked/tested (`tests/test_names.py`, 34 tests).
+- `addresses.py`: `_GeocodedArea.country_code`, `_normalize_country_code`, `.meta.json` cache sidecar, `resolved_country()` on both providers (static returns `None`).
+- `realism_config.py`: `name_locales` field with YAML parse/emit/validate (`normalize_name_locales`/`validate_name_locales`), equal-weight lists emit as YAML lists.
+- `generators/incidents.py`: Faker fully removed from the prepare/build chain; `PersonnelNameGenerator` builds per-shift pools; country = `provider.resolved_country()` → `request.country` → `DEFAULT_COUNTRY`; `IncidentGenerator` constructor no longer takes `faker_locale`.
+- `manifest.py`: `name_locales` folded into `realism_config_hash`.
+- `config/example_realism.yaml`: documented `name_locales` section; also fixed pre-existing missing phone-metrics answer-time keys that made the example fail validation.
+- `emergency_numbers.py`: removed unused `field` import (pre-existing ruff F401 that failed `ruff check .`).
+- Tests: 55 new (names 34, addresses 7, realism 11, application 3 — net of one merged); suite 384 passed, 82.04% coverage (was 329/78.89%). `ruff check .` and `ty check src` clean.
+- Docs: REALISMGUIDE.md (`name_locales` reference, sensitivity row, validation checklist), USERSGUIDE.md (realism-config pointer, cache `.meta.json`, custom-provider `resolved_country`, FAQ), CHANGELOG.md ([Unreleased] Added/Changed/Fixed).
+
+### Notes
+- `AddressProvider` protocol now declares `resolved_country()`; `IncidentGenerator` uses `getattr` so legacy duck-typed providers (implementing only `load_addresses`) still work.
+- Custom providers can implement `resolved_country()` (or not); absence falls back to `request.country`, then `US`.
+- Nothing committed yet.
+
+---
+
+## Stopping Point
+
+**Timestamp:** 2026-08-11 (continued session)
+
+**Item:** SQLite database target + database CLI flags — **DONE**.
+
+### Completed
+- Added `SQLITE = "sqlite"` to `OutputFormat` and `DatabaseDialect` in both `config.py` (StrEnum dataclass) and `schema.py` (pydantic), with validation honoring an explicit `db_dialect` override in both paths.
+- `db_exporter.py`:
+  - `_create_sqlite_engine()` — file-based engine via stdlib `sqlite3` (no new deps); `db_name` defaults to `{output_stem}.sqlite3` resolved against `output_dir`; absolute paths honored.
+  - SQLite branches in `_table_exists` (`sqlite_master`), `_drop_table`, `_create_index`, `_get_column_types`.
+  - `db_schema` ignored for SQLite (warning logged) — SQLite has no schema concept.
+  - Batch size capped at `999 // columns` per statement for SQLite (honors `SQLITE_MAX_VARIABLE_NUMBER`; fixes "too many SQL variables" on the full-year phone-metrics table).
+- `app.py`: `OutputFormat.SQLITE` routed through `export_to_database`.
+- `cli.py`: added the full `--db-*` flag set (`--db-dialect`, `--db-host`, `--db-port`, `--db-name`, `--db-user`, `--db-password`, `--db-table-incidents`, `--db-table-phone`, `--db-schema`, `--db-batch-size`, `--db-if-exists`, `--no-db-create-indexes`) wired into request building; help-panel layout kept intact (avoided typer's double-flag form, which truncates option names at 80-col; used a plain `--no-db-create-indexes` flag instead, plus `metavar=` overrides).
+- `params.py`: `db_dialect` coerced to the enum from params files.
+- Tests: 31 new (db_exporter 19, schema 4, config 7, cli 3, application 1 net — 415 total, 83.98% coverage). Real SQLite round-trips, if-exists modes, replace, schema-ignore, index creation/skip, engine path resolution, CLI end-to-end, and full-app export.
+- Docs: USERSGUIDE.md (format table, DB exports table + SQLite example + behavior notes, CLI reference `--db-*` flags, params keys, FAQ, Tutorial 5 tip), TODO.md (item marked done), CHANGELOG.md ([Unreleased] Added/Changed).
+
+### Notes
+- `ruff check .` and `ty check src` clean.
+- SQLite needs no new dependencies (stdlib `sqlite3`).
+- Nothing committed yet.
+
+---
+
+## Stopping Point
+
+**Timestamp:** 2026-08-12
+
+**Item:** Parquet metadata embedding — **DONE**.
+
+### Completed
+- `constants.py`: new `DATA_SCHEMA_VERSION = "1.0"` (data-schema version embedded in Parquet footers and the manifest).
+- `manifest.py`: `Manifest.schema_version` field (populated from `DATA_SCHEMA_VERSION`); `Manifest.to_kv_metadata()` flattens the manifest to namespaced `synth911:*` string pairs (`None` dropped, lists/dicts JSON-encoded, `row_counts`/`column_counts` deliberately excluded so chunked-mode footers stay truthful).
+- `exporters.py`: `_write_parquet_with_metadata()` (single-pass `ParquetWriter` whose schema carries the metadata, merged with pyarrow's `pandas` round-trip key) and `_merge_schema_metadata()`; `parquet_metadata=` param on `export_generated_data` and `export_chunked_generator` (chunked path embeds at write time from the first chunk's schema — no rewrite pass).
+- `app.py`: manifest is now built *before* export so Parquet footers can embed the same provenance as the sidecar; chunked mode derives `schema_hash` from the first chunk.
+- Metadata lands as plain Parquet key-value footer metadata (readable by any Parquet tool, not just pyarrow) — verified via CLI run: both files carry seed/config-hash/schema-hash/schema-version/generated-at/etc.
+- Tests: 9 new in `tests/test_parquet_metadata.py` (direct export, no-metadata backward compat, pandas-key preservation, chunked multi-chunk embed, full-app non-chunked + chunked, footer-vs-sidecar consistency, `to_kv_metadata` flattening) — 424 total, 84.18% coverage.
+- Docs: USERSGUIDE.md (manifest `schema_version` row + "Parquet Metadata Embedding" section with key table and read-back snippet), TODO.md (item marked done), CHANGELOG.md ([Unreleased] Added).
+
+### Notes
+- `ruff check .`, `ruff format`, and `ty check src` all clean.
+- Footer metadata excludes row/column counts by design; the sidecar manifest remains authoritative for those.
+- Nothing committed yet.

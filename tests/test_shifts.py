@@ -146,9 +146,7 @@ def test_shift_config_validate_rejects_missing_group() -> None:
 
 
 def test_shift_config_validate_rejects_negative_staffing() -> None:
-    config = ShiftConfig(
-        rotation=[1], shifts=[Shift("A", rotation=1, calltakers=-1)]
-    )
+    config = ShiftConfig(rotation=[1], shifts=[Shift("A", rotation=1, calltakers=-1)])
     with pytest.raises(ValidationError):
         config.validate()
 

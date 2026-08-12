@@ -29,6 +29,7 @@ class OutputFormat(str, Enum):
     SQLSERVER = "sqlserver"
     MARIADB = "mariadb"
     DUCKDB = "duckdb"
+    SQLITE = "sqlite"
 
 
 class DatasetKind(str, Enum):
@@ -47,6 +48,7 @@ class DatabaseDialect(str, Enum):
     SQLSERVER = "sqlserver"
     MARIADB = "mariadb"
     DUCKDB = "duckdb"
+    SQLITE = "sqlite"
 
 
 class ShiftPreset(str, Enum):
@@ -187,7 +189,9 @@ class RealismConfig(BaseModel):
             for priority, profiles in priorities.items():
                 total = sum(float(p[1]) for p in profiles)
                 if abs(total - 1.0) > 0.001:
-                    raise ValueError(f"problem_profiles for {agency} priority {priority} must sum to 1.0")
+                    raise ValueError(
+                        f"problem_profiles for {agency} priority {priority} must sum to 1.0"
+                    )
 
         # Validate hourly weights
         if self.hourly_weights is not None:
@@ -200,7 +204,9 @@ class RealismConfig(BaseModel):
         # Validate seasonal multipliers
         for problem, multipliers in self.seasonal_multipliers.items():
             if len(multipliers) != 4:
-                raise ValueError(f"seasonal_multipliers for {problem} must have 4 values (Winter, Spring, Summer, Fall)")
+                raise ValueError(
+                    f"seasonal_multipliers for {problem} must have 4 values (Winter, Spring, Summer, Fall)"
+                )
 
         return self
 
@@ -209,12 +215,16 @@ class GenerationRequest(BaseModel):
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     rows: int = Field(default=DEFAULT_ROWS, gt=0, description="Number of incident rows to generate")
-    area_query: str = Field(default=DEFAULT_AREA_QUERY, min_length=1, description="OpenStreetMap area query")
+    area_query: str = Field(
+        default=DEFAULT_AREA_QUERY, min_length=1, description="OpenStreetMap area query"
+    )
     output_format: OutputFormat = Field(default=OutputFormat.CSV, description="Output format")
     dataset: DatasetKind = Field(default=DatasetKind.ALL, description="Dataset to generate")
     id_format: IdFormat = Field(default=IdFormat.INTEGER, description="ID format")
     output_dir: Path = Field(default=Path(DEFAULT_OUTPUT_DIR), description="Output directory")
-    output_stem: str = Field(default=DEFAULT_OUTPUT_STEM, min_length=1, description="Output file stem")
+    output_stem: str = Field(
+        default=DEFAULT_OUTPUT_STEM, min_length=1, description="Output file stem"
+    )
     start_date: date | None = Field(default=None, description="Start date (inclusive)")
     end_date: date | None = Field(default=None, description="End date (inclusive)")
     seed: int = Field(default=911, description="Random seed")
@@ -222,11 +232,21 @@ class GenerationRequest(BaseModel):
     dispatcher_pool_size: int = Field(default=10, gt=0, description="Dispatcher pool size")
     shift_preset: ShiftPreset | None = Field(default=None, description="Shift structure preset")
     realism_config: RealismConfig | None = Field(default=None, description="Realism configuration")
-    realism_config_path: Path | None = Field(default=None, description="Path to realism config YAML")
-    max_memory_bytes: int | None = Field(default=None, gt=0, description="Memory budget for chunked export")
-    country: str = Field(default=DEFAULT_COUNTRY, min_length=1, description="ISO 3166-1 alpha-2 country code")
-    emergency_numbers: str | None = Field(default=None, description="Comma-separated emergency numbers (overrides registry)")
-    include_10_digit_emergency: bool = Field(default=False, description="Include 10-digit direct-dial emergency lines")
+    realism_config_path: Path | None = Field(
+        default=None, description="Path to realism config YAML"
+    )
+    max_memory_bytes: int | None = Field(
+        default=None, gt=0, description="Memory budget for chunked export"
+    )
+    country: str = Field(
+        default=DEFAULT_COUNTRY, min_length=1, description="ISO 3166-1 alpha-2 country code"
+    )
+    emergency_numbers: str | None = Field(
+        default=None, description="Comma-separated emergency numbers (overrides registry)"
+    )
+    include_10_digit_emergency: bool = Field(
+        default=False, description="Include 10-digit direct-dial emergency lines"
+    )
     db_dialect: DatabaseDialect | None = Field(default=None, description="Database dialect")
     db_host: str | None = Field(default=None, description="Database host")
     db_port: int | None = Field(default=None, gt=0, lt=65536, description="Database port")
@@ -234,10 +254,14 @@ class GenerationRequest(BaseModel):
     db_user: str | None = Field(default=None, description="Database user")
     db_password: str | None = Field(default=None, description="Database password")
     db_table_incidents: str = Field(default="incidents", description="Incidents table name")
-    db_table_phone: str = Field(default="hourly_call_counts", description="Phone metrics table name")
+    db_table_phone: str = Field(
+        default="hourly_call_counts", description="Phone metrics table name"
+    )
     db_schema: str | None = Field(default=None, description="Database schema")
     db_batch_size: int = Field(default=10000, gt=0, description="Batch size for database inserts")
-    db_if_exists: IfExistsMode = Field(default=IfExistsMode.APPEND, description="If table exists behavior")
+    db_if_exists: IfExistsMode = Field(
+        default=IfExistsMode.APPEND, description="If table exists behavior"
+    )
     db_create_indexes: bool = Field(default=True, description="Create indexes on key columns")
 
     @field_validator("output_stem")
@@ -248,7 +272,14 @@ class GenerationRequest(BaseModel):
         if any(c in v for c in ("/", "\\", "\x00")):
             raise ValueError("output_stem must not contain path separators or null bytes")
         stem_root = v.split(".", 1)[0].upper()
-        reserved = {"CON", "PRN", "AUX", "NUL", *[f"COM{i}" for i in range(1, 10)], *[f"LPT{i}" for i in range(1, 10)]}
+        reserved = {
+            "CON",
+            "PRN",
+            "AUX",
+            "NUL",
+            *[f"COM{i}" for i in range(1, 10)],
+            *[f"LPT{i}" for i in range(1, 10)],
+        }
         if stem_root in reserved:
             raise ValueError(f"output_stem must not be a reserved device name: {stem_root}")
         return v
@@ -275,11 +306,22 @@ class GenerationRequest(BaseModel):
             OutputFormat.SQLSERVER,
             OutputFormat.MARIADB,
             OutputFormat.DUCKDB,
+            OutputFormat.SQLITE,
         }
         if self.output_format in db_formats:
-            if self.output_format == OutputFormat.DUCKDB:
+            dialect_map = {
+                OutputFormat.POSTGRESQL: DatabaseDialect.POSTGRESQL,
+                OutputFormat.SQLSERVER: DatabaseDialect.SQLSERVER,
+                OutputFormat.MARIADB: DatabaseDialect.MARIADB,
+                OutputFormat.DUCKDB: DatabaseDialect.DUCKDB,
+                OutputFormat.SQLITE: DatabaseDialect.SQLITE,
+            }
+            # An explicit db_dialect wins over the output-format default
+            dialect = self.db_dialect or dialect_map[self.output_format]
+            if dialect in (DatabaseDialect.DUCKDB, DatabaseDialect.SQLITE):
                 if not self.db_name:
-                    self.db_name = f"{self.output_stem}.duckdb"
+                    suffix = ".duckdb" if dialect == DatabaseDialect.DUCKDB else ".sqlite3"
+                    self.db_name = f"{self.output_stem}{suffix}"
             else:
                 if not self.db_host:
                     raise ValueError("db_host is required for database exports")
@@ -293,15 +335,6 @@ class GenerationRequest(BaseModel):
                         DatabaseDialect.SQLSERVER: 1433,
                         DatabaseDialect.MARIADB: 3306,
                     }
-                    dialect = self.db_dialect
-                    if dialect is None:
-                        dialect_map = {
-                            OutputFormat.POSTGRESQL: DatabaseDialect.POSTGRESQL,
-                            OutputFormat.SQLSERVER: DatabaseDialect.SQLSERVER,
-                            OutputFormat.MARIADB: DatabaseDialect.MARIADB,
-                            OutputFormat.DUCKDB: DatabaseDialect.DUCKDB,
-                        }
-                        dialect = dialect_map[self.output_format]
                     self.db_port = defaults.get(dialect)
         return self
 

@@ -40,7 +40,10 @@ def test_csv_export_writes_expected_output_files(tmp_path: Path) -> None:
     result = Synth911Application(address_provider=_provider()).generate(request)
 
     assert result.exported_artifacts["incidents"] == tmp_path / "sample_incidents.csv"
-    assert result.exported_artifacts["hourly_call_counts"] == tmp_path / "sample_hourly_call_counts.csv"
+    assert (
+        result.exported_artifacts["hourly_call_counts"]
+        == tmp_path / "sample_hourly_call_counts.csv"
+    )
     assert (tmp_path / "sample_incidents.csv").exists()
     assert (tmp_path / "sample_hourly_call_counts.csv").exists()
 

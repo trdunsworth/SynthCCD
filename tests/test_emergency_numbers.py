@@ -172,9 +172,7 @@ def test_resolve_emergency_numbers_include_10_digit_appends() -> None:
 
 
 def test_resolve_emergency_numbers_10_digit_on_top_of_override() -> None:
-    numbers = resolve_emergency_numbers(
-        country="US", override="911", include_10_digit=True
-    )
+    numbers = resolve_emergency_numbers(country="US", override="911", include_10_digit=True)
     digits = [n.number for n in numbers]
     assert digits == ["911", *(n.number for n in TEN_DIGIT_LINES["US"])]
 

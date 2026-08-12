@@ -103,7 +103,9 @@ class HourlyCallCountGenerator:
                 np.maximum(1.0, base_hourly_volume * float(fraction) * busy_factor)
             )
         non_emergency_calls_received = rng.poisson(
-            np.maximum(1.0, base_hourly_volume * _f("non_emergency_received_fraction") * busy_factor)
+            np.maximum(
+                1.0, base_hourly_volume * _f("non_emergency_received_fraction") * busy_factor
+            )
         )
         outbound_calls_placed = rng.poisson(
             np.maximum(0.5, base_hourly_volume * _f("outbound_calls_fraction") * busy_factor)
@@ -114,10 +116,10 @@ class HourlyCallCountGenerator:
         for num in numbers:
             over = _line(num)
             rate = float(over.get("abandonment_rate", _f("nine_one_one_abandonment_rate")))
-            night = float(over.get("night_abandonment_increment", _f("night_abandonment_increment")))
-            rate_array = rate + np.where(
-                (hour_of_day >= 0) & (hour_of_day <= 5), night, 0.0
+            night = float(
+                over.get("night_abandonment_increment", _f("night_abandonment_increment"))
             )
+            rate_array = rate + np.where((hour_of_day >= 0) & (hour_of_day <= 5), night, 0.0)
             abandoned[num.number] = rng.binomial(
                 received[num.number],
                 np.minimum(rate_array, _f("max_abandonment_rate")),

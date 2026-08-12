@@ -37,7 +37,7 @@ def _run(coro):
 def test_tui_composes_all_parameters() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             input_ids = {widget.id for widget in app.query(Input)}
             assert TUI_INPUT_IDS <= input_ids
 
@@ -59,7 +59,7 @@ def test_tui_composes_all_parameters() -> None:
 def test_tui_build_request_defaults() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             request = app._build_request()
             assert request.rows == 10_000
             assert request.area_query == "Kansas City, MO"
@@ -76,7 +76,7 @@ def test_tui_build_request_defaults() -> None:
 def test_tui_build_request_custom_values() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app.query_one("#rows", Input).value = "500"
             app.query_one("#seed", Input).value = "7"
             app.query_one("#area", Input).value = "Denver, CO"
@@ -112,7 +112,7 @@ def test_tui_build_request_custom_values() -> None:
 def test_tui_build_request_invalid_integer_reports() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app.query_one("#rows", Input).value = "abc"
             with pytest.raises(ValueError):
                 app._build_request()
@@ -123,7 +123,7 @@ def test_tui_build_request_invalid_integer_reports() -> None:
 def test_tui_build_request_invalid_date_reports() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app.query_one("#start_date", Input).value = "01/01/2024"
             with pytest.raises(ValueError):
                 app._build_request()
@@ -137,7 +137,7 @@ def test_tui_load_params_prefills_fields(tmp_path: Path) -> None:
 
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app.query_one("#params", Input).value = str(params)
             app._load_params()
             assert app.query_one("#rows", Input).value == "500"
@@ -152,7 +152,7 @@ def test_tui_load_params_prefills_fields(tmp_path: Path) -> None:
 def test_tui_load_params_missing_file_reports() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app.query_one("#params", Input).value = "does_not_exist.yaml"
             app._load_params()
             assert "Params file not found" in str(app.query_one("#status", Static).content)
@@ -163,9 +163,11 @@ def test_tui_load_params_missing_file_reports() -> None:
 def test_tui_load_params_empty_reports() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app._load_params()
-            assert "Enter a params file path first." in str(app.query_one("#status", Static).content)
+            assert "Enter a params file path first." in str(
+                app.query_one("#status", Static).content
+            )
 
     _run(scenario())
 
@@ -176,7 +178,7 @@ def test_tui_load_params_unknown_key_reports(tmp_path: Path) -> None:
 
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app.query_one("#params", Input).value = str(params)
             app._load_params()
             assert "Unknown parameter" in str(app.query_one("#status", Static).content)
@@ -187,7 +189,7 @@ def test_tui_load_params_unknown_key_reports(tmp_path: Path) -> None:
 def test_tui_reset_restores_defaults() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app.query_one("#rows", Input).value = "1"
             app.query_one("#seed", Input).value = "2"
             app._reset()
@@ -228,7 +230,7 @@ def test_tui_generate_reports_exported_artifacts() -> None:
 def test_tui_generate_invalid_input_updates_status() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app.query_one("#rows", Input).value = "nope"
             with patch("synth911gen3.tui.Synth911Application") as fake_cls:
                 app._generate()
@@ -241,7 +243,7 @@ def test_tui_generate_invalid_input_updates_status() -> None:
 def test_tui_generate_marks_invalid_fields() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app.query_one("#rows", Input).value = "nope"
             app.query_one("#start_date", Input).value = "01/01/2024"
             app._generate()
@@ -257,7 +259,7 @@ def test_tui_generate_marks_invalid_fields() -> None:
 def test_tui_build_request_aggregates_multiple_field_errors() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app.query_one("#rows", Input).value = "abc"
             app.query_one("#start_date", Input).value = "not a date"
             with pytest.raises(ValueError) as excinfo:
@@ -271,7 +273,7 @@ def test_tui_build_request_aggregates_multiple_field_errors() -> None:
 def test_tui_progress_updates_bar_and_status() -> None:
     async def scenario() -> None:
         app = Synth911Tui()
-        async with app.run_test() :
+        async with app.run_test():
             app._report_progress("incidents", 500, 1000)
             progress = app.query_one("#progress", ProgressBar)
             assert progress.progress == 500

@@ -9,7 +9,7 @@ from typing import Any
 import typer
 import yaml
 
-from .config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
+from .config import DatabaseDialect, DatasetKind, GenerationRequest, IdFormat, OutputFormat
 
 _PARAMS_FILE_ALIASES = {
     "area": "area_query",
@@ -64,6 +64,8 @@ def coerce_param(key: str, value: Any) -> Any:
         return DatasetKind(str(value))
     if key in ("id_format",):
         return IdFormat(str(value))
+    if key in ("db_dialect",):
+        return DatabaseDialect(str(value))
     if key in ("output_dir", "realism_config_path"):
         return Path(value)
     if key in ("start_date", "end_date"):
@@ -77,7 +79,9 @@ def coerce_param(key: str, value: Any) -> Any:
     return value
 
 
-def build_request_from_params(file_params: dict[str, Any], cli_params: dict[str, Any]) -> GenerationRequest:
+def build_request_from_params(
+    file_params: dict[str, Any], cli_params: dict[str, Any]
+) -> GenerationRequest:
     """Merge params-file values with explicit CLI flags and build a GenerationRequest.
 
     Precedence: CLI flags > params file > GenerationRequest defaults.
@@ -85,7 +89,9 @@ def build_request_from_params(file_params: dict[str, Any], cli_params: dict[str,
     allowed = {field.name for field in fields(GenerationRequest)}
     unknown = set(file_params) - allowed
     if unknown:
-        raise typer.BadParameter(f"Unknown parameter(s) in params file: {', '.join(sorted(unknown))}")
+        raise typer.BadParameter(
+            f"Unknown parameter(s) in params file: {', '.join(sorted(unknown))}"
+        )
 
     merged = {key: coerce_param(key, value) for key, value in file_params.items()}
     merged.update(cli_params)

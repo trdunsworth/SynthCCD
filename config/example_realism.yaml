@@ -373,6 +373,11 @@ phone_metrics:
   non_emergency_abandonment_rate: 0.05
   max_abandonment_rate: 0.12
   weekend_multiplier: 1.12
+  nine_one_one_answer_time_mu: 1.80
+  nine_one_one_answer_time_sigma: 0.80
+  non_emergency_answer_time_mu: 1.70
+  non_emergency_answer_time_sigma: 0.80
+  answer_time_thresholds: [10.0, 15.0, 20.0, 40.0]
 
 # Diurnal call volume pattern (24 values for hours 0-23, will be normalized)
 hourly_weights:
@@ -451,3 +456,38 @@ shift_config:
       rotation: 2
       calltakers: 3
       dispatchers: 2
+
+# Personnel name locales per country (ISO 3166-1 alpha-2). The country is
+# derived from the geocoded OSM area; the request's --country flag is the
+# fallback when the area yields no country. This section overrides the built-in
+# country -> Faker-locale map for matching personnel rosters. Each value is
+# either a list of Faker locales (equal weight) or a mapping of locale to
+# weight (normalized at generation time).
+#
+# The default US deployment uses a weighted multi-ethnic blend approximating a
+# typical large American call center. Locale choices favor Faker providers with
+# reliable name data; CJK locales emit names in native family-name-first order.
+name_locales:
+  US:
+    en_US: 0.64
+    es_MX: 0.16
+    en_NG: 0.07
+    zh_CN: 0.03
+    fil_PH: 0.03
+    fr_CA: 0.02
+    hi_IN: 0.02
+    de_DE: 0.02
+    it_IT: 0.02
+    pt_BR: 0.02
+    ja_JP: 0.01
+    ko_KR: 0.01
+    ru_RU: 0.01
+    ar_SA: 0.01
+  # Example: Canadian center with equal English/French weight
+  # CA:
+  #   - en_CA
+  #   - fr_CA
+  # Example: Irish center with a mixed English/Irish-Gaelic roster
+  # IE:
+  #   en_IE: 0.7
+  #   ga_IE: 0.3

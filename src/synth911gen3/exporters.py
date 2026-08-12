@@ -3,11 +3,14 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 import polars as pl
 import yaml
+
+if TYPE_CHECKING:
+    import pyarrow as pa
 
 from .config import OutputFormat
 from .exceptions import ExportError
@@ -15,6 +18,46 @@ from .logging_conf import get_logger
 from .manifest import Manifest, write_manifest
 
 logger = get_logger("exporters")
+
+
+def _write_parquet_with_metadata(
+    frame: pd.DataFrame,
+    path: Path,
+    metadata: Mapping[str, str] | None,
+) -> None:
+    """Write a DataFrame to Parquet, embedding key-value footer metadata.
+
+    Uses a ``pyarrow.parquet.ParquetWriter`` whose schema carries the custom
+    metadata, so the keys land in the file's plain key-value metadata (visible
+    to any Parquet reader, not just pyarrow).
+    """
+    import pyarrow as pa
+    from pyarrow import parquet as pq
+
+    table = pa.Table.from_pandas(frame, preserve_index=False)
+    if not metadata:
+        pq.write_table(table, path)
+        return
+    embedded = _merge_schema_metadata(table.schema, metadata)
+    writer = pq.ParquetWriter(path, embedded)
+    try:
+        writer.write_table(table)
+    finally:
+        writer.close()
+
+
+def _merge_schema_metadata(
+    schema: pa.Schema,
+    metadata: Mapping[str, str],
+) -> pa.Schema:
+    """Merge namespaced string metadata into a schema's existing metadata.
+
+    ``schema.with_metadata`` replaces the whole dict (dropping pyarrow's
+    ``pandas`` round-trip key), so merge instead.
+    """
+    merged = dict(schema.metadata or {})
+    merged.update({k.encode(): str(v).encode() for k, v in metadata.items()})
+    return schema.with_metadata(merged)
 
 
 def _records_for_serialization(frame: pd.DataFrame) -> list[dict[str, Any]]:
@@ -42,14 +85,13 @@ def _build_geojson_features(frame: pd.DataFrame) -> list[dict[str, Any]]:
                 properties[key] = None
             elif hasattr(value, "isoformat"):
                 properties[key] = value.isoformat()
-        features.append({
-            "type": "Feature",
-            "geometry": {
-                "type": "Point",
-                "coordinates": [float(lon), float(lat)]
-            },
-            "properties": properties
-        })
+        features.append(
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [float(lon), float(lat)]},
+                "properties": properties,
+            }
+        )
     return features
 
 
@@ -64,10 +106,7 @@ def export_geojson(
     path = output_dir / f"{output_stem}_{dataset_name}.geojson"
 
     features = _build_geojson_features(frame)
-    geojson = {
-        "type": "FeatureCollection",
-        "features": features
-    }
+    geojson = {"type": "FeatureCollection", "features": features}
     path.write_text(json.dumps(geojson, indent=2), encoding="utf-8")
     logger.info("Wrote GeoJSON: %s (%d features)", path, len(features))
     return path
@@ -111,6 +150,7 @@ def export_chunked_generator(
     output_dir: Path,
     output_stem: str,
     dataset_name: str,
+    parquet_metadata: Mapping[str, str] | None = None,
 ) -> Path:
     """Stream an iterable of DataFrame chunks to disk without holding the full frame.
 
@@ -129,7 +169,9 @@ def export_chunked_generator(
     chunk_count = 0
     if output_format is OutputFormat.CSV:
         for chunk in frames:
-            chunk.to_csv(path, mode="a" if chunk_count else "w", header=chunk_count == 0, index=False)
+            chunk.to_csv(
+                path, mode="a" if chunk_count else "w", header=chunk_count == 0, index=False
+            )
             chunk_count += 1
     else:
         import pyarrow as pa
@@ -140,7 +182,10 @@ def export_chunked_generator(
             for chunk in frames:
                 table = pa.Table.from_pandas(chunk)
                 if writer is None:
-                    writer = pq.ParquetWriter(path, table.schema)
+                    schema = table.schema
+                    if parquet_metadata:
+                        schema = _merge_schema_metadata(schema, parquet_metadata)
+                    writer = pq.ParquetWriter(path, schema)
                 writer.write_table(table)
                 chunk_count += 1
         finally:
@@ -156,6 +201,7 @@ def export_generated_data(
     output_format: OutputFormat,
     output_dir: Path,
     output_stem: str,
+    parquet_metadata: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
     if output_format is OutputFormat.PANDAS:
         return dict(datasets)
@@ -178,7 +224,7 @@ def export_generated_data(
         artifacts = {}
         for dataset_name, frame in datasets.items():
             path = output_dir / f"{output_stem}_{dataset_name}.parquet"
-            frame.to_parquet(path, index=False)
+            _write_parquet_with_metadata(frame, path, parquet_metadata)
             artifacts[dataset_name] = path
             logger.info("Wrote parquet: %s", path)
         return artifacts

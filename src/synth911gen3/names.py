@@ -142,6 +142,31 @@ def normalize_name_locales(value: dict[str, Any]) -> dict[str, list[tuple[str, f
     return result
 
 
+def validate_name_locales(value: dict[str, list[tuple[str, float]]]) -> None:
+    """Validate an already-normalized ``name_locales`` mapping.
+
+    Used by :class:`~synth911gen3.realism_config.RealismConfig._validate` for
+    configs assembled programmatically (not via YAML, where
+    :func:`normalize_name_locales` already enforces these rules).
+    """
+    for raw_country, items in value.items():
+        raw = str(raw_country)
+        country = normalize_country(raw)
+        if raw != country:
+            raise ValidationError(f"name_locales country keys must be uppercase ISO codes: {raw!r}")
+        if not items:
+            raise ValidationError(f"name_locales entries for {country} must not be empty.")
+        for locale, weight in items:
+            if not str(locale).strip():
+                raise ValidationError(f"name_locales locales for {country} must not be empty.")
+            if weight <= 0:
+                raise ValidationError(
+                    f"name_locales weight for {country}/{locale!r} must be positive."
+                )
+            if not is_valid_faker_locale(str(locale)):
+                raise ValidationError(f"Unknown Faker locale for name generation: {locale!r}")
+
+
 def resolve_name_locales(
     country: str,
     override: dict[str, list[tuple[str, float]]] | None = None,

@@ -9,6 +9,11 @@ DEFAULT_OUTPUT_STEM = "synthetic_911"
 DEFAULT_LOCALE = "en_US"
 DEFAULT_COUNTRY = "US"
 
+# Version of the generated incident / phone-metrics data schema. Bump when
+# columns change in a breaking way. Embedded in Parquet file metadata and in
+# the data-governance manifest so consumers can detect schema drift.
+DATA_SCHEMA_VERSION = "1.0"
+
 # When ``max_memory_bytes`` is unset, incident CSV/Parquet generation is
 # chunked once the estimated in-memory DataFrame would exceed this budget.
 DEFAULT_MAX_MEMORY_BYTES = 2 * 1024**3
@@ -263,25 +268,145 @@ PHONE_METRICS: dict[str, float | list[float]] = {
 
 TIME_PROFILES = {
     "LAW": {
-        1: {"interview_mean": 12, "dispatch_mean": 4, "turnout_mean": 10, "travel_mean": 220, "scene_mean": 1_500, "closeout_mean": 240, "phone_mean": 170},
-        2: {"interview_mean": 25, "dispatch_mean": 12, "turnout_mean": 22, "travel_mean": 260, "scene_mean": 1_650, "closeout_mean": 270, "phone_mean": 210},
-        3: {"interview_mean": 45, "dispatch_mean": 25, "turnout_mean": 35, "travel_mean": 320, "scene_mean": 1_920, "closeout_mean": 330, "phone_mean": 250},
-        4: {"interview_mean": 70, "dispatch_mean": 140, "turnout_mean": 55, "travel_mean": 410, "scene_mean": 2_220, "closeout_mean": 360, "phone_mean": 300},
-        5: {"interview_mean": 95, "dispatch_mean": 320, "turnout_mean": 70, "travel_mean": 520, "scene_mean": 2_460, "closeout_mean": 390, "phone_mean": 340},
+        1: {
+            "interview_mean": 12,
+            "dispatch_mean": 4,
+            "turnout_mean": 10,
+            "travel_mean": 220,
+            "scene_mean": 1_500,
+            "closeout_mean": 240,
+            "phone_mean": 170,
+        },
+        2: {
+            "interview_mean": 25,
+            "dispatch_mean": 12,
+            "turnout_mean": 22,
+            "travel_mean": 260,
+            "scene_mean": 1_650,
+            "closeout_mean": 270,
+            "phone_mean": 210,
+        },
+        3: {
+            "interview_mean": 45,
+            "dispatch_mean": 25,
+            "turnout_mean": 35,
+            "travel_mean": 320,
+            "scene_mean": 1_920,
+            "closeout_mean": 330,
+            "phone_mean": 250,
+        },
+        4: {
+            "interview_mean": 70,
+            "dispatch_mean": 140,
+            "turnout_mean": 55,
+            "travel_mean": 410,
+            "scene_mean": 2_220,
+            "closeout_mean": 360,
+            "phone_mean": 300,
+        },
+        5: {
+            "interview_mean": 95,
+            "dispatch_mean": 320,
+            "turnout_mean": 70,
+            "travel_mean": 520,
+            "scene_mean": 2_460,
+            "closeout_mean": 390,
+            "phone_mean": 340,
+        },
     },
     "FIRE": {
-        1: {"interview_mean": 16, "dispatch_mean": 6, "turnout_mean": 28, "travel_mean": 300, "scene_mean": 2_100, "closeout_mean": 300, "phone_mean": 160},
-        2: {"interview_mean": 30, "dispatch_mean": 18, "turnout_mean": 40, "travel_mean": 340, "scene_mean": 2_280, "closeout_mean": 330, "phone_mean": 190},
-        3: {"interview_mean": 52, "dispatch_mean": 35, "turnout_mean": 55, "travel_mean": 390, "scene_mean": 2_520, "closeout_mean": 360, "phone_mean": 230},
-        4: {"interview_mean": 80, "dispatch_mean": 170, "turnout_mean": 70, "travel_mean": 470, "scene_mean": 2_760, "closeout_mean": 390, "phone_mean": 270},
-        5: {"interview_mean": 105, "dispatch_mean": 330, "turnout_mean": 84, "travel_mean": 560, "scene_mean": 3_060, "closeout_mean": 420, "phone_mean": 320},
+        1: {
+            "interview_mean": 16,
+            "dispatch_mean": 6,
+            "turnout_mean": 28,
+            "travel_mean": 300,
+            "scene_mean": 2_100,
+            "closeout_mean": 300,
+            "phone_mean": 160,
+        },
+        2: {
+            "interview_mean": 30,
+            "dispatch_mean": 18,
+            "turnout_mean": 40,
+            "travel_mean": 340,
+            "scene_mean": 2_280,
+            "closeout_mean": 330,
+            "phone_mean": 190,
+        },
+        3: {
+            "interview_mean": 52,
+            "dispatch_mean": 35,
+            "turnout_mean": 55,
+            "travel_mean": 390,
+            "scene_mean": 2_520,
+            "closeout_mean": 360,
+            "phone_mean": 230,
+        },
+        4: {
+            "interview_mean": 80,
+            "dispatch_mean": 170,
+            "turnout_mean": 70,
+            "travel_mean": 470,
+            "scene_mean": 2_760,
+            "closeout_mean": 390,
+            "phone_mean": 270,
+        },
+        5: {
+            "interview_mean": 105,
+            "dispatch_mean": 330,
+            "turnout_mean": 84,
+            "travel_mean": 560,
+            "scene_mean": 3_060,
+            "closeout_mean": 420,
+            "phone_mean": 320,
+        },
     },
     "EMS": {
-        1: {"interview_mean": 14, "dispatch_mean": 5, "turnout_mean": 16, "travel_mean": 240, "scene_mean": 1_380, "closeout_mean": 240, "phone_mean": 200},
-        2: {"interview_mean": 28, "dispatch_mean": 14, "turnout_mean": 28, "travel_mean": 280, "scene_mean": 1_560, "closeout_mean": 270, "phone_mean": 230},
-        3: {"interview_mean": 50, "dispatch_mean": 30, "turnout_mean": 40, "travel_mean": 340, "scene_mean": 1_800, "closeout_mean": 300, "phone_mean": 260},
-        4: {"interview_mean": 74, "dispatch_mean": 155, "turnout_mean": 55, "travel_mean": 430, "scene_mean": 2_040, "closeout_mean": 330, "phone_mean": 290},
-        5: {"interview_mean": 100, "dispatch_mean": 315, "turnout_mean": 70, "travel_mean": 520, "scene_mean": 2_280, "closeout_mean": 360, "phone_mean": 330},
+        1: {
+            "interview_mean": 14,
+            "dispatch_mean": 5,
+            "turnout_mean": 16,
+            "travel_mean": 240,
+            "scene_mean": 1_380,
+            "closeout_mean": 240,
+            "phone_mean": 200,
+        },
+        2: {
+            "interview_mean": 28,
+            "dispatch_mean": 14,
+            "turnout_mean": 28,
+            "travel_mean": 280,
+            "scene_mean": 1_560,
+            "closeout_mean": 270,
+            "phone_mean": 230,
+        },
+        3: {
+            "interview_mean": 50,
+            "dispatch_mean": 30,
+            "turnout_mean": 40,
+            "travel_mean": 340,
+            "scene_mean": 1_800,
+            "closeout_mean": 300,
+            "phone_mean": 260,
+        },
+        4: {
+            "interview_mean": 74,
+            "dispatch_mean": 155,
+            "turnout_mean": 55,
+            "travel_mean": 430,
+            "scene_mean": 2_040,
+            "closeout_mean": 330,
+            "phone_mean": 290,
+        },
+        5: {
+            "interview_mean": 100,
+            "dispatch_mean": 315,
+            "turnout_mean": 70,
+            "travel_mean": 520,
+            "scene_mean": 2_280,
+            "closeout_mean": 360,
+            "phone_mean": 330,
+        },
     },
 }
 
