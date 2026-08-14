@@ -536,6 +536,7 @@ SELECT agency, count(*) FROM chicago_incidents GROUP BY agency;
 | Command | Description |
 |---------|-------------|
 | `generate` | Generate synthetic datasets |
+| `validate-config` | Validate one or more realism config YAML files without generating data |
 | `tui` | Launch the Textual TUI |
 | `serve` | Launch the FastAPI REST API server |
 
@@ -958,6 +959,33 @@ Key facts:
 - A `--config path/to/realism.yaml` file overrides any or all default distributions.
 - An example config ships at `config/example_realism.yaml`.
 - Use `RealismConfig.from_yaml(...)` from Python (see [Python API Usage](#python-api-usage)).
+
+### Validating a Realism Config
+
+Validate one or more realism config files without generating any data:
+
+```bash
+uv run synth911gen3 validate-config config/example_realism.yaml
+uv run synth911gen3 validate-config config/center_a.yaml config/center_b.yaml
+```
+
+Each file is parsed and checked against all validation rules (weight sums,
+required time-profile keys, dispatch-init-fraction bounds, phone-metric bounds,
+shift config, name locales, etc.). Exit codes:
+
+| Exit code | Meaning |
+|-----------|---------|
+| `0` | All files valid |
+| `1` | One or more files failed validation |
+| `2` | Argument error (e.g., missing file) |
+
+```bash
+uv run synth911gen3 validate-config my_center.yaml
+# my_center.yaml: OK
+
+uv run synth911gen3 validate-config broken.yaml
+# broken.yaml: Priority weights defined for unknown agency: UNKNOWN
+```
 
 ---
 

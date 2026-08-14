@@ -22,6 +22,20 @@ overrides all default statistical distributions.
 uv run synth911gen3 generate --config path/to/realism_config.yaml --rows 50000
 ```
 
+### Validating a Config File
+
+Validate a realism config without generating data. The same validation rules
+described below (weight sums, required time-profile keys, dispatch-init-fraction
+bounds, phone-metric bounds, shift config, name locales) are applied:
+
+```bash
+uv run synth911gen3 validate-config path/to/realism_config.yaml
+```
+
+Prints `OK` for valid files and exits non-zero (1) if any file fails validation,
+listing the offending section. Validate several files in one call by passing
+multiple paths.
+
 ### Config File Structure
 
 An example config file is provided at `config/example_realism.yaml`. Copy and modify

@@ -47,6 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Params-file generation CLI**: `synth911gen3 generate --save-params my_run.yaml` writes the
   effective parameters (CLI flags merged over any `--params` file) to a JSON/YAML/TOML params file
   and exits without generating — a convenience for capturing a run's options for later reuse
+- **Config validation CLI**: `synth911gen3 validate-config path/to/config.yaml` validates one or
+  more realism config YAML files without generating data — parses and runs every realism
+  validation rule (weight sums, time-profile keys, dispatch-init-fraction bounds, phone-metric
+  bounds, shift config, name locales), printing `OK` per file and exiting non-zero on failure
+  (exit 1 for invalid configs, exit 2 for argument errors)
 
 ### Changed
 - TUI Parameters tab now auto-scrolls to keep the focused field in view while tabbing (the form

@@ -19,6 +19,7 @@ from synth911gen3.cli import (
 )
 from synth911gen3.config import DatasetKind, IdFormat, OutputFormat
 from synth911gen3.exceptions import ExportError
+from synth911gen3.realism_config import RealismConfig
 
 runner = CliRunner()
 
@@ -632,3 +633,54 @@ def test_cli_help_lists_save_params_option() -> None:
     result = runner.invoke(app, ["generate", "--help"])
     assert result.exit_code == 0
     assert "--save-params" in _strip_ansi(result.output)
+
+
+def test_cli_help_lists_validate_config_command() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "validate-config" in _strip_ansi(result.output)
+
+
+def test_cli_validate_config_valid(tmp_path: Path) -> None:
+    config_path = tmp_path / "valid.yaml"
+    RealismConfig().to_yaml(config_path)
+    result = runner.invoke(app, ["validate-config", str(config_path)])
+    assert result.exit_code == 0
+    assert "OK" in _strip_ansi(result.output)
+
+
+def test_cli_validate_config_invalid_yaml_exits_1(tmp_path: Path) -> None:
+    config_path = _write(tmp_path, "bad.yaml", "[invalid yaml")
+    result = runner.invoke(app, ["validate-config", str(config_path)])
+    assert result.exit_code == 1
+    output = _strip_ansi(result.output)
+    assert "bad.yaml" in output
+
+
+def test_cli_validate_config_validation_error_exits_1(tmp_path: Path) -> None:
+    config_path = _write(
+        tmp_path,
+        "bad_weights.yaml",
+        "priority_weights:\n  UNKNOWN:\n    1: 1.0\n",
+    )
+    result = runner.invoke(app, ["validate-config", str(config_path)])
+    assert result.exit_code == 1
+    output = _strip_ansi(result.output)
+    assert "bad_weights.yaml" in output
+    assert "Priority weights defined for unknown agency: UNKNOWN" in output
+
+
+def test_cli_validate_config_missing_file_exits_2(tmp_path: Path) -> None:
+    result = runner.invoke(app, ["validate-config", str(tmp_path / "missing.yaml")])
+    assert result.exit_code == 2
+
+
+def test_cli_validate_config_mixed_paths_reports_each(tmp_path: Path) -> None:
+    good = tmp_path / "good.yaml"
+    RealismConfig().to_yaml(good)
+    bad = _write(tmp_path, "bad.yaml", "hourly_weights: [0.04]")
+    result = runner.invoke(app, ["validate-config", str(good), str(bad)])
+    assert result.exit_code == 1
+    output = _strip_ansi(result.output)
+    assert "good.yaml: OK" in output
+    assert "bad.yaml" in output

@@ -6,6 +6,7 @@ from typing import Any
 
 import pandas as pd
 import typer
+import yaml
 
 from .addresses import OpenStreetMapAddressProvider
 from .app import Synth911Application
@@ -415,6 +416,35 @@ def generate(
     for dataset_name, artifact in result.exported_artifacts.items():
         logger.info("Exported %s -> %s", dataset_name, artifact)
         typer.echo(f"{dataset_name}: {artifact}")
+
+
+@app.command()
+def validate_config(
+    config_paths: list[Path] = typer.Argument(
+        ...,
+        metavar="CONFIG",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Path to a YAML realism configuration file to validate.",
+    ),
+) -> None:
+    """Validate one or more realism config files without generating data."""
+
+    from .realism_config import RealismConfig
+
+    failed = False
+    for path in config_paths:
+        try:
+            RealismConfig.from_yaml(path)
+        except (ValidationError, yaml.YAMLError, ValueError, TypeError) as exc:
+            failed = True
+            typer.secho(f"{path}: {exc}", fg=typer.colors.RED, err=True)
+            continue
+        typer.echo(f"{path}: OK")
+    if failed:
+        raise typer.Exit(code=1)
 
 
 @app.command()
