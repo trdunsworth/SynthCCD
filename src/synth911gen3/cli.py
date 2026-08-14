@@ -22,6 +22,7 @@ from .params import (
     build_request_from_params,
     coerce_param as _coerce_param,  # noqa: F401  (re-exported for tests)
     load_params_file,
+    save_params_file,
 )
 from .tls import maybe_inject_system_trust
 from .tui import run as run_tui
@@ -90,6 +91,16 @@ def generate(
         dir_okay=False,
         readable=True,
         help="Path to a JSON/YAML/TOML file of generation parameters. CLI flags override file values.",
+    ),
+    save_params: Path | None = typer.Option(
+        None,
+        "--save-params",
+        file_okay=True,
+        dir_okay=False,
+        help=(
+            "Write the effective parameters (CLI flags plus --params file, if any) "
+            "to a JSON/YAML/TOML params file and exit without generating."
+        ),
     ),
     rows: int | None = typer.Option(
         None,
@@ -367,6 +378,13 @@ def generate(
         cli_params["db_create_indexes"] = False
 
     file_params = load_params_file(params) if params is not None else {}
+
+    if save_params is not None:
+        effective = {**file_params, **cli_params}
+        save_params_file(save_params, effective)
+        typer.echo(f"Saved parameters to {save_params}")
+        return
+
     request = build_request_from_params(file_params, cli_params)
 
     logger.info(

@@ -15,6 +15,7 @@ from synth911gen3.cli import (
     app,
     build_request_from_params,
     load_params_file,
+    save_params_file,
 )
 from synth911gen3.config import DatasetKind, IdFormat, OutputFormat
 from synth911gen3.exceptions import ExportError
@@ -496,3 +497,138 @@ def test_module_entrypoint_prints_help() -> None:
     )
     assert result.returncode == 0
     assert "Synthetic 911" in result.stdout
+
+
+def test_save_params_file_yaml(tmp_path: Path) -> None:
+    path = tmp_path / "saved.yaml"
+    save_params_file(
+        path,
+        {
+            "rows": 2500,
+            "area_query": "Denver, CO",
+            "output_format": OutputFormat.PARQUET,
+            "seed": 77,
+        },
+    )
+    assert load_params_file(path) == {
+        "rows": 2500,
+        "area_query": "Denver, CO",
+        "output_format": "parquet",
+        "seed": 77,
+    }
+
+
+def test_save_params_file_json(tmp_path: Path) -> None:
+    path = tmp_path / "saved.json"
+    save_params_file(
+        path,
+        {"rows": 100, "dataset": DatasetKind.PHONE, "output_dir": Path("exports")},
+    )
+    assert load_params_file(path) == {
+        "rows": 100,
+        "dataset": "phone",
+        "output_dir": "exports",
+    }
+
+
+def test_save_params_file_toml(tmp_path: Path) -> None:
+    path = tmp_path / "saved.toml"
+    save_params_file(
+        path,
+        {
+            "rows": 500,
+            "id_format": IdFormat.GUID,
+            "include_10_digit_emergency": True,
+        },
+    )
+    assert load_params_file(path) == {
+        "rows": 500,
+        "id_format": "guid",
+        "include_10_digit_emergency": True,
+    }
+
+
+def test_save_params_file_round_trips_dates_and_paths(tmp_path: Path) -> None:
+    path = tmp_path / "saved.yaml"
+    save_params_file(
+        path,
+        {
+            "start_date": date(2026, 1, 1),
+            "end_date": date(2026, 1, 7),
+            "realism_config_path": Path("config/center.yaml"),
+            "db_create_indexes": False,
+        },
+    )
+    request = build_request_from_params(load_params_file(path), {})
+    assert request.start_date == date(2026, 1, 1)
+    assert request.end_date == date(2026, 1, 7)
+    assert request.realism_config_path == Path("config/center.yaml")
+    assert request.db_create_indexes is False
+
+
+def test_save_params_file_drops_none_values(tmp_path: Path) -> None:
+    path = tmp_path / "saved.yaml"
+    save_params_file(path, {"rows": 5, "end_date": None, "db_host": None})
+    assert load_params_file(path) == {"rows": 5}
+
+
+def test_save_params_file_unsupported_extension(tmp_path: Path) -> None:
+    path = tmp_path / "saved.txt"
+    with pytest.raises(typer.BadParameter):
+        save_params_file(path, {"rows": 5})
+
+
+def test_cli_save_params_short_circuits_and_writes_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_static_provider(monkeypatch)
+    saved = tmp_path / "run.yaml"
+    result = runner.invoke(
+        app,
+        [
+            "generate",
+            "--save-params",
+            str(saved),
+            "--rows",
+            "2500",
+            "--area",
+            "Denver, CO",
+            "--format",
+            "parquet",
+            "--seed",
+            "77",
+        ],
+    )
+    assert result.exit_code == 0
+    assert "Saved parameters" in _strip_ansi(result.output)
+    assert "incidents:" not in _strip_ansi(result.output)
+    assert load_params_file(saved) == {
+        "rows": 2500,
+        "area_query": "Denver, CO",
+        "output_format": "parquet",
+        "seed": 77,
+    }
+
+
+def test_cli_save_params_merges_params_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _install_static_provider(monkeypatch)
+    params = _write(tmp_path, "base.yaml", "rows: 100\ndataset: phone\narea: Seattle, WA\n")
+    saved = tmp_path / "run.json"
+    result = runner.invoke(
+        app,
+        ["generate", "--params", str(params), "--save-params", str(saved), "--rows", "500"],
+    )
+    assert result.exit_code == 0
+    assert load_params_file(saved) == {
+        "rows": 500,
+        "dataset": "phone",
+        "area_query": "Seattle, WA",
+    }
+
+
+def test_cli_help_lists_save_params_option() -> None:
+    result = runner.invoke(app, ["generate", "--help"])
+    assert result.exit_code == 0
+    assert "--save-params" in _strip_ansi(result.output)

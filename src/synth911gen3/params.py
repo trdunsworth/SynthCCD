@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from dataclasses import fields
 from datetime import date
+from enum import Enum
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,54 @@ def load_params_file(path: Path) -> dict[str, Any]:
             data.pop(alias)
 
     return data
+
+
+def _to_plain(value: Any) -> Any:
+    """Convert a GenerationRequest-compatible value to a plain JSON/YAML/TOML type."""
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, Path):
+        return str(value)
+    if isinstance(value, date):
+        return value.isoformat()
+    return value
+
+
+def _dump_toml(data: dict[str, Any]) -> str:
+    """Serialize a flat dict of plain scalars to TOML."""
+    lines: list[str] = []
+    for key, value in data.items():
+        if isinstance(value, bool):
+            rendered = "true" if value else "false"
+        elif isinstance(value, (int, float)):
+            rendered = str(value)
+        else:
+            rendered = json.dumps(str(value))
+        lines.append(f"{key} = {rendered}")
+    return "\n".join(lines) + "\n"
+
+
+def save_params_file(path: Path, params: dict[str, Any]) -> None:
+    """Write generation parameters to a params file (JSON/YAML/TOML).
+
+    ``params`` should be a mapping of canonical ``GenerationRequest`` field
+    names to values (as built by ``build_request_from_params``). Enums, paths,
+    and dates are serialized to plain string values so the file round-trips
+    through ``load_params_file`` + ``coerce_param``.
+    """
+    suffix = path.suffix.lower()
+    data = {key: _to_plain(value) for key, value in params.items() if value is not None}
+
+    if suffix == ".json":
+        path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    elif suffix in (".yaml", ".yml"):
+        path.write_text(yaml.safe_dump(data, sort_keys=False), encoding="utf-8")
+    elif suffix == ".toml":
+        path.write_text(_dump_toml(data), encoding="utf-8")
+    else:
+        raise typer.BadParameter(
+            f"Unsupported params file format: {suffix} (expected .json, .yaml, .yml, or .toml)."
+        )
 
 
 def coerce_param(key: str, value: Any) -> Any:

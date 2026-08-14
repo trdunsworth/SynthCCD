@@ -548,6 +548,7 @@ uv run synth911gen3 generate [OPTIONS]
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--params` | `-p` | *(none)* | Path to a JSON/YAML/TOML file specifying multiple generation parameters at once |
+| `--save-params` | | *(none)* | Write the effective parameters (CLI flags merged over any `--params` file) to a JSON/YAML/TOML file and exit without generating |
 | `--rows` | `-r` | `10000` | Number of incident rows to generate (minimum: 1) |
 | `--area` | `-a` | `"Kansas City, MO"` | Area query for OpenStreetMap address lookup |
 | `--format` | `-f` | `csv` | Output format: `csv`, `parquet`, `json`, `yaml`, `pandas`, `polars`, `geojson`, `shapefile`, `postgresql`, `sqlserver`, `mariadb`, `duckdb`, `sqlite` |
@@ -1079,6 +1080,31 @@ uv run synth911gen3 generate --params run.toml
 ```
 
 Two ready-made examples are included in the repo: `config/example_params.json` and `config/example_params.yaml`.
+
+### Capturing Parameters with `--save-params`
+
+Instead of hand-writing a params file, run `generate` with the flags you want and add
+`--save-params <path>` to write them out (and exit without generating). The extension
+(`.json`, `.yaml`/`.yml`, or `.toml`) selects the format. Values are written with canonical
+`GenerationRequest` keys (e.g. `area_query`, `output_format`, `realism_config_path`) so the
+saved file loads directly with `--params`.
+
+```bash
+# Capture a run's settings as YAML
+uv run synth911gen3 generate --rows 2500 --area "Denver, CO" --format parquet --seed 77 --save-params denver.yaml
+
+# Saved file (denver.yaml)
+#   rows: 2500
+#   area_query: Denver, CO
+#   output_format: parquet
+#   seed: 77
+
+# Reuse it later
+uv run synth911gen3 generate --params denver.yaml
+
+# Combine a --params file with overrides, capturing the merged result
+uv run synth911gen3 generate --params config/example_params.yaml --rows 500 --save-params my_run.json
+```
 
 ---
 
