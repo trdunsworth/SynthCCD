@@ -1,3 +1,4 @@
+import json
 import re
 import subprocess
 import sys
@@ -6,6 +7,7 @@ from pathlib import Path
 
 import pytest
 import typer
+import yaml
 from typer.testing import CliRunner
 
 from synth911gen3.addresses import Address, StaticAddressProvider
@@ -684,3 +686,64 @@ def test_cli_validate_config_mixed_paths_reports_each(tmp_path: Path) -> None:
     output = _strip_ansi(result.output)
     assert "good.yaml: OK" in output
     assert "bad.yaml" in output
+
+
+def test_cli_help_lists_schema_command() -> None:
+    result = runner.invoke(app, ["--help"])
+    assert result.exit_code == 0
+    assert "schema" in _strip_ansi(result.output)
+
+
+def test_cli_schema_exports_incidents_json() -> None:
+    result = runner.invoke(app, ["schema", "--format", "json", "--dataset", "incidents"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["dataset"] == "incidents"
+    assert data["version"] == "1.0"
+    assert data["schema_hash"]
+    assert "id_number" in data["datasets"]["incidents"]
+    assert "agency" in data["datasets"]["incidents"]
+
+
+def test_cli_schema_exports_phone_yaml() -> None:
+    result = runner.invoke(app, ["schema", "--format", "yaml", "--dataset", "phone"])
+    assert result.exit_code == 0
+    data = yaml.safe_load(result.output)
+    assert data["dataset"] == "phone"
+    assert "hour_start" in data["datasets"]["hourly_call_counts"]
+
+
+def test_cli_schema_dataset_all_includes_both() -> None:
+    result = runner.invoke(app, ["schema", "--dataset", "all"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert set(data["datasets"]) == {"incidents", "hourly_call_counts"}
+
+
+def test_cli_schema_respects_id_format() -> None:
+    result = runner.invoke(app, ["schema", "--id-format", "guid", "--dataset", "incidents"])
+    assert result.exit_code == 0
+    data = json.loads(result.output)
+    assert data["datasets"]["incidents"]["id_number"] != "int64"
+
+
+def test_cli_schema_writes_output_file(tmp_path: Path) -> None:
+    out = tmp_path / "schema.json"
+    result = runner.invoke(app, ["schema", "--output", str(out)])
+    assert result.exit_code == 0
+    assert "Schema written to" in _strip_ansi(result.output)
+    data = json.loads(out.read_text(encoding="utf-8"))
+    assert "id_number" in data["datasets"]["incidents"]
+
+
+def test_cli_schema_unsupported_format_exits_2() -> None:
+    result = runner.invoke(app, ["schema", "--format", "xml"])
+    assert result.exit_code == 2
+    assert "Unsupported format" in _strip_ansi(result.output)
+
+
+def test_cli_schema_invalid_config_exits_1(tmp_path: Path) -> None:
+    bad = _write(tmp_path, "bad.yaml", "priority_weights:\n  UNKNOWN:\n    1: 1.0\n")
+    result = runner.invoke(app, ["schema", "--config", str(bad)])
+    assert result.exit_code == 1
+    assert "Priority weights defined for unknown agency" in _strip_ansi(result.output)

@@ -335,7 +335,15 @@ recommendation docs in `docs/`, and direct code review.
       `OK` per file, exits 1 on any invalid file, exits 2 on argument errors. Covered by
       `tests/test_cli.py` (valid, invalid YAML, validation error, missing file, mixed paths,
       help listing) and documented in `USERSGUIDE.md` and `REALISMGUIDE.md`.
-- [ ] **P2 — Schema export CLI.** Add `synth911gen3 schema --format json|yaml --dataset incidents` to export output schema definitions.
+- [x] **P2 — Schema export CLI.** `synth911gen3 schema --format json|yaml --dataset incidents`
+      exports the output schema definition (column names and dtypes per dataset, schema
+      `version`, deterministic `schema_hash` matching the manifest/Parquet metadata hash, and
+      package/environment provenance) without generating data or fetching addresses. Probes via
+      `build_preview_datasets` (single-row, static address pool) so the definition reflects
+      `--config`, `--id-format`, `country`, and emergency-number overrides; supports
+      `--output` to write to a file, exit 2 on an unsupported format, exit 1 on an invalid
+      config. Covered by `tests/test_cli.py` (JSON/YAML/all/id-format/file/format-error/
+      config-error/help) and `tests/test_describe.py`; documented in `USERSGUIDE.md`.
 - [x] **P2 — International emergency number support.** Customize volume column names for emergency/non-emergency lines per country. Current schema hardcodes US/Canada 911 terminology (e.g., `nine_one_one_calls_received`, `non_emergency_calls_received`). Need configurable emergency number definitions per locale: US/Canada (911), UK (999/112), Ireland (999/112), France (112, 114 for hearing-impaired, 15 SAMU, 17 Police, 18 Fire, 191 Aviation, 196 Maritime), Germany (112/110), etc. Would require: configurable emergency number registry per country/region, dynamic column naming in phone metrics output, per-number volume fractions/abandonment rates/answer-time thresholds in realism config, and locale-aware CLI params (e.g., `--country IE` or `--emergency-numbers "999,112"`). **Completed:** Registry with 26 countries in `emergency_numbers.py`, dynamic column naming via `column_prefix()`, `--country`/`--emergency-numbers`/`--include-10-digit-emergency` CLI flags, per-line overrides in `phone_metric_lines` realism config section.
 - [x] **P2 — Emergency number registry with US/Canada defaults.** Establish a built-in registry of emergency numbers per country with US/Canada (911) as defaults. Include a flag (e.g., `--include-10-digit-emergency`) to optionally include 10-digit emergency lines (e.g., 10-digit direct-dial numbers for specific agencies or regions) alongside the standard short codes. This would support countries where both short codes and full numbers are used, and allow modeling of legacy or transitional dialing patterns. **Completed:** Registry defaults US/CA to 911; `--include-10-digit-emergency` flag appends 10-digit lines from `TEN_DIGIT_LINES` registry; override via `--emergency-numbers` for custom short codes.
 

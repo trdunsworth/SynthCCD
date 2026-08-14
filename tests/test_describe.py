@@ -1,7 +1,12 @@
 import pandas as pd
 
 from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat
-from synth911gen3.describe import SCHEMA_ROWS, SAMPLE_ROWS, build_preview_datasets
+from synth911gen3.describe import (
+    SCHEMA_ROWS,
+    SAMPLE_ROWS,
+    build_preview_datasets,
+    build_schema_definition,
+)
 
 
 def _request(dataset: DatasetKind = DatasetKind.ALL, **kwargs) -> GenerationRequest:
@@ -74,3 +79,37 @@ def test_preview_is_deterministic_for_same_seed() -> None:
     second = build_preview_datasets(request, schema_only=False)["incidents"]
 
     assert first.equals(second)
+
+
+def test_schema_definition_incidents_shape() -> None:
+    definition = build_schema_definition(_request(DatasetKind.INCIDENTS))
+
+    assert definition["dataset"] == "incidents"
+    assert definition["version"] == "1.0"
+    assert definition["schema_hash"]
+    assert set(definition["datasets"]) == {"incidents"}
+    columns = definition["datasets"]["incidents"]
+    assert columns["id_number"] == "int64"
+    assert "agency" in columns
+
+
+def test_schema_definition_phone_shape() -> None:
+    definition = build_schema_definition(_request(DatasetKind.PHONE))
+
+    assert set(definition["datasets"]) == {"hourly_call_counts"}
+    columns = definition["datasets"]["hourly_call_counts"]
+    assert "hour_start" in columns
+    assert "nine_one_one_calls_received" in columns
+
+
+def test_schema_definition_respects_id_format() -> None:
+    definition = build_schema_definition(
+        _request(DatasetKind.INCIDENTS, id_format=IdFormat.GUID)
+    )
+    assert definition["datasets"]["incidents"]["id_number"] != "int64"
+
+
+def test_schema_definition_hash_is_deterministic() -> None:
+    first = build_schema_definition(_request(DatasetKind.INCIDENTS))
+    second = build_schema_definition(_request(DatasetKind.INCIDENTS))
+    assert first["schema_hash"] == second["schema_hash"]

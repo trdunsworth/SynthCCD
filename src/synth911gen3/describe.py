@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date
+from datetime import date, datetime, timezone
+from typing import Any
 
 import pandas as pd
 
 from .addresses import StaticAddressProvider
 from .config import DatasetKind, GenerationRequest
+from .constants import DATA_SCHEMA_VERSION
 from .domain import Address
 from .generators import HourlyCallCountGenerator, IncidentGenerator
+from .manifest import _hash_schema
 
 SCHEMA_ROWS = 1
 SAMPLE_ROWS = 5
@@ -45,3 +48,44 @@ def build_preview_datasets(
         probe = replace(request, start_date=today, end_date=today)
         datasets["hourly_call_counts"] = HourlyCallCountGenerator().generate(probe)
     return datasets
+
+
+def build_schema_definition(
+    request: GenerationRequest,
+) -> dict[str, Any]:
+    """Build a serializable output-schema definition for the selected dataset.
+
+    The column set and dtypes are derived from the same single-row probe used
+    by ``--schema``/``--dry-run`` (static address pool, no OpenStreetMap fetch),
+    so the definition reflects ``id_format``, ``--config``, ``country``, and
+    emergency-number overrides. Includes the schema version, a deterministic
+    ``schema_hash`` (matching the manifest/Parquet metadata hash), and
+    package/environment provenance.
+    """
+    import platform
+    import sys
+
+    from importlib.metadata import version
+
+    preview = build_preview_datasets(request, schema_only=True)
+    try:
+        package_version = version("synth911gen3")
+    except Exception:
+        package_version = "0.0.0-dev"
+
+    return {
+        "version": DATA_SCHEMA_VERSION,
+        "schema_hash": _hash_schema(preview),
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "package": "synth911gen3",
+        "package_version": package_version,
+        "python_version": (
+            f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        ),
+        "platform": platform.platform(),
+        "dataset": request.dataset.value,
+        "datasets": {
+            name: {col: str(dtype) for col, dtype in frame.dtypes.items()}
+            for name, frame in preview.items()
+        },
+    }

@@ -536,6 +536,7 @@ SELECT agency, count(*) FROM chicago_incidents GROUP BY agency;
 | Command | Description |
 |---------|-------------|
 | `generate` | Generate synthetic datasets |
+| `schema` | Export the output schema (columns and types) as JSON or YAML |
 | `validate-config` | Validate one or more realism config YAML files without generating data |
 | `tui` | Launch the Textual TUI |
 | `serve` | Launch the FastAPI REST API server |
@@ -631,6 +632,40 @@ Sample rows use a small static address pool (never the OSM network) and a
 single-day phone range, so previews are instant and deterministic for a given
 `--seed`. Sample addresses are illustrative only — they are not the addresses a
 full run would produce.
+
+### Schema Export Command
+
+The `schema` command exports the output schema definition (column names and
+dtypes for each dataset) as JSON or YAML without generating data or fetching
+addresses:
+
+```bash
+uv run synth911gen3 schema --format json --dataset incidents
+uv run synth911gen3 schema --format yaml --dataset phone
+uv run synth911gen3 schema --dataset all
+```
+
+| Option | Short | Default | Description |
+|--------|-------|---------|-------------|
+| `--format` | `-f` | `json` | Output format: `json` or `yaml` |
+| `--dataset` | `-d` | `incidents` | Dataset to describe: `incidents`, `phone`, or `all` |
+| `--config` | | *(none)* | Path to YAML realism configuration file |
+| `--id-format` | | `integer` | id_number style: `integer` or `guid` |
+| `--output` | `-o` | *(stdout)* | Write the schema definition to a file instead of printing to stdout |
+
+The exported document includes the schema `version`, a deterministic
+`schema_hash` (matching the hash embedded in Parquet metadata and the
+`{output_stem}_manifest.json` sidecar), the selected `dataset`, the columns and
+dtypes per dataset, and package/environment provenance. The definition reflects
+`--config` and `--id-format`, so it matches what a full run produces:
+
+```bash
+# Write the incidents schema to a file
+uv run synth911gen3 schema --format json --output schema.json
+
+# Inspect the schema your configured center would produce
+uv run synth911gen3 schema --config my_center.yaml --id-format guid
+```
 
 ---
 

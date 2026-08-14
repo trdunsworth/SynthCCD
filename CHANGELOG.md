@@ -52,6 +52,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validation rule (weight sums, time-profile keys, dispatch-init-fraction bounds, phone-metric
   bounds, shift config, name locales), printing `OK` per file and exiting non-zero on failure
   (exit 1 for invalid configs, exit 2 for argument errors)
+- **Schema export CLI**: `synth911gen3 schema --format json|yaml --dataset incidents` exports
+  the output schema definition (column names and dtypes per dataset, schema version,
+  deterministic `schema_hash` matching the manifest/Parquet metadata hash, and
+  package/environment provenance) without generating data or fetching addresses — respects
+  `--config`, `--id-format`, and `--output`
 
 ### Changed
 - TUI Parameters tab now auto-scrolls to keep the focused field in view while tabbing (the form

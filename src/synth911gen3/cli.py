@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -445,6 +446,85 @@ def validate_config(
         typer.echo(f"{path}: OK")
     if failed:
         raise typer.Exit(code=1)
+
+
+@app.command()
+def schema(
+    format: str = typer.Option(
+        "json",
+        "--format",
+        "-f",
+        case_sensitive=False,
+        show_default=False,
+        help="Output format for the schema definition: json or yaml (default: json).",
+    ),
+    dataset: DatasetKind = typer.Option(
+        DatasetKind.INCIDENTS,
+        "--dataset",
+        "-d",
+        case_sensitive=False,
+        show_default=False,
+        help="Dataset to describe: incidents, phone, or all (default: incidents).",
+    ),
+    config: Path | None = typer.Option(
+        None,
+        "--config",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        help="Path to YAML realism configuration file.",
+    ),
+    id_format: IdFormat | None = typer.Option(
+        None,
+        "--id-format",
+        case_sensitive=False,
+        show_default=False,
+        help="id_number style: integer or guid (default: integer).",
+    ),
+    output: Path | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        file_okay=True,
+        dir_okay=False,
+        help="Write the schema definition to this file instead of printing to stdout.",
+    ),
+) -> None:
+    """Export the output schema (columns and types) as JSON or YAML."""
+
+    from .describe import build_schema_definition
+
+    fmt = format.lower()
+    if fmt not in ("json", "yaml"):
+        typer.secho(
+            f"Unsupported format: {format!r}. Use 'json' or 'yaml'.",
+            fg=typer.colors.RED,
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    request = GenerationRequest(
+        dataset=dataset,
+        realism_config_path=config,
+        id_format=id_format or IdFormat.INTEGER,
+    )
+
+    try:
+        definition = build_schema_definition(request)
+    except (ValidationError, yaml.YAMLError) as exc:
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(code=1) from exc
+
+    text = json.dumps(definition, indent=2, sort_keys=True) if fmt == "json" else yaml.safe_dump(
+        definition, sort_keys=False, default_flow_style=None
+    )
+
+    if output is not None:
+        output.write_text(text, encoding="utf-8")
+        typer.echo(f"Schema written to {output}")
+    else:
+        typer.echo(text)
 
 
 @app.command()
