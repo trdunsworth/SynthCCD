@@ -140,7 +140,7 @@ async def health_check() -> dict[str, str]:
 @app.get("/schema")
 async def get_schema(
     rows: int = Query(100, ge=1, description="Number of rows for schema probe"),
-    dataset: str = Query("all", description="Dataset: incidents, phone, all"),
+    dataset: str = Query("incidents", description="Dataset: incidents, phone, all"),
     output_format: str = Query("pandas", description="Output format for probe"),
     area_query: str = Query("Kansas City, MO", description="Area query for addresses"),
     seed: int = Query(911, description="Random seed"),

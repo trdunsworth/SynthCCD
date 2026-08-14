@@ -91,7 +91,7 @@ _HELP_TEXT = (
     "PARAMETERS\n"
     "  Rows               Number of incident rows to generate (default: 10000).\n"
     "  Seed               Random seed for reproducible output (default: 911).\n"
-    "  Dataset            incidents, phone, or all (default: all).\n"
+    "  Dataset            incidents, phone, or all (default: incidents).\n"
     "  Output format      csv, parquet, json, yaml, pandas, or polars (default: csv).\n"
     "  ID format          integer or guid for id_number (default: integer).\n"
     "  Area query         OpenStreetMap search area for addresses (default: Kansas City, MO).\n"

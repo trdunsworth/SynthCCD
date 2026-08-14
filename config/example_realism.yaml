@@ -378,6 +378,11 @@ phone_metrics:
   non_emergency_answer_time_mu: 1.70
   non_emergency_answer_time_sigma: 0.80
   answer_time_thresholds: [10.0, 15.0, 20.0, 40.0]
+  # How strongly the answer-time lognormal mu shifts with hourly load, and the
+  # per-hour random noise (std-dev on the log scale) that makes percentages
+  # vary hour-to-hour.
+  answer_time_load_sensitivity: 0.25
+  answer_time_mu_noise_sd: 0.05
 
 # Diurnal call volume pattern (24 values for hours 0-23, will be normalized)
 hourly_weights:

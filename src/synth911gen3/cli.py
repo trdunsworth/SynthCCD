@@ -120,7 +120,7 @@ def generate(
         "--dataset",
         case_sensitive=False,
         show_default=False,
-        help="Dataset to generate: incidents, phone, or all (default: all).",
+        help="Dataset to generate: incidents, phone, or all (default: incidents).",
     ),
     id_format: IdFormat | None = typer.Option(
         None,
@@ -290,7 +290,7 @@ def generate(
     ),
     db_create_indexes: bool | None = typer.Option(
         None,
-        "--no-db-create-indexes",
+        "--no-db-indexes",
         help="Skip creating indexes on key columns (default: create them).",
     ),
     schema: bool = typer.Option(

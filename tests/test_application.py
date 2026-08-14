@@ -1,3 +1,4 @@
+from datetime import date
 from uuid import UUID
 
 import sqlite3
@@ -538,3 +539,54 @@ def test_application_name_locales_in_manifest_hash() -> None:
     a = Manifest.from_request(request_a)
     b = Manifest.from_request(request_b)
     assert a.realism_config_hash != b.realism_config_hash
+
+
+def test_application_incidents_only_excludes_phone_metrics() -> None:
+    provider = StaticAddressProvider([Address("101 N Main St", "Kansas City", "Missouri")])
+    request = GenerationRequest(
+        rows=10,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=11,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.incidents is not None
+    assert result.hourly_call_counts is None
+
+
+def test_application_phone_only_excludes_incidents_and_scales_to_days() -> None:
+    request = GenerationRequest(
+        rows=10_000,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=11,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+    )
+
+    result = Synth911Application().generate(request)
+
+    assert result.incidents is None
+    assert result.hourly_call_counts is not None
+    assert len(result.hourly_call_counts) == 7 * 24
+
+
+def test_application_phone_answer_time_percentages_vary_by_hour() -> None:
+    from synth911gen3.generators.phone_metrics import HourlyCallCountGenerator
+
+    request = GenerationRequest(
+        rows=200_000,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+    )
+
+    frame = HourlyCallCountGenerator().generate(request)
+
+    pct = frame["nine_one_one_answered_10s_pct"]
+    assert pct.nunique() > 5, "answer-time percentages should vary across hours"
+    assert pct.max() - pct.min() > 2.0, "answer-time spread should exceed 2 percentage points"

@@ -77,6 +77,13 @@ recommendation docs in `docs/`, and direct code review.
       and volume factors in `phone_metrics.py` are now exposed through the `phone_metrics`
       section of `RealismConfig`/YAML (volume fractions, abandonment rates, night
       increment, max abandonment, weekend multiplier).
+- [x] **P2 — Make hourly answer-time percentages vary by hour.** Answer-time percentages
+      were identical every hour because the lognormal mu was constant per day. Added two
+      configurable `phone_metrics` keys — `answer_time_load_sensitivity` (0.25) and
+      `answer_time_mu_noise_sd` (0.05) — that shift the lognormal mu with hourly load and
+      add per-hour random noise respectively. Verified: 9-1-1 10 s answered percentages
+      now span a multi-point range with dozens of unique values across hours. Covered by
+      `tests/test_application.py`.
 
 ---
 
@@ -116,6 +123,13 @@ recommendation docs in `docs/`, and direct code review.
       fields are highlighted with an error border via aggregated `FieldValidationError`
       feedback (cleared on edit); status panel colors info/success/error states. The TUI
       already exposed seed, date range, pool sizes, output dir, and the realism-config path.
+- [x] **P2 — Default to the incidents dataset only.** `GenerationRequest`, the pydantic
+      `schema.py` model, the CLI `--dataset` help, the TUI Dataset select, and the
+      `/schema` serve endpoint all default to `incidents` instead of `all`. Selecting
+      `incidents` or `phone` was already mutually exclusive; the change makes the default
+      generate only incidents (10,000 rows) unless `--dataset all`/`phone` is chosen.
+      Covered by updated `tests/test_config.py`/`test_tui.py` and new exclusivity + phone
+      row-count (24/day) tests in `tests/test_application.py`.
 - [ ] **P2 — Implement the PyQt6 GUI** (AGENTS.md goal: "TUI or a GUI"). Requires re-adding
       the `pyqt6` dependency (removed in the dependency trim); a desktop GUI would serve
       non-technical operators. **Deferred** — not being pursued for now.
@@ -242,7 +256,7 @@ recommendation docs in `docs/`, and direct code review.
   configurable via `db_batch_size`. New output formats: `postgresql`, `sqlserver`,
   `mariadb`, `duckdb`, `sqlite`. CLI params: `--db-host`, `--db-port`, `--db-name`, `--db-user`,
   `--db-password`, `--db-table-incidents`, `--db-table-phone`, `--db-schema`,
-  `--db-batch-size`, `--db-if-exists`, `--no-db-create-indexes`. Documented in
+  `--db-batch-size`, `--db-if-exists`, `--no-db-indexes`. Documented in
   `USERSGUIDE.md`.
 - [x] **Data governance manifest.** Emit a sidecar metadata file (seed, params, config hash,
   schema version, generation timestamp) with every export for reproducibility/auditing.
@@ -299,7 +313,7 @@ recommendation docs in `docs/`, and direct code review.
   (`999 // columns`) honoring SQLite's `SQLITE_MAX_VARIABLE_NUMBER` bound-parameter limit.
   Full CLI support: `--format sqlite` plus the new `--db-*` flags (`--db-host`, `--db-port`,
   `--db-name`, `--db-user`, `--db-password`, `--db-table-incidents`, `--db-table-phone`,
-  `--db-schema`, `--db-batch-size`, `--db-if-exists`, `--db-dialect`, `--no-db-create-indexes`),
+  `--db-schema`, `--db-batch-size`, `--db-if-exists`, `--db-dialect`, `--no-db-indexes`),
   params-file keys, and Python API (`OutputFormat.SQLITE`). End-to-end covered by
   `tests/test_db_exporter.py` (round-trip, if-exists modes, schema ignore, indexes, engine paths),
   `tests/test_config.py`, `tests/test_schema.py`, `tests/test_cli.py`, and

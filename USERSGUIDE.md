@@ -51,7 +51,9 @@ source .venv/bin/activate
 
 ## Quick Start
 
-Generate default datasets (10,000 incidents + hourly phone counts) as CSV files in `output/`:
+Generate the default dataset (10,000 incident rows) as a CSV file in `output/`.
+Pass `--dataset all` to also generate hourly phone counts, or `--dataset phone`
+for phone metrics only:
 
 ```bash
 uv run synth911gen3 generate
@@ -231,6 +233,8 @@ phone_metrics:
   non_emergency_answer_time_mu: 1.80
   non_emergency_answer_time_sigma: 0.80
   answer_time_thresholds: [10, 15, 20, 40]
+  answer_time_load_sensitivity: 0.25
+  answer_time_mu_noise_sd: 0.05
 EOF
 
 uv run synth911gen3 generate \
@@ -547,7 +551,7 @@ uv run synth911gen3 generate [OPTIONS]
 | `--rows` | `-r` | `10000` | Number of incident rows to generate (minimum: 1) |
 | `--area` | `-a` | `"Kansas City, MO"` | Area query for OpenStreetMap address lookup |
 | `--format` | `-f` | `csv` | Output format: `csv`, `parquet`, `json`, `yaml`, `pandas`, `polars`, `geojson`, `shapefile`, `postgresql`, `sqlserver`, `mariadb`, `duckdb`, `sqlite` |
-| `--dataset` | `-d` | `all` | Dataset to generate: `incidents`, `phone`, `all` |
+| `--dataset` | `-d` | `incidents` | Dataset to generate: `incidents`, `phone`, `all` |
 | `--id-format` | | `integer` | id_number style: `integer` or `guid` |
 | `--output-dir` | `-o` | `output` | Directory for exported files |
 | `--output-stem` | `-s` | `synthetic_911` | Filename prefix for exported files |
@@ -573,7 +577,7 @@ uv run synth911gen3 generate [OPTIONS]
 | `--db-schema` | | *(none)* | Database schema (ignored for SQLite) |
 | `--db-batch-size` | | `10000` | Rows per database insert batch |
 | `--db-if-exists` | | `append` | Table-exists behavior: `append`, `replace`, or `fail` |
-| `--no-db-create-indexes` | | *(create them)* | Skip creating indexes on key columns |
+| `--no-db-indexes` | | *(create them)* | Skip creating indexes on key columns |
 | `--schema` | | *(off)* | Print the generated schema (columns + types) for the selected datasets; no data is generated and no addresses are fetched |
 | `--dry-run` | | *(off)* | Print the schema plus a few sample rows; no files are written and no addresses are fetched |
 
@@ -714,7 +718,7 @@ curl "http://localhost:8000/schema?rows=1000&dataset=incidents&area_query=Seattl
 
 Query parameters:
 - `rows` (int, default 100): Number of rows for schema probe
-- `dataset` (str, default "all"): incidents, phone, or all
+- `dataset` (str, default "incidents"): incidents, phone, or all
 - `output_format` (str, default "pandas"): Output format for probe
 - `area_query` (str, default "Kansas City, MO"): Area for addresses
 - `seed` (int, default 911): Random seed
@@ -813,7 +817,7 @@ docker run --rm   -v synth911gen3-cache:/home/synth911/.cache/synth911gen3   -v 
 | `rows` | int | 10000 | Number of CAD incidents to generate |
 | `area_query` | str | "Kansas City, MO" | OpenStreetMap Nominatim query for address geocoding |
 | `output_format` | enum | CSV | Export format (see [Output Formats](#output-formats)) |
-| `dataset` | enum | ALL | Which dataset(s) to generate |
+| `dataset` | enum | INCIDENTS | Which dataset(s) to generate |
 | `id_format` | enum | INTEGER | Incident id_number style: `integer` or `guid` |
 | `output_dir` | Path | "output" | Output directory path |
 | `output_stem` | str | "synthetic_911" | Base filename for exports |
@@ -1242,7 +1246,7 @@ Database exports require connection parameters. These can be provided via CLI fl
 | `db_schema` | --db-schema | Database schema (ignored for SQLite) | No |
 | `db_batch_size` | --db-batch-size | Rows per batch insert | No (default: 10000) |
 | `db_if_exists` | --db-if-exists | `append`, `replace`, `fail` | No (default: `append`) |
-| `db_create_indexes` | --no-db-create-indexes | Skip creating indexes on key columns | No (default: create them) |
+| `db_create_indexes` | --no-db-indexes | Skip creating indexes on key columns | No (default: create them) |
 
 #### Usage Examples
 
@@ -1287,7 +1291,7 @@ sqlite3 output/kc_cad.sqlite3 "SELECT agency, priority, COUNT(*) FROM incidents 
 
 **Skip index creation for faster bulk loads (all dialects):**
 ```bash
-uv run synth911gen3 generate --format sqlite --rows 100000 --no-db-create-indexes
+uv run synth911gen3 generate --format sqlite --rows 100000 --no-db-indexes
 ```
 
 **MariaDB with custom schema and replace mode:**
@@ -1501,7 +1505,7 @@ uv run synth911gen3 generate --dataset incidents
 # Only hourly phone metrics
 uv run synth911gen3 generate --dataset phone
 
-# Both (default)
+# Both incidents and hourly phone metrics
 uv run synth911gen3 generate --dataset all
 ```
 

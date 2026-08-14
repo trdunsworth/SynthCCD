@@ -234,7 +234,7 @@ def test_cli_help_lists_db_flags() -> None:
         "--db-schema",
         "--db-batch-size",
         "--db-if-exists",
-        "--no-db-create-indexes",
+        "--no-db-indexes",
     ):
         assert flag in output, f"expected {flag} in generate --help"
 
@@ -261,7 +261,7 @@ def test_cli_db_flags_map_to_request(tmp_path: Path) -> None:
             "50",
             "--db-if-exists",
             "replace",
-            "--no-db-create-indexes",
+            "--no-db-indexes",
         ],
     )
     assert result.exit_code == 0

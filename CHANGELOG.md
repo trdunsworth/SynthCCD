@@ -48,13 +48,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - TUI Parameters tab now auto-scrolls to keep the focused field in view while tabbing (the form
   previously filled its scroll container, suppressing scroll overflow entirely)
+- Phone metrics answer-time percentages now vary hour-to-hour. Two new optional
+  `phone_metrics` keys control this: `answer_time_load_sensitivity` (0.25) shifts the
+  lognormal μ with hourly load (busy hours answer slower), and `answer_time_mu_noise_sd`
+  (0.05) adds per-hour random noise on the log scale, so the percentages are no longer
+  identical every hour.
+- The default dataset is now `incidents` only (CLI `--dataset`, TUI select, Python API,
+  and the serve `/schema` endpoint all default to `incidents`). Select `--dataset phone`
+  or `--dataset all` for phone metrics or both; selecting `incidents` or `phone` already
+  generated only that dataset.
 - OSM address lookups now surface the underlying network/TLS cause instead of generic "unable to
   reach" messages; certificate failures include a hint pointing at `SYNTH911_SYSTEM_TRUST=1`.
   Connectivity failures raise the new `AddressConnectionError` (subclass of `AddressLookupError`),
   and Overpass network errors no longer slip through the street-name fallback uncaught
 - Personnel names now follow the OSM region's country (falling back to the request `--country`, then `US`) instead of a fixed `en_US` Faker locale
 - `IncidentGenerator` no longer takes a `faker_locale` constructor argument
-- Database exports are now configurable from the CLI: new `--db-dialect`, `--db-host`, `--db-port`, `--db-name`, `--db-user`, `--db-password`, `--db-table-incidents`, `--db-table-phone`, `--db-schema`, `--db-batch-size`, `--db-if-exists`, and `--no-db-create-indexes` flags (index creation is disabled with `--no-db-create-indexes`; previously only reachable via params files or the Python API)
+- Database exports are now configurable from the CLI: new `--db-dialect`, `--db-host`, `--db-port`, `--db-name`, `--db-user`, `--db-password`, `--db-table-incidents`, `--db-table-phone`, `--db-schema`, `--db-batch-size`, `--db-if-exists`, and `--no-db-indexes` flags (index creation is disabled with `--no-db-indexes`; previously only reachable via params files or the Python API)
 
 ### Deprecated
 - N/A

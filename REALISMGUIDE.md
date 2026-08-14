@@ -152,6 +152,8 @@ phone_metrics:
   non_emergency_answer_time_mu: 1.70
   non_emergency_answer_time_sigma: 0.80
   answer_time_thresholds: [10, 15, 20, 40]
+  answer_time_load_sensitivity: 0.25
+  answer_time_mu_noise_sd: 0.05
 
 # Diurnal call volume pattern (24 values for hours 0-23, will be normalized)
 hourly_weights:
@@ -506,12 +508,18 @@ binomial on the received counts:
 | `non_emergency_answer_time_mu` | 1.70 | Lognormal μ for non-emergency answer time (seconds) |
 | `non_emergency_answer_time_sigma` | 0.80 | Lognormal σ for non-emergency answer time |
 | `answer_time_thresholds` | [10, 15, 20, 40] | Seconds thresholds for % answered columns |
+| `answer_time_load_sensitivity` | 0.25 | How strongly the answer-time lognormal μ shifts with hourly load (busy hours answer slower) |
+| `answer_time_mu_noise_sd` | 0.05 | Std-dev of per-hour random noise applied to lognormal μ, so answer-time percentages vary hour-to-hour |
 
 ### Answer Time Percentages
 
 For each hour the generator computes the cumulative probability of a call being
-answered within the configured thresholds using the lognormal CDF. Defaults
-produce approximately these answer rates:
+answered within the configured thresholds using the lognormal CDF. The lognormal
+`mu` is first adjusted by the hour's load (`busy_factor`) via
+`answer_time_load_sensitivity`, then given per-hour random noise scaled by
+`answer_time_mu_noise_sd`. The noise keeps percentages from being identical
+every hour while the load term keeps busy hours slower. Defaults produce
+approximately these answer rates:
 
 | Threshold | Default 9-1-1 % | Default Non-Emergency % |
 |-----------|-----------------|-------------------------|

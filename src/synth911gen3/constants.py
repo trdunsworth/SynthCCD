@@ -264,6 +264,8 @@ PHONE_METRICS: dict[str, float | list[float]] = {
     "non_emergency_answer_time_mu": 1.70,
     "non_emergency_answer_time_sigma": 0.80,
     "answer_time_thresholds": [10.0, 15.0, 20.0, 40.0],
+    "answer_time_load_sensitivity": 0.25,
+    "answer_time_mu_noise_sd": 0.05,
 }
 
 TIME_PROFILES = {

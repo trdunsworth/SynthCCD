@@ -31,7 +31,8 @@ Activate the virtual environment in PowerShell:
 
 ## Run the generator
 
-Generate the default datasets into `output\`:
+Generate the default dataset (10,000 incidents) into `output\`. Add `--dataset all`
+to also produce hourly phone counts, or `--dataset phone` for phone metrics only:
 
 ```powershell
 uv run synth911gen3 generate

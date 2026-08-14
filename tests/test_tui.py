@@ -47,7 +47,7 @@ def test_tui_composes_all_parameters() -> None:
             assert app.query_one("#rows", Input).value == "10000"
             assert app.query_one("#area", Input).value == "Kansas City, MO"
             assert app.query_one("#format", Select).value == "csv"
-            assert app.query_one("#dataset", Select).value == "all"
+            assert app.query_one("#dataset", Select).value == "incidents"
             assert app.query_one("#id_format", Select).value == "integer"
             assert app.query_one("#seed", Input).value == "911"
             assert app.query_one("#calltaker_pool_size", Input).value == "12"
@@ -64,7 +64,7 @@ def test_tui_build_request_defaults() -> None:
             assert request.rows == 10_000
             assert request.area_query == "Kansas City, MO"
             assert request.output_format is OutputFormat.CSV
-            assert request.dataset is DatasetKind.ALL
+            assert request.dataset is DatasetKind.INCIDENTS
             assert request.id_format is IdFormat.INTEGER
             assert request.seed == 911
             assert request.start_date is None

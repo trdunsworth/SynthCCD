@@ -116,6 +116,8 @@ class PhoneMetrics(BaseModel):
     non_emergency_answer_time_mu: float
     non_emergency_answer_time_sigma: float = Field(gt=0)
     answer_time_thresholds: list[float] = Field(min_length=1)
+    answer_time_load_sensitivity: float = Field(default=0.25, ge=0)
+    answer_time_mu_noise_sd: float = Field(default=0.05, ge=0)
     lines: dict[str, LineMetrics] = Field(default_factory=dict)
 
 
@@ -219,7 +221,7 @@ class GenerationRequest(BaseModel):
         default=DEFAULT_AREA_QUERY, min_length=1, description="OpenStreetMap area query"
     )
     output_format: OutputFormat = Field(default=OutputFormat.CSV, description="Output format")
-    dataset: DatasetKind = Field(default=DatasetKind.ALL, description="Dataset to generate")
+    dataset: DatasetKind = Field(default=DatasetKind.INCIDENTS, description="Dataset to generate")
     id_format: IdFormat = Field(default=IdFormat.INTEGER, description="ID format")
     output_dir: Path = Field(default=Path(DEFAULT_OUTPUT_DIR), description="Output directory")
     output_stem: str = Field(

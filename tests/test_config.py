@@ -18,7 +18,7 @@ def test_generation_request_defaults() -> None:
     assert request.rows == 10_000
     assert request.area_query == "Kansas City, MO"
     assert request.output_format is OutputFormat.CSV
-    assert request.dataset is DatasetKind.ALL
+    assert request.dataset is DatasetKind.INCIDENTS
     assert request.id_format is IdFormat.INTEGER
     assert request.output_stem == "synthetic_911"
     assert request.max_memory_bytes is None
