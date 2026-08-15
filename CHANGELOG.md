@@ -10,12 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Architecture decision records: `docs/adr/` now documents the significant design
+  decisions (vectorized generation, dual pydantic/dataclass config models, OSM address
+  sourcing, chunked export, YAML realism config, lognormal time profiles, reproducibility
+  manifest, shift-rotation model, internationalization, pluggable exports) with an index
+  and a template for future records.
 - Regression signature suite: `synth911gen3.regression` computes statistical signatures
   of generated data (fractions, timing means, diurnal shape, phone-metrics rates) and
   `tests/test_regression.py` compares fresh generation against the committed baseline
   (`tests/regression_baseline.json`) to detect realism drift across versions.
   `scripts/update_regression_baseline.py` refreshes the baseline after intentional
   realism changes.
+
 - Initial project structure and synthetic 911 CAD/phone data generator
 - Core incident generation with vectorized numpy pipeline (million-row scale)
 - Realistic address generation via OpenStreetMap/Overpass (overpy)

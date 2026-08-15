@@ -396,7 +396,15 @@ recommendation docs in `docs/`, and direct code review.
 
 ### Documentation
 - [ ] **P2 — Video tutorials.** Short screen-capture demos for tutorials.
-- [ ] **P2 — Architecture decision records (ADRs).** Document key design decisions (vectorization approach, pydantic vs dataclass, etc.).
+- [x] **P2 — Architecture decision records (ADRs).** Document key design decisions (vectorization approach, pydantic vs dataclass, etc.).
+  Added `docs/adr/` with a format/index README plus ten records: `0001` vectorized
+  numpy pipeline, `0002` dual config models (pydantic at the edges, slotted dataclasses
+  at runtime), `0003` OSM address provider with Parquet cache, `0004` memory-bounded
+  chunked export, `0005` YAML realism config with weight tables, `0006` lognormal
+  per-agency/per-priority time profiles, `0007` seeded reproducibility + manifest +
+  Parquet metadata + regression baseline, `0008` crew-rotation shift model, `0009`
+  internationalization (emergency-number registry, name locales), `0010` pluggable
+  export layer with database targets.
 - [x] **P2 — Contribution guide.** Added `CONTRIBUTING.md` covering development setup, TLS-proxy notes, code style (ruff/ty), testing and coverage gates, documentation maintenance, commit discipline, the PR process, and the permissions summary.
 
 ---

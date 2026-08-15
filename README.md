@@ -67,3 +67,11 @@ uv run scripts/audit_deps.py   # dependency security audit (pip-audit)
 
 On networks behind a TLS-inspecting proxy, prefix the audit with
 `$env:SYNTH911_SYSTEM_TRUST = "1"` so it verifies against the OS trust store.
+
+## Documentation
+
+- `USERSGUIDE.md` — quick start, CLI reference, params files, output formats, schema, examples, Python API
+- `REALISMGUIDE.md` — realism YAML configuration reference, validation rules, and default distributions
+- `docs/adr/` — architecture decision records explaining the significant design decisions
+- `CHANGELOG.md` — release history
+
