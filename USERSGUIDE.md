@@ -1715,6 +1715,21 @@ result = app.generate(request)
 incidents_df = result.incidents  # pd.DataFrame
 ```
 
+### Regression Signatures
+
+For a statistical fingerprint of generated data (fractions, timing means,
+diurnal shape, phone-metrics rates), see `synth911gen3.regression`. It powers
+the realism-regression test suite; see REALISMGUIDE for the baseline workflow.
+
+```python
+from synth911gen3.regression import build_signature, compare, load_baseline
+from pathlib import Path
+
+current, phone = build_signature()  # deterministic reference generation
+baseline = load_baseline(Path("tests/regression_baseline.json"))
+issues = compare(current, baseline["incidents"])  # [] = within tolerance
+```
+
 ---
 
 ## Troubleshooting

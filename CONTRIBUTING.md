@@ -94,6 +94,19 @@ uv run pytest tests/test_your_module.py
   `tests/test_properties.py` (distribution shapes, weight sums, temporal
   patterns). The `.hypothesis/` cache directory is gitignored; pass
   `--hypothesis-seed=<n>` to explore fresh examples deterministically.
+- Realism drift across versions is covered by the regression suite
+  (`tests/test_regression.py`), which compares freshly generated signatures
+  against the committed baseline `tests/regression_baseline.json`. If you
+  *intentionally* change realism defaults (weights, time profiles, phone
+  metrics), refresh the baseline and review the value diff before committing:
+
+  ```bash
+  uv run python scripts/update_regression_baseline.py
+  ```
+
+  Commit the refreshed baseline together with the realism change. If the
+  regression suite fails and you did not intend to change realism, treat it as
+  a regression.
 
 ## Documentation maintenance
 

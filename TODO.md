@@ -381,7 +381,17 @@ recommendation docs in `docs/`, and direct code review.
   abandonment ≤ received, monotone answer-time curves, and volume/abandonment rates tracking
   their configured targets. `hypothesis` added to the dev dependency group; `.hypothesis/`
   cache directory gitignored.
-- [ ] **P2 — Regression test suite.** Automated comparison of key statistics across versions to detect realism regressions.
+- [x] **P2 — Regression test suite.** Automated comparison of key statistics across versions
+  to detect realism regressions. New `synth911gen3.regression` module computes a compact
+  statistical *signature* of generated data (agency/priority/reception/disposition fractions,
+  per-cell timing means, hourly call-shape, phone-metrics rates) and compares it against a
+  committed baseline (`tests/regression_baseline.json`) with configurable tolerances
+  (`RegressionTolerances`). `tests/test_regression.py` (20 tests) regenerates the reference
+  datasets from a fixed seed and fails when the realism defaults drift; the gate also
+  validates baseline schema/hash metadata and comparator behavior (fraction/mean/rate drift,
+  missing keys, custom tolerances, JSON round-trips). `scripts/update_regression_baseline.py`
+  refreshes the baseline after intentional realism changes and prints a value diff for
+  review.
 - [ ] **P2 — Load testing benchmarks.** CI benchmarks for generation throughput at various scales (10K, 100K, 1M, 10M rows).
 
 ### Documentation

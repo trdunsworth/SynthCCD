@@ -437,6 +437,49 @@ app = Synth911Application(address_provider=OpenStreetMapAddressProvider())
 result = app.generate(request)
 ```
 
+### Regression Signature (Realism Baseline)
+
+The generators are deterministic for a given seed, which makes the realism
+knobs testable as a frozen *signature*. `synth911gen3.regression` computes a
+compact statistical summary of generated data and compares it against the
+committed baseline at `tests/regression_baseline.json`:
+
+- `incident_signature(frame)` — agency, priority, reception, and
+  disposition fractions; per-agency/per-priority timing means; per-agency
+  problem fractions; the 24-hour call-shape; total elapsed mean/median.
+- `phone_signature(frame)` — received/outbound volumes per hour,
+  abandonment rates, and answer-time percentage means.
+- `compare(current, baseline, tolerances)` — returns a list of human-readable
+  mismatches (empty means the signature is within tolerance).
+- `RegressionTolerances` — absolute bounds for fractions/rates/percentages and
+  a relative bound (with absolute floor) for timing means. Defaults sit at
+  roughly 4–6 sampling standard errors for the default baseline sizes.
+
+The regression suite (`tests/test_regression.py`) regenerates the reference
+datasets from a fixed seed (`4242`) and fails when the output drifts from the
+baseline. Tune the realism defaults and the suite will tell you what moved:
+
+```bash
+# After an *intentional* realism change, refresh the baseline:
+uv run python scripts/update_regression_baseline.py
+# Review the printed value diff, then commit baseline + code together.
+```
+
+Run the update script only when the drift is deliberate. If the suite fails
+and you did not intend to change realism, the drift is a regression — fix it.
+
+```python
+from synth911gen3.regression import build_signature, compare, load_baseline
+
+current, phone = build_signature()
+baseline = load_baseline(Path("tests/regression_baseline.json"))
+issues = compare(current, baseline["incidents"])
+```
+
+Baseline metadata records the seed, row counts, date window, package version,
+schema version, and the realism-config hash, so a stale baseline (e.g. after a
+schema bump) is detected by the suite rather than silently compared.
+
 ---
 
 ## Realism Features (Default Distributions)
