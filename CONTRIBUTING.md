@@ -90,6 +90,11 @@ uv run scripts/audit_deps.py
 uv run pytest tests/test_your_module.py
 ```
 
+- Statistical invariants are covered with `hypothesis` in
+  `tests/test_properties.py` (distribution shapes, weight sums, temporal
+  patterns). The `.hypothesis/` cache directory is gitignored; pass
+  `--hypothesis-seed=<n>` to explore fresh examples deterministically.
+
 ## Documentation maintenance
 
 Every change that affects user-facing behavior must keep the guides in sync.

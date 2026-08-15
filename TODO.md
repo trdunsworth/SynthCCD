@@ -371,7 +371,16 @@ recommendation docs in `docs/`, and direct code review.
 - [ ] **P2 — Prometheus metrics endpoint.** Expose generation metrics (rows/sec, memory usage, queue depths) for monitoring.
 
 ### Testing / Quality
-- [ ] **P2 — Property-based testing.** Add hypothesis-based tests for statistical properties (distribution shapes, weight sums, temporal patterns).
+- [x] **P2 — Property-based testing.** Added hypothesis-based tests for statistical properties
+  (distribution shapes, weight sums, temporal patterns). `tests/test_properties.py` (14 tests):
+  lognormal timing draws respect clip bounds and track configured per-agency/per-priority
+  means, every weight table normalizes to 1.0 (including full YAML round trips with randomized
+  weights), generated category fractions converge to config weights (chi-square goodness of
+  fit), call-lifecycle timestamps stay strictly ordered inside the requested window with exact
+  derived-column deltas, call hours track arbitrary diurnal weights, and phone metrics keep
+  abandonment ≤ received, monotone answer-time curves, and volume/abandonment rates tracking
+  their configured targets. `hypothesis` added to the dev dependency group; `.hypothesis/`
+  cache directory gitignored.
 - [ ] **P2 — Regression test suite.** Automated comparison of key statistics across versions to detect realism regressions.
 - [ ] **P2 — Load testing benchmarks.** CI benchmarks for generation throughput at various scales (10K, 100K, 1M, 10M rows).
 

@@ -13,6 +13,7 @@ dist/
 .ruff_cache/
 .mypy_cache/
 .ty_cache/
+.hypothesis/
 .coverage
 htmlcov/
 

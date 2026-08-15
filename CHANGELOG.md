@@ -57,6 +57,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deterministic `schema_hash` matching the manifest/Parquet metadata hash, and
   package/environment provenance) without generating data or fetching addresses — respects
   `--config`, `--id-format`, and `--output`
+- **Property-based testing**: hypothesis-based tests (`tests/test_properties.py`) assert
+  statistical invariants across arbitrary seeds/parameters — lognormal timing draws respect
+  clip bounds and track configured per-agency/per-priority means, every weight table
+  normalizes to 1.0 (including YAML round trips), generated category fractions converge to
+  the configured weights (chi-square), call-lifecycle timestamps stay strictly ordered with
+  exact derived-column deltas, call hours track the diurnal weights, and phone metrics keep
+  abandonment ≤ received, monotone answer-time curves, and volume/abandonment rates tracking
+  their configured targets. `hypothesis` added to the dev dependency group.
 
 ### Changed
 - TUI Parameters tab now auto-scrolls to keep the focused field in view while tabbing (the form
