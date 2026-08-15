@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `scripts/update_regression_baseline.py` refreshes the baseline after intentional
   realism changes.
 
+### Changed
+- TLS proxy workaround: `UV_NATIVE_TLS=true` (deprecated by uv) replaced with
+  `UV_SYSTEM_CERTS=true` in AGENTS.md, CONTRIBUTING.md, and USERSGUIDE.md. Behavior
+  is unchanged — uv still verifies against the OS trust store.
 - Initial project structure and synthetic 911 CAD/phone data generator
 - Core incident generation with vectorized numpy pipeline (million-row scale)
 - Realistic address generation via OpenStreetMap/Overpass (overpy)

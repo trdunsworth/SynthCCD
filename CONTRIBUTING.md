@@ -37,7 +37,7 @@ uv's default rustls roots do not trust the proxy's issuer, so TLS fails with
 `invalid peer certificate: UnknownIssuer`. Safe workaround (verification stays
 on):
 
-- `uv sync` / `uv add`: prefix with `UV_NATIVE_TLS=true`
+- `uv sync` / `uv add`: prefix with `UV_SYSTEM_CERTS=true`
 - Runtime OSM lookups: set `SYNTH911_SYSTEM_TRUST=1` (uses the dev-only
   `truststore` package via `synth911gen3.tls.maybe_inject_system_trust()`)
 

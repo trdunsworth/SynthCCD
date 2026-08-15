@@ -1750,8 +1750,8 @@ against the **operating system trust store** instead of bundled CA lists (verifi
 
 ```bash
 # 1. Let uv use the OS trust store for package downloads
-$env:UV_NATIVE_TLS = "true"        # PowerShell
-# export UV_NATIVE_TLS=true         # Linux/macOS
+$env:UV_SYSTEM_CERTS = "true"      # PowerShell
+# export UV_SYSTEM_CERTS=true       # Linux/macOS
 uv sync
 
 # 2. Let the generator use the OS trust store for OSM lookups (dev dependency: truststore)
@@ -1905,7 +1905,7 @@ A: Yes. Use `--format postgresql` (or `sqlserver`, `mariadb`, `duckdb`, `sqlite`
 A: Check internet connectivity. Try simpler area query. Addresses cached after first fetch.
 
 **Q: TLS errors behind corporate proxy**
-A: Set `UV_NATIVE_TLS=true` for `uv sync`, and `SYNTH911_SYSTEM_TRUST=1` for OSM lookups. Uses OS trust store.
+A: Set `UV_SYSTEM_CERTS=true` for `uv sync`, and `SYNTH911_SYSTEM_TRUST=1` for OSM lookups. Uses OS trust store.
 
 **Q: Generation is slow**
 A: Use Parquet format. First run fetches OSM addresses (cached). For large runs, lower `--max-memory-bytes` to stream chunks.
