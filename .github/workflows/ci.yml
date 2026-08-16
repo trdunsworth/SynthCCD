@@ -41,3 +41,72 @@ jobs:
 
       - name: Run dependency audit
         run: uv run scripts/audit_deps.py
+
+  params-regression:
+    name: params regression (JSON/YAML/TOML)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Test JSON params file
+        run: |
+          uv run synth911gen3 generate \
+            --params config/example_params.json \
+            --rows 100 \
+            --output-dir output \
+            --output-stem ci_test_json \
+            --dataset incidents \
+            --format csv \
+            --no-db-indexes
+
+      - name: Test YAML params file
+        run: |
+          uv run synth911gen3 generate \
+            --params config/example_params.yaml \
+            --rows 100 \
+            --output-dir output \
+            --output-stem ci_test_yaml \
+            --dataset incidents \
+            --format csv \
+            --no-db-indexes
+
+      - name: Test TOML params file
+        run: |
+          uv run synth911gen3 generate \
+            --params config/example_params.toml \
+            --rows 100 \
+            --output-dir output \
+            --output-stem ci_test_toml \
+            --dataset incidents \
+            --format csv \
+            --no-db-indexes
+
+      - name: Verify params file round-trip (save + load)
+        run: |
+          uv run synth911gen3 generate \
+            --params config/example_params.json \
+            --save-params /tmp/roundtrip.toml \
+            --rows 10 \
+            --output-dir output
+          uv run synth911gen3 generate \
+            --params /tmp/roundtrip.toml \
+            --rows 10 \
+            --output-dir output \
+            --output-stem roundtrip_test \
+            --format csv \
+            --no-db-indexes

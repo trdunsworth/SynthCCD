@@ -351,6 +351,42 @@ time_profiles:
       closeout_mean: 360
       phone_mean: 330
 
+# Problem-type phone duration multipliers (applied to phone_mean per incident)
+# Values > 1.0 increase call duration; < 1.0 decrease call duration.
+# Unlisted problem types default to 1.0.
+problem_phone_multipliers:
+  "Active Shooter": 2.5
+  "Cardiac Arrest": 1.6
+  "Structure Fire": 1.5
+  "Barricaded Subject": 2.0
+  "Hostage Situation": 2.5
+  "Homicide": 1.8
+  "Shots Fired": 1.6
+  "Burglary In Progress": 1.5
+  "Domestic Disturbance": 1.4
+  "Missing Person": 1.4
+  "Vehicle Collision w/ Injury": 1.3
+  "Assault": 1.3
+  "Weapons Violation": 1.3
+  "DUI / Impaired Driver": 1.3
+  "Gas Leak": 1.4
+  "Hazardous Condition": 1.3
+  "Vehicle Extrication": 1.5
+  "Water Rescue": 1.6
+  "Stroke": 1.5
+  "Hemorrhage / Bleeding": 1.4
+  "Choking": 1.5
+  "Unconscious Person": 1.4
+  "Difficulty Breathing": 1.3
+  "Seizure": 1.3
+  "Chest Pain": 1.3
+  "Overdose": 1.4
+  "Head Injury": 1.4
+  "Allergic Reaction": 1.3
+  "Traumatic Injury": 1.3
+  "Pregnancy / Childbirth": 1.4
+  "Psychiatric Emergency": 1.3
+
 # Fraction of the phone window that must elapse before dispatch can begin,
 # per priority (lo, hi). Fractions < 1.0 dispatch while the caller is still on
 # the phone (parallel dispatch); >= 1.0 defer dispatch until after the call ends.

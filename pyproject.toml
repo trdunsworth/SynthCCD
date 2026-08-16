@@ -1,6 +1,6 @@
 [project]
 name = "synth911gen3"
-version = "0.9.0"
+version = "0.9.5"
 description = "Synthetic 911 CAD and phone data generator"
 readme = "README.md"
 authors = [

@@ -15,9 +15,11 @@ from .constants import (
     HOURLY_WEIGHTS as DEFAULT_HOURLY_WEIGHTS,
     PHONE_METRICS as DEFAULT_PHONE_METRICS,
     PRIORITY_WEIGHTS as DEFAULT_PRIORITY_WEIGHTS,
+    PROBLEM_PHONE_MULTIPLIERS as DEFAULT_PROBLEM_PHONE_MULTIPLIERS,
     PROBLEM_PROFILES as DEFAULT_PROBLEM_PROFILES,
     SEASONAL_MULTIPLIERS as DEFAULT_SEASONAL_MULTIPLIERS,
     TIME_PROFILES as DEFAULT_TIME_PROFILES,
+    ZONE_TRAVEL_MULTIPLIERS as DEFAULT_ZONE_TRAVEL_MULTIPLIERS,
 )
 from .exceptions import ValidationError
 from .names import normalize_name_locales, validate_name_locales
@@ -40,6 +42,8 @@ class RealismConfig:
     shift_config: ShiftConfig = field(default_factory=ShiftConfig)
     seasonal_multipliers: dict[str, list[float]] = field(default_factory=dict)
     name_locales: dict[str, list[tuple[str, float]]] = field(default_factory=dict)
+    zone_travel_multipliers: dict[str, float] = field(default_factory=dict)
+    problem_phone_multipliers: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.agency_weights:
@@ -71,6 +75,10 @@ class RealismConfig:
             self.agency_names = {"LAW": "LAW", "FIRE": "FIRE", "EMS": "EMS"}
         if not self.seasonal_multipliers:
             self.seasonal_multipliers = DEFAULT_SEASONAL_MULTIPLIERS.copy()
+        if not self.zone_travel_multipliers:
+            self.zone_travel_multipliers = DEFAULT_ZONE_TRAVEL_MULTIPLIERS.copy()
+        if not self.problem_phone_multipliers:
+            self.problem_phone_multipliers = DEFAULT_PROBLEM_PHONE_MULTIPLIERS.copy()
         if not self.shift_config.shifts and not self.shift_config.rotation:
             self.shift_config = get_default_shift_config()
 
@@ -155,8 +163,18 @@ class RealismConfig:
             for problem, multipliers in data["seasonal_multipliers"].items():
                 config.seasonal_multipliers[problem] = [float(m) for m in multipliers]
 
+        if "zone_travel_multipliers" in data:
+            config.zone_travel_multipliers = {
+                str(k): float(v) for k, v in data["zone_travel_multipliers"].items()
+            }
+
         if "name_locales" in data:
             config.name_locales = normalize_name_locales(data["name_locales"])
+
+        if "problem_phone_multipliers" in data:
+            config.problem_phone_multipliers = {
+                str(k): float(v) for k, v in data["problem_phone_multipliers"].items()
+            }
 
         config._validate()
         return config
@@ -316,6 +334,8 @@ class RealismConfig:
             "agency_names": self.agency_names,
             "shift_config": self.shift_config.to_dict(),
             "seasonal_multipliers": self.seasonal_multipliers,
+            "zone_travel_multipliers": self.zone_travel_multipliers,
+            "problem_phone_multipliers": self.problem_phone_multipliers,
             "name_locales": self._name_locales_for_yaml(),
         }
         with path.open("w", encoding="utf-8") as f:

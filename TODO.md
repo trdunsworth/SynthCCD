@@ -204,7 +204,7 @@ recommendation docs in `docs/`, and direct code review.
       Tokyo or Moscow deployments) and a late-shift dispatch-time penalty (dropped as not
       needed for now).
 - [x] **Diurnal call volume patterns** — done via `hourly_weights`.
-- [ ] **Geographic zone multipliers** (URBAN/SUBURBAN/RURAL) applied to travel time.
+- [x] **Geographic zone multipliers** (URBAN/SUBURBAN/RURAL) applied to travel time. Added `zone` field to `Address` model with OSM-based classification (landuse, place, highway, building tags), `ZONE_TRAVEL_MULTIPLIERS` in constants (URBAN=0.8, SUBURBAN=1.0, RURAL=1.5), configurable via `zone_travel_multipliers` in `RealismConfig`/YAML, applied to `travel_mean` in incident generation.
 - [x] **Parallel dispatch/call-taking timelines** — see Functionality above.
 - [x] **Separate turnout and travel times** — done.
 - [x] **Priority-weighted problem selection** — see Functionality above.
@@ -266,8 +266,11 @@ recommendation docs in `docs/`, and direct code review.
   Written as `{output_stem}_manifest.json` for all file-based formats (CSV, Parquet, JSON,
   YAML). Includes `package_version`, `python_version`, `platform`, and `generated_at` for
   full reproducibility. Documented in `USERSGUIDE.md` with field reference table.
-- **`config/example_params` parity.** Add a TOML example alongside JSON/YAML, and a
-  params-driven CI regression run.
+- [x] **`config/example_params` parity.** Add a TOML example alongside JSON/YAML, and a
+  params-driven CI regression run. Created `config/example_params.toml` with a distinct
+  example configuration; all three formats (JSON/YAML/TOML) load and round-trip via the CLI
+  `--params` and `--save-params` flags. Added a `params-regression` CI job that exercises
+  each example file and verifies TOML round-trip.
 - [x] **Packaging/distribution.** Publish on PyPI and/or containerize; add a `uv.lock`-driven
       Docker build and a `synth911gen3 serve` (FastAPI) entrypoint for a hosted API.
       Created `Dockerfile` (multi-stage build), `docker-compose.yml` (with API server and
@@ -320,7 +323,7 @@ recommendation docs in `docs/`, and direct code review.
   `tests/test_application.py`; documented in `USERSGUIDE.md`.
 
 ### Usability / Developer Experience
-- [ ] **P2 — `config/example_params` parity.** Add TOML example alongside JSON/YAML, and params-driven CI regression run.
+- [x] **P2 — `config/example_params` parity.** Add TOML example alongside JSON/YAML, and params-driven CI regression run. Created `config/example_params.toml` with a distinct example configuration; all three formats (JSON/YAML/TOML) load and round-trip via the CLI `--params` and `--save-params` flags. Added a `params-regression` CI job that exercises each example file and verifies TOML round-trip.
 - [ ] **P2 — PyQt6 GUI.** Requires re-adding `pyqt6` dependency; desktop GUI for non-technical operators. **Deferred** — not being pursued for now.
 - [x] **P2 — Param file generation CLI.** `synth911gen3 generate --save-params my_run.yaml`
       writes the effective parameters (CLI flags merged over any `--params` file) to a JSON/YAML/TOML
@@ -353,9 +356,9 @@ recommendation docs in `docs/`, and direct code review.
 - [ ] **P2 — Columnar statistics pre-computation.** Pre-compute column statistics during generation for faster downstream analytics (min/max/null counts per column).
 
 ### Data Quality / Realism
-- [ ] **P2 — Correlation between fields.** Current model treats fields independently; add correlations (e.g., high priority ↔ shorter interview time, urban zone ↔ shorter travel time).
+- [x] **P2 — Correlation between fields.** Implemented geographic zone (URBAN/SUBURBAN/RURAL) correlation with travel time via OSM-based zone classification and configurable `zone_travel_multipliers` (URBAN=0.8, SUBURBAN=1.0, RURAL=1.5). Priority-weighted time distributions already correlate priority with interview/dispatch/turnout/travel times via `TIME_PROFILES` per agency/priority.
 - [x] **P2 — Person name diversity.** Added `name_locales` realism-config section and `PersonnelNameGenerator`: country-matched Faker-locale blends derived from the geocoded OSM region (with a weighted multi-ethnic US default), per-country overrides, CJK family-name-first ordering, and `resolved_country()` on address providers persisted in the address-cache `.meta.json` sidecar. Replaces the fixed `en_US` roster.
-- [ ] **P2 — Call duration correlation with problem type.** Complex problems (e.g., "Active Shooter") should have longer phone durations on average.
+- [x] **P2 — Call duration correlation with problem type.** Complex problems (e.g., "Active Shooter") have longer phone durations on average. Added `PROBLEM_PHONE_MULTIPLIERS` in `constants.py` with per-problem multipliers (e.g., Active Shooter=2.5, Cardiac Arrest=1.6, Noise Complaint=1.0). Integrated into `RealismConfig` as `problem_phone_multipliers` with YAML serialization. Incident generator applies multipliers to `phone_mean` per-incident based on selected `problem_nature`, creating realistic correlation where high-acuity problems yield longer call durations within each priority level.
 - [ ] **P2 — Shift handoff effects.** Model increased response times during shift change periods.
 
 ### Integration / Ecosystem

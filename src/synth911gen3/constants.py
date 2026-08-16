@@ -483,3 +483,105 @@ SEASONAL_MULTIPLIERS: dict[str, list[float]] = {
 
 # Default multiplier for any problem type not explicitly listed
 DEFAULT_SEASONAL_MULTIPLIER = [1.0, 1.0, 1.0, 1.0]
+
+# Geographic zone travel time multipliers
+# Applied to base travel_mean from TIME_PROFILES based on address zone
+# URBAN: dense city center, shorter travel distances
+# SUBURBAN: residential outskirts, moderate travel distances
+# RURAL: sparse areas, longer travel distances
+ZONE_TRAVEL_MULTIPLIERS = {
+    "URBAN": 0.8,
+    "SUBURBAN": 1.0,
+    "RURAL": 1.5,
+}
+
+# Problem-type phone duration multipliers
+# Applied to base phone_mean from TIME_PROFILES based on problem nature
+# Values > 1.0 increase call duration, < 1.0 decrease call duration
+# Default is 1.0 for any problem type not explicitly listed
+PROBLEM_PHONE_MULTIPLIERS: dict[str, float] = {
+    # LAW - High complexity / long duration
+    "Active Shooter": 2.5,
+    "Barricaded Subject": 2.0,
+    "Hostage Situation": 2.5,
+    "Homicide": 1.8,
+    "Robbery": 1.4,
+    "Shots Fired": 1.6,
+    "Burglary In Progress": 1.5,
+    "Vehicle Collision w/ Injury": 1.3,
+    "Assault": 1.3,
+    "Domestic Disturbance": 1.4,
+    "Missing Person": 1.4,
+    "Weapons Violation": 1.3,
+    "Reckless Driving": 1.2,
+    "DUI / Impaired Driver": 1.3,
+    "Burglary": 1.2,
+    "Drug/Narcotic Violation": 1.2,
+    "Motor Vehicle Theft": 1.1,
+    "Disorderly Conduct": 1.1,
+    "Theft Report": 1.1,
+    "Burglary Alarm": 1.0,
+    "Traffic Crash": 1.2,
+    "Fraud": 1.1,
+    "Harassment": 1.1,
+    "Shoplifting": 1.1,
+    "Vandalism": 1.1,
+    "Trespass": 1.0,
+    "Suspicious Person": 1.1,
+    "Welfare Check": 1.2,
+    "Noise Complaint": 1.0,
+    "Traffic Stop": 1.0,
+    "Found Property": 1.0,
+    "Animal Complaint": 1.0,
+    "Animal Bite": 1.2,
+    "Public Assist": 1.0,
+    "Assist Fire": 1.2,
+    "Assist EMS": 1.2,
+    # FIRE - High complexity / long duration
+    "Structure Fire": 1.5,
+    "Rescue Call": 1.4,
+    "Vehicle Fire": 1.3,
+    "Gas Leak": 1.4,
+    "Hazardous Condition": 1.3,
+    "Vehicle Extrication": 1.5,
+    "Water Rescue": 1.6,
+    "Cooking Fire": 1.1,
+    "Brush/Grass Fire": 1.3,
+    "CO Investigation": 1.1,
+    "Elevator Rescue": 1.2,
+    "Electrical Wiring Problem": 1.1,
+    "Fire Alarm": 1.0,
+    "Smoke Investigation": 1.1,
+    "Overheat Investigation": 1.0,
+    "Odor Investigation": 1.0,
+    "Medical Assist": 1.2,
+    "Mutual Aid": 1.2,
+    "Lockout / Public Service": 1.0,
+    "Assist Police": 1.2,
+    # EMS - High complexity / long duration
+    "Cardiac Arrest": 1.6,
+    "Choking": 1.5,
+    "Unconscious Person": 1.4,
+    "Difficulty Breathing": 1.3,
+    "Stroke": 1.5,
+    "Hemorrhage / Bleeding": 1.4,
+    "Seizure": 1.3,
+    "Chest Pain": 1.3,
+    "Altered Mental Status": 1.3,
+    "Heart Problems": 1.3,
+    "Overdose": 1.4,
+    "Head Injury": 1.4,
+    "Allergic Reaction": 1.3,
+    "Traumatic Injury": 1.3,
+    "Fall Injury": 1.2,
+    "Motor Vehicle Crash": 1.3,
+    "Abdominal Pain": 1.2,
+    "Diabetic Problem": 1.2,
+    "Sick Person": 1.1,
+    "Pregnancy / Childbirth": 1.4,
+    "Psychiatric Emergency": 1.3,
+    "Heat/Cold Exposure": 1.2,
+}
+
+# Default multiplier for any problem type not explicitly listed
+DEFAULT_PROBLEM_PHONE_MULTIPLIER = 1.0

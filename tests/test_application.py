@@ -590,3 +590,63 @@ def test_application_phone_answer_time_percentages_vary_by_hour() -> None:
     pct = frame["nine_one_one_answered_10s_pct"]
     assert pct.nunique() > 5, "answer-time percentages should vary across hours"
     assert pct.max() - pct.min() > 2.0, "answer-time spread should exceed 2 percentage points"
+
+
+def test_application_problem_phone_duration_correlation() -> None:
+    """Test that problem nature correlates with phone duration within each priority."""
+    from synth911gen3.constants import PROBLEM_PHONE_MULTIPLIERS
+
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=10000,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.incidents is not None
+    df = result.incidents
+
+    # Check correlation within each priority level
+    # High-multiplier problems should have longer phone durations than
+    # low-multiplier problems within the same priority
+    for priority in [1, 2, 3, 4, 5]:
+        pri_df = df[df["priority"] == priority]
+        if len(pri_df) < 50:  # Skip if too few samples
+            continue
+
+        # Get problems present in this priority
+        problems_present = pri_df["problem_nature"].unique()
+        if len(problems_present) < 2:
+            continue
+
+        # Classify problems by multiplier
+        high_mult_problems = [
+            p for p in problems_present
+            if PROBLEM_PHONE_MULTIPLIERS.get(p, 1.0) >= 1.3
+        ]
+        low_mult_problems = [
+            p for p in problems_present
+            if PROBLEM_PHONE_MULTIPLIERS.get(p, 1.0) <= 1.1
+        ]
+
+        if not high_mult_problems or not low_mult_problems:
+            continue
+
+        high_avg = pri_df[pri_df["problem_nature"].isin(high_mult_problems)]["phone_duration_seconds"].mean()
+        low_avg = pri_df[pri_df["problem_nature"].isin(low_mult_problems)]["phone_duration_seconds"].mean()
+
+        # High multiplier problems should have longer average phone durations
+        # within the same priority level
+        assert high_avg > low_avg, (
+            f"Priority {priority}: high-multiplier problems (avg {high_avg:.1f}s) "
+            f"should have longer phone durations than low-multiplier problems "
+            f"(avg {low_avg:.1f}s)"
+        )

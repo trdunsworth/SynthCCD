@@ -71,6 +71,10 @@ def _print_samples(name: str, frame: pd.DataFrame, rows: int) -> None:
 
 def _describe(request: GenerationRequest, *, dry_run: bool) -> None:
     from .describe import SAMPLE_ROWS, build_preview_datasets
+    from .logging_conf import configure_logging
+
+    # Suppress logging during preview generation to avoid polluting output
+    configure_logging(quiet=True)
 
     preview = build_preview_datasets(request, schema_only=not dry_run)
     mode = "Dry run" if dry_run else "Schema preview"
@@ -494,6 +498,10 @@ def schema(
     """Export the output schema (columns and types) as JSON or YAML."""
 
     from .describe import build_schema_definition
+    from .logging_conf import configure_logging
+
+    # Suppress logging during schema generation to avoid polluting JSON/YAML output
+    configure_logging(quiet=True)
 
     fmt = format.lower()
     if fmt not in ("json", "yaml"):

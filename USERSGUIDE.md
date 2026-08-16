@@ -1139,10 +1139,11 @@ uv run synth911gen3 generate --params denver.json --rows 1000000 --format parque
 
 # YAML or TOML params files work too
 uv run synth911gen3 generate --params config/example_params.yaml
+uv run synth911gen3 generate --params config/example_params.toml
 uv run synth911gen3 generate --params run.toml
 ```
 
-Two ready-made examples are included in the repo: `config/example_params.json` and `config/example_params.yaml`.
+Three ready-made examples are included in the repo: `config/example_params.json`, `config/example_params.yaml`, and `config/example_params.toml`.
 
 ### Capturing Parameters with `--save-params`
 

@@ -240,6 +240,7 @@ shift_config:
 | `hourly_weights` | 24-hour call volume pattern | 24 values, auto-normalized |
 | `shift_config` | Crew rotation pattern and per-shift hours/rotation/staffing | Unique shift names, every rotation group covers all 24 hours |
 | `name_locales` | Faker locale blend for personnel rosters, per country | Valid Faker locales, positive weights, uppercase ISO country keys |
+| `problem_phone_multipliers` | Per-problem-type phone duration multipliers | Positive floats; unlisted problems default to 1.0 |
 
 > Note: the config key is `problem_profiles` (not `problem_problems`).
 
@@ -262,6 +263,44 @@ how far through the phone window dispatch may begin, per priority: values below 
 mean a unit can be dispatched while the caller is still on the phone (high-priority
 calls), and values of 1.0+ defer dispatch until after the call ends (low-priority
 calls).
+
+### Problem-Type Phone Duration Multipliers
+
+Call duration varies significantly by problem nature. A cardiac arrest or active shooter
+incident typically involves a much longer caller interaction than a noise complaint or
+traffic stop. The `problem_phone_multipliers` section applies a per-problem multiplier
+to the base `phone_mean` (from `time_profiles`) for each incident, creating realistic
+correlation between problem type and call duration.
+
+```yaml
+problem_phone_multipliers:
+  "Active Shooter": 2.5
+  "Cardiac Arrest": 1.6
+  "Structure Fire": 1.5
+  "Noise Complaint": 1.0
+  "Traffic Stop": 1.0
+```
+
+- **Multiplier > 1.0**: Increases the expected phone duration for that problem type
+- **Multiplier < 1.0**: Decreases the expected phone duration
+- **Unlisted problems**: Default to 1.0 (no adjustment)
+
+The multiplier is applied to the agency/priority `phone_mean` at incident generation
+time, after the problem nature is selected. This means high-acuity problems (which
+tend to appear at higher priorities) receive longer call durations on top of their
+priority-based `phone_mean`.
+
+| Problem Type | Default Multiplier | Rationale |
+|--------------|-------------------|-----------|
+| Active Shooter | 2.5 | Extended caller interaction, tactical coordination |
+| Cardiac Arrest | 1.6 | Pre-arrival instructions, prolonged caller engagement |
+| Structure Fire | 1.5 | Multiple caller reports, evolving situation updates |
+| Shots Fired | 1.6 | Caller safety, suspect tracking |
+| Domestic Disturbance | 1.4 | Volatile situation, ongoing risk assessment |
+| Stroke | 1.5 | Time-critical medical instructions |
+| Burglary In Progress | 1.5 | Caller hiding, real-time updates |
+| Noise Complaint | 1.0 | Brief informational call |
+| Traffic Stop | 1.0 | Officer-initiated, minimal caller interaction |
 
 ### Shift Structures
 

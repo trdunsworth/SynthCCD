@@ -10,6 +10,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- None yet.
+
+---
+
+## [0.9.5] - 2026-08-15
+
+### Added
+- **Call duration correlation with problem type**: Added `PROBLEM_PHONE_MULTIPLIERS` in `constants.py` with per-problem multipliers (e.g., Active Shooter=2.5, Cardiac Arrest=1.6, Noise Complaint=1.0). Integrated into `RealismConfig` as `problem_phone_multipliers` with YAML serialization. Incident generator applies multipliers to `phone_mean` per-incident based on selected `problem_nature`, creating realistic correlation where high-acuity problems yield longer call durations within each priority level.
 - Architecture decision records: `docs/adr/` now documents the significant design
   decisions (vectorized generation, dual pydantic/dataclass config models, OSM address
   sourcing, chunked export, YAML realism config, lognormal time profiles, reproducibility

@@ -291,6 +291,7 @@ class OpenStreetMapAddressProvider:
         postal_codes = frame["postal_code"] if "postal_code" in frame.columns else [""] * len(frame)
         latitudes = frame["latitude"] if "latitude" in frame.columns else [0.0] * len(frame)
         longitudes = frame["longitude"] if "longitude" in frame.columns else [0.0] * len(frame)
+        zones = frame["zone"] if "zone" in frame.columns else ["URBAN"] * len(frame)
         return [
             Address(
                 str(street),
@@ -299,14 +300,16 @@ class OpenStreetMapAddressProvider:
                 postal_code=str(postal) if pd.notna(postal) else "",
                 latitude=float(lat) if pd.notna(lat) else 0.0,
                 longitude=float(lon) if pd.notna(lon) else 0.0,
+                zone=str(zone) if pd.notna(zone) else "URBAN",
             )
-            for street, city, state, postal, lat, lon in zip(
+            for street, city, state, postal, lat, lon, zone in zip(
                 frame["street_address"],
                 frame["city"],
                 frame["state"],
                 postal_codes,
                 latitudes,
                 longitudes,
+                zones,
             )
         ]
 
@@ -324,6 +327,7 @@ class OpenStreetMapAddressProvider:
                 "state": [address.state for address in addresses],
                 "latitude": [address.latitude for address in addresses],
                 "longitude": [address.longitude for address in addresses],
+                "zone": [address.zone for address in addresses],
             }
         )
         self._cache_dir.mkdir(parents=True, exist_ok=True)
@@ -462,6 +466,41 @@ class OpenStreetMapAddressProvider:
             return []
         return self._parse_elements(result, area.city, area.state)
 
+    def _classify_zone(self, tags: dict[str, str], lat: float, lon: float) -> str:
+        """Classify address zone as URBAN, SUBURBAN, or RURAL based on OSM tags."""
+        landuse = tags.get("landuse", "").lower()
+        place = tags.get("place", "").lower()
+        highway = tags.get("highway", "").lower()
+        building = tags.get("building", "").lower()
+        residential = tags.get("residential", "").lower()
+
+        if place in ("city", "town"):
+            return "URBAN"
+        if landuse in ("commercial", "industrial", "retail", "residential") and place not in ("village", "hamlet"):
+            return "URBAN"
+        if building in ("apartments", "commercial", "office", "retail", "hotel"):
+            return "URBAN"
+        if highway in ("primary", "secondary", "tertiary", "motorway", "trunk"):
+            return "URBAN"
+
+        if place in ("suburb", "neighbourhood"):
+            return "SUBURBAN"
+        if landuse == "residential" and place in ("village", "hamlet"):
+            return "SUBURBAN"
+        if residential in ("urban", "suburban"):
+            return "SUBURBAN"
+        if building in ("house", "detached", "semi_detached", "terrace"):
+            return "SUBURBAN"
+
+        if place in ("village", "hamlet", "isolated_dwelling", "farm"):
+            return "RURAL"
+        if landuse in ("farmland", "forest", "meadow", "orchard", "vineyard"):
+            return "RURAL"
+        if highway in ("unclassified", "residential", "service", "track", "path"):
+            return "RURAL"
+
+        return "URBAN"
+
     def _query_named_streets(self, area: _GeocodedArea) -> list[Address]:
         query = _build_named_street_query(
             area.south, area.west, area.north, area.east, self._max_addresses
@@ -498,6 +537,9 @@ class OpenStreetMapAddressProvider:
                 if center is not None:
                     lat = getattr(center, "lat", None)  # type: ignore[attr-defined]
                     lon = getattr(center, "lon", None)  # type: ignore[attr-defined]
+            lat_val = float(lat) if lat is not None else 0.0
+            lon_val = float(lon) if lon is not None else 0.0
+            zone = self._classify_zone(tags, lat_val, lon_val)
             addresses.append(
                 Address(
                     f"{housenumber} {street}".strip(),
@@ -505,8 +547,9 @@ class OpenStreetMapAddressProvider:
                     state,
                     street_number=housenumber,
                     postal_code=tags.get("addr:postcode") or "",
-                    latitude=float(lat) if lat is not None else 0.0,
-                    longitude=float(lon) if lon is not None else 0.0,
+                    latitude=lat_val,
+                    longitude=lon_val,
+                    zone=zone,
                 )
             )
         return self._dedupe(addresses)
@@ -540,7 +583,7 @@ class OpenStreetMapAddressProvider:
             number = (
                 100 + (int(hashlib.md5(name.encode("utf-8")).hexdigest(), 16) + offset * 97) % 8_900
             )
-            address = Address(f"{number} {name}", city, state)
+            address = Address(f"{number} {name}", city, state, zone="SUBURBAN")
             key = (address.street_address, city, state)
             if key not in seen:
                 seen.add(key)

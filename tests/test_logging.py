@@ -36,6 +36,9 @@ def _quiet_logger(name: str) -> tuple[logging.Logger, _RecordingHandler]:
 
 @pytest.fixture(autouse=True)
 def _reset_package_logger() -> Iterator[None]:
+    _ROOT_LOGGER.handlers.clear()
+    _ROOT_LOGGER.setLevel(logging.NOTSET)
+    _ROOT_LOGGER.propagate = True
     yield
     _ROOT_LOGGER.handlers.clear()
     _ROOT_LOGGER.setLevel(logging.NOTSET)

@@ -1,4 +1,4 @@
-# synth911gen3
+# SynthCCD
 
 TUI-first scaffold for generating synthetic 9-1-1 CAD incidents and hourly phone-center counts with `uv`.
 
@@ -74,4 +74,3 @@ On networks behind a TLS-inspecting proxy, prefix the audit with
 - `REALISMGUIDE.md` — realism YAML configuration reference, validation rules, and default distributions
 - `docs/adr/` — architecture decision records explaining the significant design decisions
 - `CHANGELOG.md` — release history
-

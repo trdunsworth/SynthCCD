@@ -156,6 +156,7 @@ class Address:
     postal_code: str = ""
     latitude: float = 0.0
     longitude: float = 0.0
+    zone: str = "URBAN"
 
     def __post_init__(self) -> None:
         if not self.street_name:
