@@ -1,3 +1,17 @@
+"""Runtime generation request and output-format configuration.
+
+:class:`GenerationRequest` is the single in-memory description of what a
+generation run should produce — row count, area, format, dataset, date
+range, seed, personnel pools, realism overrides, and database-export
+options. Every entry point (CLI, TUI, params files, REST API) builds one
+of these and hands it to :class:`synth911gen3.app.Synth911Application`.
+
+The enums here are the canonical string values used across the CLI flags,
+params files, and REST payloads; the parallel enums in
+:mod:`synth911gen3.schema` are the pydantic validation layer over the
+same vocabulary.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -30,6 +44,13 @@ _WINDOWS_RESERVED_NAMES = frozenset(
 
 
 class OutputFormat(StrEnum):
+    """Supported export targets for generated datasets.
+
+    File formats (csv, parquet, json, yaml, geojson, shapefile), in-memory
+    formats (pandas, polars), and direct database targets (postgresql,
+    sqlserver, mariadb, duckdb, sqlite).
+    """
+
     CSV = "csv"
     PARQUET = "parquet"
     JSON = "json"
@@ -46,6 +67,8 @@ class OutputFormat(StrEnum):
 
 
 class DatabaseDialect(StrEnum):
+    """SQL dialects supported by the database exporter."""
+
     POSTGRESQL = "postgresql"
     SQLSERVER = "sqlserver"
     MARIADB = "mariadb"
@@ -54,18 +77,31 @@ class DatabaseDialect(StrEnum):
 
 
 class DatasetKind(StrEnum):
+    """Which datasets a run generates: incidents, phone, or both."""
+
     INCIDENTS = "incidents"
     PHONE = "phone"
     ALL = "all"
 
 
 class IdFormat(StrEnum):
+    """How incident ``id_number`` values are produced: sequential ints or UUIDs."""
+
     INTEGER = "integer"
     GUID = "guid"
 
 
 @dataclass(slots=True)
 class GenerationRequest:
+    """Everything needed to run one generation, with defaults.
+
+    Defaults match the CLI defaults: 10,000 rows, Kansas City MO,
+    CSV output, incidents only, integer IDs, seed 911. Optional values
+    (``None``) mean "use the built-in default" and are resolved lazily by
+    the ``resolved_*`` methods, so a request always carries an explicit
+    value once resolved.
+    """
+
     rows: int = DEFAULT_ROWS
     area_query: str = DEFAULT_AREA_QUERY
     output_format: OutputFormat = OutputFormat.CSV
@@ -101,14 +137,17 @@ class GenerationRequest:
     db_create_indexes: bool = True
 
     def resolved_start_date(self) -> date:
+        """Effective start date: the request value, or Jan 1 of this year."""
         today = date.today()
         return self.start_date or date(today.year, 1, 1)
 
     def resolved_end_date(self) -> date:
+        """Effective end date: the request value, or Dec 31 of this year."""
         today = date.today()
         return self.end_date or date(today.year, 12, 31)
 
     def get_realism_config(self) -> RealismConfig:
+        """Resolve the realism config: explicit object, YAML path, or defaults."""
         if self.realism_config is not None:
             return self.realism_config
         if self.realism_config_path is not None:
@@ -116,11 +155,18 @@ class GenerationRequest:
         return RealismConfig()
 
     def resolved_emergency_numbers(self) -> list[EmergencyNumber]:
+        """Resolve the emergency-number registry for the request's country."""
         return resolve_emergency_numbers(
             self.country, self.emergency_numbers, self.include_10_digit_emergency
         )
 
     def validate(self) -> None:
+        """Validate the request, raising :class:`ValidationError` on any problem.
+
+        Checks row counts, output paths, personnel pools, date ordering,
+        shift-preset names, emergency-number overrides, realism config,
+        and database options (for database formats).
+        """
         if self.rows <= 0:
             raise ValidationError("rows must be greater than zero.")
         if not self.area_query.strip():
@@ -157,6 +203,12 @@ class GenerationRequest:
             self._validate_database_options()
 
     def _validate_database_options(self) -> None:
+        """Validate DB options and fill defaults (file names, ports) for the dialect.
+
+        File-based dialects (duckdb, sqlite) only require a file name
+        (resolved against ``output_dir``); server dialects require
+        host/name/user and default their port.
+        """
         # Determine dialect from output_format if not explicitly set
         dialect_map = {
             OutputFormat.POSTGRESQL: DatabaseDialect.POSTGRESQL,
@@ -202,6 +254,7 @@ class GenerationRequest:
             self.db_port = defaults[dialect]
 
     def _validate_output_path(self) -> None:
+        """Reject empty, reserved, or path-traversing output stem/directory values."""
         if not self.output_stem.strip():
             raise ValidationError("output_stem must not be empty.")
         if self.output_stem in (".", ".."):

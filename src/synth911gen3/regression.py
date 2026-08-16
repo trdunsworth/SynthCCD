@@ -177,6 +177,7 @@ def phone_signature(frame: pd.DataFrame) -> dict[str, float]:
 def _tolerance_for(
     key: str, tolerances: RegressionTolerances, baseline_value: float
 ) -> float:
+    """Pick the tolerance band for a statistic key (timing/phone/hour/fraction)."""
     if key.startswith("hour."):
         return tolerances.hour_abs
     if key.startswith("phone."):
@@ -267,6 +268,7 @@ def build_signature(
 
 
 def _package_version() -> str:
+    """Installed package version, or ``0.0.0-dev`` when not installed."""
     try:
         from importlib.metadata import version
 

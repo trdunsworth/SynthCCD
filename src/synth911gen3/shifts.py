@@ -1,3 +1,17 @@
+"""Shift structures for personnel assignment.
+
+Models how a 9-1-1 center staffs its calltakers and dispatchers over
+time: :class:`Shift` is one scheduled work block, :class:`ShiftConfig` is
+a full structure combining a crew rotation pattern with the shifts on the
+clock. The generator uses :meth:`ShiftConfig.active_shift` to decide which
+shift handled each call, which drives the calltaker/dispatcher pools and
+the late-shift dispatch penalty.
+
+Built-in presets cover the common center layouts: 2x12h with a 14-day
+crew rotation (default), 2x12h, 3x8h, and 4x10h. Custom structures can be
+defined through the realism config ``shift_config`` section.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -41,12 +55,15 @@ class Shift:
 
     @property
     def is_overnight(self) -> bool:
+        """True when this shift crosses midnight (end time precedes start)."""
         return self._start_minutes() >= self._end_minutes()
 
     def _start_minutes(self) -> int:
+        """Start time as minutes since midnight."""
         return self.start_hour * 60 + self.start_minute
 
     def _end_minutes(self) -> int:
+        """End time as minutes since midnight (before a midnight wrap)."""
         return self.end_hour * 60 + self.end_minute
 
     def covers(self, moment: datetime) -> bool:
@@ -86,6 +103,13 @@ class ShiftConfig:
     cycle_start_weekday: int = 0
 
     def active_shift(self, moment: datetime) -> Shift:
+        """Return the shift on duty at ``moment`` for the active crew group.
+
+        Picks the group scheduled for that calendar day from the rotation,
+        then the covering shift with the most recent start; falls back to
+        the group's earliest-started shift when no shift window covers the
+        moment (e.g. a gap between shifts).
+        """
         if not self.shifts:
             raise ValidationError("shift_config has no shifts defined.")
         if not self.rotation:
@@ -103,9 +127,11 @@ class ShiftConfig:
         )
 
     def total_calltakers(self) -> int:
+        """Sum of per-shift calltaker staffing (ignores shifts with ``None``)."""
         return sum(shift.calltakers for shift in self.shifts if shift.calltakers is not None)
 
     def total_dispatchers(self) -> int:
+        """Sum of per-shift dispatcher staffing (ignores shifts with ``None``)."""
         return sum(shift.dispatchers for shift in self.shifts if shift.dispatchers is not None)
 
     def rotation_cycle_offset(self) -> int:
@@ -116,6 +142,13 @@ class ShiftConfig:
         return (_anchor(self.cycle_start_weekday) - date(1970, 1, 1)).days
 
     def validate(self) -> None:
+        """Validate the structure: non-empty shifts/rotation, 24h coverage per group.
+
+        Raises:
+            ValidationError: On empty or inconsistent structures, including
+                duplicate shift names, unknown rotation groups, negative
+                staffing, or groups that do not cover all 24 hours.
+        """
         if not self.shifts:
             raise ValidationError("shift_config.shifts must define at least one shift.")
         if not self.rotation:
@@ -147,6 +180,7 @@ class ShiftConfig:
                 )
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize to a plain dict for YAML/JSON round-tripping."""
         shifts = []
         for shift in self.shifts:
             entry: dict[str, Any] = {
@@ -172,6 +206,7 @@ class ShiftConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ShiftConfig:
+        """Build a ShiftConfig from a plain dict (YAML ``shift_config`` section)."""
         shifts = [
             Shift(
                 name=str(item["name"]),
@@ -195,6 +230,7 @@ class ShiftConfig:
 
 
 def _covers_full_day(shifts: list[Shift]) -> bool:
+    """True when the given shifts together cover every minute of the day."""
     covered = [False] * _MINUTES_PER_DAY
     for shift in shifts:
         start = shift._start_minutes()
@@ -211,6 +247,7 @@ def _covers_full_day(shifts: list[Shift]) -> bool:
 
 
 def _shift(name: str, label: str, start: int, end: int, rotation: int) -> Shift:
+    """Build a preset shift with the standard 3-calltaker / 2-dispatcher staffing."""
     return Shift(
         name=name,
         label=label,
@@ -295,10 +332,12 @@ _PRESET_FACTORIES: dict[str, Callable[[], ShiftConfig]] = {
 
 
 def get_default_shift_config() -> ShiftConfig:
+    """Return the default 2x12h-4shift-14day structure (fresh instance each call)."""
     return preset_4shift_14day()
 
 
 def get_preset(name: str) -> ShiftConfig:
+    """Build the named preset; raises for unknown names."""
     factory = _PRESET_FACTORIES.get(name)
     if factory is None:
         available = ", ".join(sorted(_PRESET_FACTORIES))
@@ -307,6 +346,7 @@ def get_preset(name: str) -> ShiftConfig:
 
 
 def apply_shift_preset(shift_config: ShiftConfig, preset_name: str | None) -> ShiftConfig:
+    """Replace ``shift_config`` with the named preset, or return it unchanged."""
     if preset_name is None:
         return shift_config
     return get_preset(preset_name)

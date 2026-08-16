@@ -91,7 +91,7 @@ This generates 1,000 incidents for Seattle, WA in Parquet format. First run will
 **Step 3: Inspect the output**
 ```bash
 ls output/
-# synthetic_911_incidents.parquet  synthetic_911_hourly_call_counts.parquet  synthetic_911_manifest.json
+# synthetic_911_incidents.parquet  synthetic_911_manifest.json
 ```
 
 **Step 4: Load in Python**
@@ -705,7 +705,7 @@ The status panel and help tab explain each field.
 | Rows | Number of incident rows (default: 10000) |
 | Seed | Random seed for reproducible output (default: 911) |
 | Area query | OpenStreetMap query (default: "Kansas City, MO") |
-| Output format | csv, parquet, json, yaml, pandas, polars |
+| Output format | All supported formats: csv, parquet, json, yaml, pandas, polars, geojson, shapefile, postgresql, sqlserver, mariadb, duckdb, sqlite |
 | Dataset | incidents, phone, all |
 | ID format | id_number style: integer or guid |
 | Output directory | Directory for exported files (default: output) |
@@ -840,8 +840,6 @@ docker run --rm   -v synth911gen3-cache:/home/synth911/.cache/synth911gen3   -v 
 |----------|---------|-------------|
 | `SYNTH911_LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 | `SYNTH911_SYSTEM_TRUST` | `0` | Set to `1` to use OS trust store for TLS (corporate proxies) |
-
----
 
 ---
 
@@ -1288,15 +1286,12 @@ uv run synth911gen3 generate --format geojson --rows 10000 --area "Seattle, WA"
 #### Shapefile (ESRI)
 
 - Outputs a traditional **ESRI Shapefile** with `.shp`, `.shx`, `.dbf`, `.prj`, `.cpg` files
-- Requires optional dependencies: `uv add geopandas shapely`
+- Uses `geopandas` and `shapely` (included in the base dependencies)
 - Geometry: Point (WGS84 / EPSG:4326)
 - **Note**: Shapefile format limits field names to 10 characters; long column names are automatically truncated (e.g., `internal_reference_number` → `internal_r`). For full fidelity, prefer GeoJSON or Parquet.
 - Compatible with ArcGIS, QGIS, and other desktop GIS software
 
 ```bash
-# Install optional dependencies first
-uv add geopandas shapely
-
 # Generate shapefile
 uv run synth911gen3 generate --format shapefile --rows 10000 --area "Denver, CO"
 ```
@@ -1486,6 +1481,9 @@ uv run synth911gen3 generate --rows 5000000 --format parquet --max-memory-bytes 
 | `city` | str | City name |
 | `state` | str | State/province |
 | `postal_code` | str | ZIP/postal code from OSM when available |
+| `latitude` | float | Latitude from OSM address node; `0.0` when no coordinates available (synthesized fallback addresses) |
+| `longitude` | float | Longitude from OSM address node; `0.0` when no coordinates available |
+| `zone` | str | Geographic zone classification: URBAN, SUBURBAN, or RURAL (OSM-based) |
 | `location` | str | `street_address, city, state` |
 | `call_start_time` | datetime | Call received timestamp |
 | `hour` | int | Hour of day (0–23) of `call_start_time` |
@@ -2006,59 +2004,5 @@ MIT License - see LICENSE file for details.
 
 - Issues: [GitHub Issues](https://github.com/trdunsworth/synth911gen3/issues)
 - Documentation: This guide + inline code docstrings
-
----
-
-
-## Docker Deployment
-
-### Using Docker Compose (Recommended)
-
-```bash
-# Start the API server
-docker compose up -d synth911gen3
-
-# Check health
-curl http://localhost:8000/health
-
-# Run a one-off generation job
-docker compose --profile generate run synth911gen3-generate
-```
-
-### Using Docker Directly
-
-```bash
-# Build the image
-docker build -t synth911gen3:0.1.0 .
-
-# Run the API server
-docker run -d \
-  -p 8000:8000 \
-  -v synth911gen3-cache:/home/synth911/.cache/synth911gen3 \
-  -v synth911gen3-output:/app/output \
-  --name synth911gen3-api \
-  synth911gen3:0.1.0
-
-# Run a one-off generation
-docker run --rm \
-  -v synth911gen3-cache:/home/synth911/.cache/synth911gen3 \
-  -v synth911gen3-output:/app/output \
-  synth911gen3:0.1.0 \
-  synth911gen3 generate --rows 50000 --format parquet
-```
-
-### Persistent Volumes
-
-| Volume | Purpose |
-|--------|---------|
-| `synth911gen3-cache` | OSM address cache (speeds up subsequent runs) |
-| `synth911gen3-output` | Generated output files |
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `SYNTH911_LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
-| `SYNTH911_SYSTEM_TRUST` | `0` | Set to `1` to use OS trust store for TLS (corporate proxies) |
 
 ---

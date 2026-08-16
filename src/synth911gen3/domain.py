@@ -1,3 +1,11 @@
+"""Core domain models shared across the package.
+
+Defines the :class:`Address` value object used by every address provider
+and the :class:`GenerationResult` returned by the generation pipeline, plus
+the street-address parsing helpers that split a free-form OSM street string
+into its CAD-style components (number, name, type, directionals).
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -98,10 +106,17 @@ _STREET_TYPES = frozenset(
 
 
 def _normalize_direction(value: str) -> str:
+    """Abbreviate a compass direction (``NORTH`` → ``N``); pass through others."""
     return _DIRECTION_ABBREVIATIONS.get(value.upper(), value.upper())
 
 
 def _is_house_number(token: str) -> bool:
+    """Return True when a token looks like a street number.
+
+    Accepts plain digits (``204``) and alphanumeric house numbers
+    (``17A``), while rejecting ordinals such as ``12th`` that belong to
+    the street name.
+    """
     if token.isdigit():
         return True
     lower = token.lower()
@@ -145,6 +160,17 @@ def parse_address_parts(
 
 @dataclass(frozen=True, slots=True)
 class Address:
+    """A street address in CAD-ready component form.
+
+    Fields mirror the output schema (``street_number``, ``street_name``,
+    ``street_type``, prefix/postfix directionals, ``postal_code``) plus
+    the OSM-derived coordinates and geographic ``zone`` classification
+    (URBAN, SUBURBAN, or RURAL) used for travel-time multipliers.
+
+    When only the free-form ``street_address`` is supplied, the
+    components are derived automatically via :func:`parse_address_parts`.
+    """
+
     street_address: str
     city: str
     state: str
@@ -169,11 +195,20 @@ class Address:
 
     @property
     def location(self) -> str:
+        """Combined ``street_address, city, state`` string for output."""
         return f"{self.street_address}, {self.city}, {self.state}"
 
 
 @dataclass(frozen=True, slots=True)
 class GenerationResult:
+    """Output of one generation run, before or after export.
+
+    ``incidents`` and ``hourly_call_counts`` hold the generated frames
+    (or ``None`` when that dataset was not requested); ``exported_artifacts``
+    maps artifact descriptions to their written paths (or in-memory values
+    for pandas/polars results).
+    """
+
     incidents: pd.DataFrame | None
     hourly_call_counts: pd.DataFrame | None
     exported_artifacts: dict[str, Path | Any]

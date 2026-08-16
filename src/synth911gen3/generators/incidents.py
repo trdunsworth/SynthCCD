@@ -1,3 +1,16 @@
+"""CAD incident record generation (vectorized, seed-deterministic).
+
+:class:`IncidentGenerator` produces the full incident dataset for a
+request: agency/priority weighted problem natures, seasonal weighting,
+lognormal lifecycle timings, geographic zone travel multipliers,
+shift-aware calltaker/dispatcher assignment (Zipf-weighted for workload
+realism), reception and disposition profiles, and reference numbers per
+agency/day. All draws flow through a single seeded NumPy RNG so a given
+seed plus realism config yields byte-identical output; large runs stream
+chunks via :meth:`IncidentGenerator.generate_chunks` under a memory
+budget.
+"""
+
 from __future__ import annotations
 
 import random as _random
@@ -54,12 +67,14 @@ logger = get_logger("incidents")
 def _weighted_choice_from_pairs(
     rng: np.random.Generator, weighted_pairs: list[tuple[str, float]]
 ) -> str:
+    """Draw one label from ``(label, weight)`` pairs with normalized probabilities."""
     values = [item for item, _ in weighted_pairs]
     probabilities = [weight for _, weight in weighted_pairs]
     return str(rng.choice(values, p=probabilities))
 
 
 def _distribute(amount: int, slots: int) -> list[int]:
+    """Split ``amount`` across ``slots`` as evenly as possible (remainder first)."""
     if slots <= 0:
         return []
     base, extra = divmod(max(amount, 1), slots)
@@ -95,6 +110,7 @@ def _resolve_shift_staffing(
 def _build_shift_pools(
     name_gen: PersonnelNameGenerator, staffing: list[tuple[str, int, int]]
 ) -> dict[str, dict[str, list[str]]]:
+    """Create a unique-name roster per shift: ``{shift: {calltakers, dispatchers}}``."""
     pools: dict[str, dict[str, list[str]]] = {}
     for name, calltakers, dispatchers in staffing:
         pools[name] = {
@@ -105,21 +121,25 @@ def _build_shift_pools(
 
 
 def _zipf_weights(count: int) -> np.ndarray:
+    """Normalized Zipf-ish weights (1/k) so earlier pool members take more calls."""
     weights = np.array([1.0 / (index + 1) for index in range(count)])
     return weights / weights.sum()
 
 
 def _zipf_pick(rng: np.random.Generator, names: list[str]) -> str:
+    """Single Zipf-weighted pick from a name pool."""
     return str(rng.choice(np.asarray(names, dtype=object), p=_zipf_weights(len(names))))
 
 
 def _zipf_choice(rng: np.random.Generator, names: list[str], size: int) -> np.ndarray:
+    """Vectorized Zipf-weighted draws from a name pool."""
     return rng.choice(np.asarray(names, dtype=object), size=size, p=_zipf_weights(len(names)))
 
 
 def _categorical_choice(
     rng: np.random.Generator, values: list[str], weights: list[float], size: int
 ) -> np.ndarray:
+    """Vectorized weighted draw from a categorical label set."""
     return rng.choice(
         np.asarray(values, dtype=object), size=size, p=np.asarray(weights, dtype=float)
     )
@@ -133,6 +153,7 @@ def _lognormal_seconds(
     minimum: int = 0,
     maximum: int | None = None,
 ) -> np.ndarray:
+    """Draw lognormal durations (seconds) with a target mean, clipped to bounds."""
     mu = np.log(np.maximum(np.asarray(mean_seconds, dtype=float), 1.0)) - (sigma**2) / 2
     values = rng.lognormal(mu, sigma, size=size)
     upper = maximum if maximum is not None else np.inf
@@ -188,6 +209,11 @@ def _build_reference_numbers(
     times_series: pd.Series,
     start_counts: np.ndarray | None = None,
 ) -> np.ndarray:
+    """Per-agency daily reference numbers like ``LAW-260101-000001``.
+
+    The counter runs per agency over the whole dataset (continuing across
+    chunks via ``start_counts``); the date portion is the incident's YMD.
+    """
     ymd = (times_series.dt.year % 100) * 10000 + times_series.dt.month * 100 + times_series.dt.day
     ymd_str = np.char.zfill(ymd.to_numpy().astype("U6"), 6)
 
@@ -210,7 +236,10 @@ def _build_reference_numbers(
 
 
 class IncidentGenerator:
+    """Vectorized, seed-deterministic CAD incident dataset generator."""
+
     def __init__(self, address_provider: AddressProvider) -> None:
+        """Bind the address provider used to sample incident locations."""
         self._address_provider = address_provider
 
     def _prepare(
@@ -218,6 +247,7 @@ class IncidentGenerator:
     ) -> tuple[
         RealismConfig, ShiftConfig, dict[str, dict[str, list[str]]], list, np.random.Generator
     ]:
+        """Validate, merge realism config, load addresses, and build personnel rosters."""
         request.validate()
         realism = request.get_realism_config()
         shift_config = apply_shift_preset(realism.shift_config, request.shift_preset)
@@ -259,6 +289,7 @@ class IncidentGenerator:
         request: GenerationRequest,
         on_progress: Callable[[int, int], None] | None = None,
     ) -> pd.DataFrame:
+        """Generate the full incident dataset as a single DataFrame."""
         realism, shift_config, shift_pools, addresses, rng = self._prepare(request)
         records = self._build_records(request, realism, shift_config, shift_pools, addresses, rng)
 
@@ -289,6 +320,7 @@ class IncidentGenerator:
         shift_pools: dict[str, dict[str, list[str]]],
         addresses: list,
     ) -> int:
+        """Chunk size that keeps one chunk under the memory budget (probe-measured)."""
         budget = (
             request.max_memory_bytes
             if request.max_memory_bytes is not None
@@ -374,6 +406,12 @@ class IncidentGenerator:
         guid_rng: _random.Random | None = None,
         start_counts: np.ndarray | None = None,
     ) -> dict[str, np.ndarray]:
+        """Draw one chunk of records as a dict of parallel NumPy columns.
+
+        All random draws come from ``rng`` so the whole dataset is
+        reproducible; ``start_index`` seeds sequential integer IDs and
+        ``start_counts`` carries reference-number counters across chunks.
+        """
         n = request.rows if n is None else n
 
         start = np.datetime64(request.resolved_start_date().isoformat()).astype("datetime64[s]")
@@ -630,6 +668,7 @@ class IncidentGenerator:
     def _timing_table(
         realism: RealismConfig, agency_keys: list[str], max_priority: int, field: str
     ) -> np.ndarray:
+        """Lookup table of a timing field's mean per (agency, priority) cell."""
         table = np.zeros((len(agency_keys), max_priority + 1), dtype=np.float64)
         for agency_index, agency_key in enumerate(agency_keys):
             for priority, profile in realism.time_profiles[agency_key].items():

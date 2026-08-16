@@ -1,3 +1,14 @@
+"""Dataset writers for every supported output format.
+
+File formats (CSV, Parquet, JSON, YAML, GeoJSON, Shapefile) write into
+``output_dir`` using the ``{stem}_{dataset}.{ext}`` naming convention;
+in-memory formats (pandas, polars) return the frames directly; database
+formats are handled by :mod:`synth911gen3.db_exporter`. Large runs stream
+through :func:`export_chunked_generator` to bound peak memory, and the
+governance manifest lands as a JSON sidecar via
+:func:`export_manifest`.
+"""
+
 from __future__ import annotations
 
 import json
@@ -61,6 +72,7 @@ def _merge_schema_metadata(
 
 
 def _records_for_serialization(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    """Convert a DataFrame to JSON/YAML-safe records (datetimes as ISO strings)."""
     serializable = frame.copy()
     for column in serializable.select_dtypes(include=["datetime64[ns]"]).columns:
         serializable[column] = serializable[column].dt.strftime("%Y-%m-%dT%H:%M:%S")
@@ -203,6 +215,16 @@ def export_generated_data(
     output_stem: str,
     parquet_metadata: Mapping[str, str] | None = None,
 ) -> dict[str, Any]:
+    """Write generated datasets in the requested format.
+
+    Returns a mapping keyed by dataset name: paths for file formats,
+    frames for the in-memory pandas/polars formats, or ``{"bundle": path}``
+    for the bundled JSON/YAML formats.
+
+    Raises:
+        ExportError: For formats without a writer here (database dialects
+            go through :mod:`synth911gen3.db_exporter` instead).
+    """
     if output_format is OutputFormat.PANDAS:
         return dict(datasets)
 

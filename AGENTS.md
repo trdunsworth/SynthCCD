@@ -131,7 +131,9 @@ A change is not complete until the relevant guides are updated.
 
 ## Tech Stack
 
-- Framework: Python, Faker, Numpy, SciPy, pandas, requests, overpy, pydantic, polars, rich, prompt_toolkit, PyQt6
+- Framework: Python, Faker, Numpy, SciPy, pandas, overpy, pydantic, polars,
+  textual, typer, fastapi/uvicorn, httpx, pyarrow, geopandas, shapely,
+  sqlalchemy, duckdb
 - Language: Python
 - Package Manager: uv
 - Validation: ruff
@@ -199,10 +201,13 @@ UnknownIssuer`. Safe workaround (verification stays on):
 
 ## Project Structure
 
-- `src/` - Source material for review
-- `docs/` - Documentation for instruction and output
+- `src/synth911gen3/` - The live package (CLI, TUI, server, generators)
+- `docs/` - Read-only v2-era reference scripts (e.g., `synth911.py`, `synthgui.py`),
+  architecture decision records (`docs/adr/`), and recommendation guidance
 - `output/` - Location of generated files
-- `tests/` - testing plans go here.
+- `tests/` - pytest suite
+- `config/` - Example params and realism-config files
+- `scripts/` - Developer/CI helpers
 
 ## Permissions
 
@@ -223,7 +228,7 @@ UnknownIssuer`. Safe workaround (verification stays on):
 
 ### Not allowed
 
-- Alter files in `src/` directory
+- Alter files in `docs/` (read-only v2-era reference material)
 - Delete project
 
 ## PR Requirements

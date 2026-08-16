@@ -1,3 +1,12 @@
+"""Data-governance manifest for generated datasets.
+
+Every run produces a JSON sidecar manifest that records the full
+generation context: seed, request parameters, realism-config hash,
+schema hash, package provenance, and per-dataset row/column counts. The
+same manifest flattens into Parquet footer metadata
+(:meth:`Manifest.to_kv_metadata`) so Parquet files are self-documenting.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -21,6 +30,8 @@ PACKAGE_NAME = "synth911gen3"
 
 @dataclass(slots=True)
 class Manifest:
+    """Immutable-ish record of how a dataset run was configured and produced."""
+
     version: str
     generated_at: str
     package: str
@@ -47,9 +58,11 @@ class Manifest:
     column_counts: dict[str, int]
 
     def to_json(self) -> str:
+        """Serialize to sorted, indented JSON."""
         return json.dumps(asdict(self), indent=2, sort_keys=True)
 
     def to_yaml(self) -> str:
+        """Serialize to YAML."""
         import yaml
 
         return yaml.safe_dump(asdict(self), sort_keys=False, default_flow_style=None)
@@ -79,6 +92,7 @@ class Manifest:
         request: GenerationRequest,
         datasets: dict[str, pd.DataFrame] | None = None,
     ) -> Manifest:
+        """Build a manifest from a request (and the produced datasets, when known)."""
         realism = request.get_realism_config()
         config_hash = _hash_realism_config(realism)
         schema_hash = _hash_schema(datasets) if datasets else ""
@@ -112,6 +126,7 @@ class Manifest:
 
 
 def _hash_realism_config(realism: RealismConfig) -> str:
+    """Stable 16-hex digest of a realism config (YAML-dumped, sorted keys)."""
     import yaml
 
     data = {
@@ -144,6 +159,7 @@ def _hash_realism_config(realism: RealismConfig) -> str:
 
 
 def _hash_schema(datasets: dict[str, pd.DataFrame]) -> str:
+    """Stable digest of dataset column names and dtypes (sorted for determinism)."""
     parts = []
     for name, frame in sorted(datasets.items()):
         cols = sorted(f"{c}:{frame[c].dtype}" for c in frame.columns)
@@ -152,6 +168,7 @@ def _hash_schema(datasets: dict[str, pd.DataFrame]) -> str:
 
 
 def _get_package_version() -> str:
+    """Installed package version, or a dev fallback when not installed."""
     try:
         from importlib.metadata import version
 
@@ -166,6 +183,7 @@ def write_manifest(
     output_stem: str,
     output_format: OutputFormat,
 ) -> Path:
+    """Write the manifest as a ``{stem}_manifest.json`` sidecar in ``output_dir``."""
     output_dir.mkdir(parents=True, exist_ok=True)
     path = output_dir / f"{output_stem}_manifest.json"
     path.write_text(manifest.to_json(), encoding="utf-8")

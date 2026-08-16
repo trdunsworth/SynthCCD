@@ -1,3 +1,4 @@
+"""Tests for the DatabaseExporter across dialects and table modes."""
 import sqlite3
 
 import pytest

@@ -1,3 +1,16 @@
+"""TLS trust-store workaround for TLS-inspecting corporate proxies.
+
+Python's bundled CA list (and uv's default roots) do not trust the
+certificate issuer used by such proxies, so outbound HTTPS fails with
+``invalid peer certificate: UnknownIssuer``. The entry point
+:func:`maybe_inject_system_trust` switches the current process to the
+operating system's trust store when the operator opts in via the
+``SYNTH911_SYSTEM_TRUST`` environment variable.
+
+Call this once at process startup (CLI, TUI, server) before any
+networked work; it is a no-op when the environment variable is unset.
+"""
+
 from __future__ import annotations
 
 import os

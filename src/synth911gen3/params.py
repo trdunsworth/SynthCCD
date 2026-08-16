@@ -1,3 +1,13 @@
+"""Params-file loading, saving, and merging for generation requests.
+
+A params file lets users persist a full run configuration (JSON, YAML, or
+TOML) instead of repeating CLI flags. :func:`load_params_file` reads and
+normalizes it, :func:`coerce_param` converts raw string values into the
+types :class:`~synth911gen3.config.GenerationRequest` expects, and
+:func:`build_request_from_params` merges file values with explicit CLI
+flags (CLI wins) into a validated request.
+"""
+
 from __future__ import annotations
 
 import json

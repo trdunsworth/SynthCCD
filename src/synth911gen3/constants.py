@@ -1,3 +1,32 @@
+"""Default realism constants for synthetic data generation.
+
+Every table here is the built-in default profile of a typical large
+American 9-1-1 center. They feed three consumers:
+
+* the generator core (:mod:`synth911gen3.generators.incidents`),
+* the hourly phone metrics generator
+  (:mod:`synth911gen3.generators.phone_metrics`), and
+* :class:`synth911gen3.realism_config.RealismConfig`, which deep-copies
+  them into a runtime config that users can override via YAML.
+
+Conventions:
+
+* Weight tables (``AGENCY_WEIGHTS``, ``PRIORITY_WEIGHTS``,
+  ``PROBLEM_PROFILES``, ``CALL_RECEPTION_WEIGHTS``,
+  ``DISPOSITION_PROFILES``) each sum to 1.0 per scope; the schema and
+  regression suites enforce this.
+* ``PROBLEM_PROFILES`` is keyed by agency then priority (1 = highest,
+  5 = lowest); each entry is a ``(problem_name, weight)`` pair.
+* ``SEASONAL_MULTIPLIERS`` and ``PROBLEM_PHONE_MULTIPLIERS`` apply
+  per-incident scaling to problem selection weight and call duration
+  respectively. Problems without an entry use the ``DEFAULT_*`` fallbacks.
+* Priorities are 1-5 integers; seasons are indexed
+  0=Winter, 1=Spring, 2=Summer, 3=Fall.
+
+Bump ``DATA_SCHEMA_VERSION`` when generated columns change in a breaking
+way; it is embedded in Parquet metadata and the governance manifest.
+"""
+
 from __future__ import annotations
 
 import numpy as np
@@ -122,14 +151,15 @@ PROBLEM_PROFILES = {
             ("Electrical Wiring Problem", 0.08),
         ],
         3: [
-            ("Fire Alarm", 0.25),
-            ("Smoke Investigation", 0.20),
+            ("Fire Alarm", 0.22),
+            ("Smoke Investigation", 0.18),
             ("Overheat Investigation", 0.12),
             ("Odor Investigation", 0.12),
             ("CO Investigation", 0.10),
             ("Medical Assist", 0.10),
-            ("Mutual Aid", 0.06),
-            ("Brush/Grass Fire", 0.05),
+            ("Chimney Fire", 0.08),
+            ("Mutual Aid", 0.05),
+            ("Brush/Grass Fire", 0.03),
         ],
         4: [
             ("Fire Alarm", 0.30),

@@ -1,3 +1,4 @@
+"""CLI tests: commands, flags, params-file merging, and error handling."""
 import json
 import re
 import subprocess

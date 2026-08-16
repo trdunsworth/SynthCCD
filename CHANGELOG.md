@@ -10,7 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
-- None yet.
+- FIRE problem pool: `Chimney Fire` added at priority 3. It previously existed only in
+  `SEASONAL_MULTIPLIERS` (winter-weighted: 2.5/0.5/0.1/1.5), so its seasonal profile never
+  applied to generated incidents. FIRE problem count is now 22.
+
+### Fixed
+- TUI help text now lists all 13 output formats instead of 6.
 
 ---
 
@@ -29,42 +34,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`tests/regression_baseline.json`) to detect realism drift across versions.
   `scripts/update_regression_baseline.py` refreshes the baseline after intentional
   realism changes.
-
-### Changed
-- TLS proxy workaround: `UV_NATIVE_TLS=true` (deprecated by uv) replaced with
-  `UV_SYSTEM_CERTS=true` in AGENTS.md, CONTRIBUTING.md, and USERSGUIDE.md. Behavior
-  is unchanged — uv still verifies against the OS trust store.
-- Initial project structure and synthetic 911 CAD/phone data generator
-- Core incident generation with vectorized numpy pipeline (million-row scale)
-- Realistic address generation via OpenStreetMap/Overpass (overpy)
-- Config-driven realism via YAML (`RealismConfig`):
-  - Priority-weighted time distributions (interview, dispatch, turnout, travel, scene, closeout, phone)
-  - Agency-specific weights and display names (LAW/FIRE/EMS)
-  - Per-priority problem profiles with weighted selection
-  - Call reception methods (E-911, Phone, OFFICER, Radio, C2C, Text, CAD2CAD)
-  - Disposition codes (NR-No Report, RE-Report, CI-Citation, CN-Cancellation, etc.)
-  - Hourly call volume patterns (diurnal weights)
-  - Phone metrics (abandonment rates, volume fractions, weekend multiplier)
-  - Dispatch initiation fractions by priority
-  - Shift configurations (presets: 2x12h-4shift-14day, 2x12h-2shift, 3x8h-3shift, 4x10h-4shift)
-- Personnel modeling:
-  - Separate calltaker/dispatcher pools per shift
-  - Zipf-like workload weighting
-  - Per-shift staffing from `shift_config`
-- Incident ID formats: integer (sequential) or GUID (seeded UUID v4)
-- `incident_start_time` field distinct from `call_start_time` (0-3s offset)
-- Parallel dispatch/call-taking timelines via `dispatch_init_fraction`
-- Full address components: street_number, street_name, street_type, prefix_directional, postfix_directional, city, state, postal_code
-- Memory-budget guard with chunked CSV/Parquet export (`max_memory_bytes`)
-- CLI with Typer: generate, schema, dry-run, config file support, params file (JSON/YAML/TOML)
-- TUI with Textual: live progress, field validation, params loading, worker-thread generation
-- Structured logging (`SYNTH911_LOG_LEVEL`, `--verbose/-v`, `--quiet/-q`)
-- `--schema` and `--dry-run` flags for preview without full generation
-- TLS trust store injection for corporate proxies (`SYNTH911_SYSTEM_TRUST=1`)
-- FastAPI REST API server (`synth911gen3 serve`) with endpoints: `/health`, `/schema`, `/generate`, `/generate/stream`
-- Multi-stage Docker build with non-root user, health checks, and persistent volumes
-- Docker Compose for API server and one-off generation jobs
-- Pydantic models for request validation
 - **International personnel names**: country-matched name locales derived from the geocoded OSM region (`resolved_country()` on address providers, cached in a `.meta.json` sidecar), weighted multi-ethnic blend for US deployments, per-country overrides via the realism config `name_locales` section, CJK family-name-first ordering, and `PersonnelNameGenerator` replacing single-locale Faker rosters
 - **SQLite database target**: `sqlite` output format/dialect using the stdlib `sqlite3` driver (no extra dependencies); file-based engine with `db_name` defaulting to `{output_stem}.sqlite3` in `output_dir`; SQLite-aware table-exists/drop/index/type handling; `db_schema` ignored with a warning (SQLite has no schemas); per-statement batch cap (`999 // columns`) honoring SQLite's bound-parameter limit; full CLI `--db-*` flag set, params-file keys, and Python API support
 - **Parquet metadata embedding**: generation provenance (seed, realism config hash, schema hash, schema version, timestamps, request summary) written into each Parquet file's key-value footer metadata as namespaced `synth911:*` pairs — self-documenting files readable by any Parquet tool; embedded at write time for both full and chunked exports (chunked mode derives `schema_hash` from the first chunk); new `DATA_SCHEMA_VERSION` constant and `Manifest.schema_version`/`Manifest.to_kv_metadata()`
@@ -91,6 +60,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their configured targets. `hypothesis` added to the dev dependency group.
 
 ### Changed
+- TLS proxy workaround: `UV_NATIVE_TLS=true` (deprecated by uv) replaced with
+  `UV_SYSTEM_CERTS=true` in AGENTS.md, CONTRIBUTING.md, and USERSGUIDE.md. Behavior
+  is unchanged — uv still verifies against the OS trust store.
 - TUI Parameters tab now auto-scrolls to keep the focused field in view while tabbing (the form
   previously filled its scroll container, suppressing scroll overflow entirely)
 - Phone metrics answer-time percentages now vary hour-to-hour. Two new optional
@@ -114,7 +86,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - N/A
 
 ### Removed
-- Unused runtime dependencies: pydantic, requests, scipy, rich, prompt_toolkit, inquirerpy, pyqt6
+- Unused runtime dependencies: requests, rich, prompt_toolkit, inquirerpy, pyqt6
 
 ### Fixed
 - Path traversal validation for `output_dir`/`output_stem`
@@ -149,3 +121,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.0] - 2026-08-09
 
 Initial release candidate. All core AGENTS.md goals implemented.
+
+### Added
+- Initial project structure and synthetic 911 CAD/phone data generator
+- Core incident generation with vectorized numpy pipeline (million-row scale)
+- Realistic address generation via OpenStreetMap/Overpass (overpy)
+- Config-driven realism via YAML (`RealismConfig`):
+  - Priority-weighted time distributions (interview, dispatch, turnout, travel, scene, closeout, phone)
+  - Agency-specific weights and display names (LAW/FIRE/EMS)
+  - Per-priority problem profiles with weighted selection
+  - Call reception methods (E-911, Phone, OFFICER, Radio, C2C, Text, CAD2CAD)
+  - Disposition codes (NR-No Report, RE-Report, CI-Citation, CN-Cancellation, etc.)
+  - Hourly call volume patterns (diurnal weights)
+  - Phone metrics (abandonment rates, volume fractions, weekend multiplier)
+  - Dispatch initiation fractions by priority
+  - Shift configurations (presets: 2x12h-4shift-14day, 2x12h-2shift, 3x8h-3shift, 4x10h-4shift)
+- Personnel modeling:
+  - Separate calltaker/dispatcher pools per shift
+  - Zipf-like workload weighting
+  - Per-shift staffing from `shift_config`
+- Incident ID formats: integer (sequential) or GUID (seeded UUID v4)
+- `incident_start_time` field distinct from `call_start_time` (0-3s offset)
+- Parallel dispatch/call-taking timelines via `dispatch_init_fraction`
+- Full address components: street_number, street_name, street_type, prefix_directional, postfix_directional, city, state, postal_code
+- Memory-budget guard with chunked CSV/Parquet export (`max_memory_bytes`)
+- CLI with Typer: generate, schema, dry-run, config file support, params file (JSON/YAML/TOML)
+- TUI with Textual: live progress, field validation, params loading, worker-thread generation
+- Structured logging (`SYNTH911_LOG_LEVEL`, `--verbose/-v`, `--quiet/-q`)
+- `--schema` and `--dry-run` flags for preview without full generation
+- TLS trust store injection for corporate proxies (`SYNTH911_SYSTEM_TRUST=1`)
+- FastAPI REST API server (`synth911gen3 serve`) with endpoints: `/health`, `/schema`, `/generate`, `/generate/stream`
+- Multi-stage Docker build with non-root user, health checks, and persistent volumes
+- Docker Compose for API server and one-off generation jobs
+- Pydantic models for request validation

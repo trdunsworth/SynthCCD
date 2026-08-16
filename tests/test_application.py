@@ -1,3 +1,4 @@
+"""End-to-end tests for Synth911Application generation across datasets and formats."""
 from datetime import date
 from uuid import UUID
 

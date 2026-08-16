@@ -1,3 +1,4 @@
+"""Tests for system-trust injection under the SYNTH911_SYSTEM_TRUST env var."""
 import sys
 from types import SimpleNamespace
 

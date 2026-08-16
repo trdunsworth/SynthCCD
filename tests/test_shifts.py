@@ -1,3 +1,4 @@
+"""Tests for shift presets, staffing resolution, and worker-name selection."""
 from datetime import datetime
 
 import numpy as np

@@ -1,3 +1,4 @@
+"""Tests for logging configuration, loggers, and the ProgressReporter."""
 import logging
 from collections.abc import Iterator
 

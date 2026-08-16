@@ -1,3 +1,14 @@
+"""Emergency-number registry and resolution for phone-metrics generation.
+
+The hourly phone-metrics dataset models traffic on each emergency line a
+center answers. This module holds the per-country short-code registry
+(:data:`EMERGENCY_NUMBER_REGISTRY`), optional 10-digit direct-dial lines
+(:data:`TEN_DIGIT_LINES`), and the resolution logic that turns a
+:class:`GenerationRequest` into the concrete list of lines to model.
+Country codes are normalized to ISO 3166-1 alpha-2 (aliases like ``UK``
+and ``USA`` accepted); see REALISMGUIDE.md for the reference table.
+"""
+
 from __future__ import annotations
 
 import re

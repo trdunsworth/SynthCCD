@@ -1,3 +1,4 @@
+"""Tests for schema/preview builders used by --schema, --dry-run, and the API."""
 import pandas as pd
 
 from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat

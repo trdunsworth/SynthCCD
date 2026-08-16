@@ -1,3 +1,15 @@
+"""YAML-driven realism configuration.
+
+Every distribution the generator uses — agency and priority weights,
+problem profiles, call-reception and disposition weights, time profiles,
+phone-metrics parameters, hourly weights, shift structure, seasonal and
+zone multipliers, and name locales — can be overridden per run via a
+realism YAML file. :class:`RealismConfig` holds the merged result: user
+values take precedence, untouched sections fall back to the defaults in
+:mod:`~synth911gen3.constants`. See REALISMGUIDE.md for the full schema
+and validation rules.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -46,6 +58,7 @@ class RealismConfig:
     problem_phone_multipliers: dict[str, float] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
+        """Fill any empty section with its constants-module default."""
         if not self.agency_weights:
             self.agency_weights = DEFAULT_AGENCY_WEIGHTS.copy()
         if not self.priority_weights:
@@ -84,6 +97,13 @@ class RealismConfig:
 
     @classmethod
     def from_yaml(cls, path: Path) -> RealismConfig:
+        """Load a realism YAML file, applying overrides over the defaults.
+
+        Raises:
+            ValidationError: If any section fails validation after merging
+                (e.g. weights not summing to 1.0, missing time-profile
+                keys, malformed shift config).
+        """
         with path.open("r", encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
 
@@ -181,6 +201,7 @@ class RealismConfig:
 
     @staticmethod
     def _normalize_weights(weights: dict[Any, float]) -> dict[str, float]:
+        """Coerce a raw weights mapping to normalized floats summing to 1.0."""
         normalized = {str(k): float(v) for k, v in weights.items()}
         total = sum(normalized.values())
         if total <= 0:
@@ -188,6 +209,13 @@ class RealismConfig:
         return {k: v / total for k, v in normalized.items()}
 
     def _validate(self) -> None:
+        """Cross-validate every section after defaults are merged.
+
+        Checks weights sum to 1.0, all priorities/keys exist per agency,
+        time-profile keys are present, phone-metrics values are in range,
+        agency display names exist, name locales are valid, and the shift
+        config covers a full day per rotation group.
+        """
         for agency, weights in self.priority_weights.items():
             if agency not in self.agency_weights:
                 raise ValidationError(f"Priority weights defined for unknown agency: {agency}")
@@ -312,6 +340,7 @@ class RealismConfig:
         self.shift_config.validate()
 
     def to_yaml(self, path: Path) -> None:
+        """Serialize the full merged config to YAML (round-trips through from_yaml)."""
         data = {
             "agency_weights": self.agency_weights,
             "priority_weights": {k: v for k, v in self.priority_weights.items()},
@@ -353,10 +382,12 @@ class RealismConfig:
         return result
 
     def _phone_metrics_for_yaml(self) -> dict[str, Any]:
+        """Phone metrics plus the per-line overrides, nested under ``lines``."""
         data: dict[str, Any] = dict(self.phone_metrics)
         if self.phone_metric_lines:
             data["lines"] = {num: dict(over) for num, over in self.phone_metric_lines.items()}
         return data
 
     def get_agency_display_name(self, agency: str) -> str:
+        """Human-readable agency name (e.g. ``POLICE``) or the code itself."""
         return self.agency_names.get(agency, agency)

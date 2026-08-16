@@ -1,3 +1,13 @@
+"""Application-level orchestration of a generation run.
+
+:class:`Synth911Application` is the single entry point shared by the CLI,
+TUI, and server: it validates the request, builds the requested datasets
+(streaming incidents in chunks for very large CSV/Parquet runs), routes
+to the file/database exporters, and assembles the final
+:class:`~synth911gen3.domain.GenerationResult` with the governance
+manifest.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -16,7 +26,10 @@ logger = get_logger("app")
 
 
 class Synth911Application:
+    """Orchestrates dataset generation and export for a single request."""
+
     def __init__(self, address_provider: AddressProvider | None = None) -> None:
+        """Use the given provider (tests) or the default OpenStreetMap-backed one."""
         self._address_provider = address_provider or OpenStreetMapAddressProvider()
 
     def generate(
@@ -24,6 +37,18 @@ class Synth911Application:
         request: GenerationRequest,
         on_progress: Callable[[str, int, int], None] | None = None,
     ) -> GenerationResult:
+        """Generate and export the datasets requested by ``request``.
+
+        Args:
+            request: Validated run configuration.
+            on_progress: Optional ``(dataset, done, total)`` callback for
+                progress reporting during incident generation.
+
+        Returns:
+            The generated frames (when materialized) plus exported artifact
+            paths. CSV/Parquet runs that exceed the memory budget return
+            streamed artifacts instead of frames.
+        """
         request.validate()
 
         datasets = {}

@@ -1,3 +1,13 @@
+"""Typer command-line interface for synth911gen3.
+
+Commands: ``generate`` (default workflow, with params-file support and
+schema/dry-run previews), ``validate-config``, ``schema`` (export the
+schema definition), and ``tui``. The CLI builds a validated
+:class:`~synth911gen3.config.GenerationRequest` from CLI flags merged
+over a params file, then delegates to :class:`Synth911Application`.
+See USERSGUIDE.md for the full flag reference.
+"""
+
 from __future__ import annotations
 
 import json
@@ -31,6 +41,7 @@ from .tui import run as run_tui
 
 
 def _parse_date(value: str | None) -> date | None:
+    """Parse an ISO date string, or return ``None`` when not provided."""
     if value is None:
         return None
     return date.fromisoformat(value)
@@ -49,14 +60,17 @@ def configure(
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable debug-level logging."),
     quiet: bool = typer.Option(False, "--quiet", "-q", help="Suppress non-error logging."),
 ) -> None:
+    """Global callback: set log verbosity for every command."""
     configure_logging(verbose=verbose, quiet=quiet)
 
 
 def _describe_frame(name: str, frame: pd.DataFrame) -> str:
+    """One-line dataset summary for in-memory (pandas/polars) runs."""
     return f"{name}: {len(frame):,} rows x {len(frame.columns)} columns"
 
 
 def _print_schema(name: str, frame: pd.DataFrame) -> None:
+    """Print a dataset's column names and dtypes."""
     typer.echo(f"{name} schema ({len(frame.columns)} columns):")
     for column in frame.columns:
         typer.echo(f"  {column:<28} {frame[column].dtype}")
@@ -64,12 +78,14 @@ def _print_schema(name: str, frame: pd.DataFrame) -> None:
 
 
 def _print_samples(name: str, frame: pd.DataFrame, rows: int) -> None:
+    """Print the first ``rows`` rows of a dataset as a text table."""
     typer.echo(f"{name} sample rows ({min(len(frame), rows)}):")
     typer.echo(frame.head(rows).to_string(index=False))
     typer.echo()
 
 
 def _describe(request: GenerationRequest, *, dry_run: bool) -> None:
+    """Print the schema (and sample rows for dry runs) using preview datasets."""
     from .describe import SAMPLE_ROWS, build_preview_datasets
     from .logging_conf import configure_logging
 
@@ -543,5 +559,6 @@ def tui() -> None:
 
 
 def main() -> None:
+    """CLI entry point: inject system TLS trust, then run the Typer app."""
     maybe_inject_system_trust()
     app()

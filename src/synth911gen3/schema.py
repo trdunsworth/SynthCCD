@@ -1,3 +1,13 @@
+"""Pydantic models for request and realism-config validation.
+
+This module holds the canonical, validated view of user input:
+:class:`GenerationRequest` (a full run configuration), the
+:class:`RealismConfig` sub-model embedded in it, and the output-schema
+metadata models (:class:`OutputSchema`, :class:`SchemaVersion`) written
+to generated files. Field names here are the canonical keys used by the
+CLI, TUI, params files, and the Python API.
+"""
+
 from __future__ import annotations
 
 from datetime import date
@@ -17,6 +27,8 @@ from .constants import (
 
 
 class OutputFormat(str, Enum):
+    """Supported dataset output formats; file formats and DB dialects."""
+
     CSV = "csv"
     PARQUET = "parquet"
     JSON = "json"
@@ -33,17 +45,23 @@ class OutputFormat(str, Enum):
 
 
 class DatasetKind(str, Enum):
+    """Which dataset(s) a run generates: incidents, phone metrics, or both."""
+
     INCIDENTS = "incidents"
     PHONE = "phone"
     ALL = "all"
 
 
 class IdFormat(str, Enum):
+    """CAD incident identifier style: sequential integers or GUIDs."""
+
     INTEGER = "integer"
     GUID = "guid"
 
 
 class DatabaseDialect(str, Enum):
+    """Supported SQL dialects for database exports."""
+
     POSTGRESQL = "postgresql"
     SQLSERVER = "sqlserver"
     MARIADB = "mariadb"
@@ -52,6 +70,8 @@ class DatabaseDialect(str, Enum):
 
 
 class ShiftPreset(str, Enum):
+    """Built-in shift-structure presets (see :mod:`synth911gen3.shifts`)."""
+
     TWO_X_TWELVE_H_FOUR_SHIFT_FOURTEEN_DAY = "2x12h-4shift-14day"
     TWO_X_TWELVE_H_TWO_SHIFT = "2x12h-2shift"
     THREE_X_EIGHT_H_THREE_SHIFT = "3x8h-3shift"
@@ -59,12 +79,20 @@ class ShiftPreset(str, Enum):
 
 
 class IfExistsMode(str, Enum):
+    """Behavior when a database table already exists at export time."""
+
     APPEND = "append"
     REPLACE = "replace"
     FAIL = "fail"
 
 
 class TimeProfileIntervals(BaseModel):
+    """Lognormal mean parameters (seconds) for each lifecycle interval.
+
+    One instance per agency/priority; drives the elapsed-time draws in the
+    incident generator. Unknown keys are rejected (``extra="forbid"``).
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     interview_mean: int = Field(ge=0, description="Caller questioning duration (seconds)")
@@ -77,6 +105,12 @@ class TimeProfileIntervals(BaseModel):
 
 
 class DispatchInitFraction(BaseModel):
+    """Fraction of calls dispatched before call-taking completes, per priority.
+
+    The generator draws a value uniformly from ``[lo, hi]`` to split the
+    call-taking and dispatch timelines for high-priority calls.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     lo: float = Field(ge=0, description="Lower bound of dispatch fraction")
@@ -84,12 +118,15 @@ class DispatchInitFraction(BaseModel):
 
     @model_validator(mode="after")
     def validate_bounds(self) -> DispatchInitFraction:
+        """Reject an inverted range (``hi`` below ``lo``)."""
         if self.hi < self.lo:
             raise ValueError("hi must be >= lo")
         return self
 
 
 class LineMetrics(BaseModel):
+    """Per-line overrides for a specific emergency number in the phone metrics."""
+
     model_config = ConfigDict(extra="forbid")
 
     received_fraction: float | None = Field(default=None, ge=0, le=1)
@@ -100,6 +137,12 @@ class LineMetrics(BaseModel):
 
 
 class PhoneMetrics(BaseModel):
+    """Parameters for the hourly call-count simulation.
+
+    Mix fractions, abandonment rates, answer-time lognormal parameters,
+    and per-line overrides. See REALISMGUIDE.md for defaults.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     min_hourly_volume: float = Field(ge=0)
@@ -122,6 +165,8 @@ class PhoneMetrics(BaseModel):
 
 
 class ShiftConfig(BaseModel):
+    """Shift structure as read from a realism YAML (see :mod:`synth911gen3.shifts`)."""
+
     model_config = ConfigDict(extra="forbid")
 
     name: str
@@ -131,6 +176,8 @@ class ShiftConfig(BaseModel):
 
 
 class Shift(BaseModel):
+    """A single scheduled work block in a shift structure."""
+
     model_config = ConfigDict(extra="forbid")
 
     name: str
@@ -145,6 +192,8 @@ class Shift(BaseModel):
 
 
 class RealismConfig(BaseModel):
+    """Validated realism YAML overrides embedded in a GenerationRequest."""
+
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     agency_weights: dict[str, float] = Field(default_factory=dict)
@@ -162,6 +211,7 @@ class RealismConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_weights(self) -> RealismConfig:
+        """Validate that every provided weight set sums to 1.0 (within tolerance)."""
         # Validate agency weights sum to 1
         if self.agency_weights:
             total = sum(self.agency_weights.values())
@@ -214,6 +264,13 @@ class RealismConfig(BaseModel):
 
 
 class GenerationRequest(BaseModel):
+    """A complete, validated generation run configuration.
+
+    Field names are canonical across the CLI, TUI, params files, and the
+    Python API. Built-in defaults target 10,000 CSV incident rows for
+    Kansas City, MO.
+    """
+
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
     rows: int = Field(default=DEFAULT_ROWS, gt=0, description="Number of incident rows to generate")
@@ -269,6 +326,7 @@ class GenerationRequest(BaseModel):
     @field_validator("output_stem")
     @classmethod
     def validate_output_stem(cls, v: str) -> str:
+        """Reject reserved device names, path separators, and null bytes."""
         if v in (".", ".."):
             raise ValueError("output_stem must not be '.' or '..'")
         if any(c in v for c in ("/", "\\", "\x00")):
@@ -289,6 +347,7 @@ class GenerationRequest(BaseModel):
     @field_validator("output_dir")
     @classmethod
     def validate_output_dir(cls, v: Path) -> Path:
+        """Reject null bytes and ``..`` path segments."""
         if "\x00" in str(v):
             raise ValueError("output_dir must not contain null bytes")
         if any(part == ".." for part in v.parts):
@@ -297,12 +356,14 @@ class GenerationRequest(BaseModel):
 
     @model_validator(mode="after")
     def validate_dates(self) -> GenerationRequest:
+        """Reject an inverted date range (start after end)."""
         if self.start_date and self.end_date and self.start_date > self.end_date:
             raise ValueError("start_date must be on or before end_date")
         return self
 
     @model_validator(mode="after")
     def validate_database_options(self) -> GenerationRequest:
+        """Require DB connection fields for server dialects; default file names/ports otherwise."""
         db_formats = {
             OutputFormat.POSTGRESQL,
             OutputFormat.SQLSERVER,
@@ -342,6 +403,8 @@ class GenerationRequest(BaseModel):
 
 
 class SchemaVersion(BaseModel):
+    """Generator/schema metadata stamped into manifest files."""
+
     model_config = ConfigDict(extra="forbid")
 
     version: str = "1.0"
@@ -353,6 +416,8 @@ class SchemaVersion(BaseModel):
 
 
 class OutputSchema(BaseModel):
+    """Column-name to type mapping describing a generated dataset's schema."""
+
     model_config = ConfigDict(extra="forbid")
 
     version: str

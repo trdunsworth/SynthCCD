@@ -1,3 +1,13 @@
+"""Hourly call-center phone metrics generation.
+
+:class:`HourlyCallCountGenerator` simulates one row per hour of the
+requested date range with received/abandoned/answered counts for each
+emergency line plus the non-emergency and outbound lines. Volumes follow
+the diurnal ``hourly_weights`` (scaled so the run's total volume matches
+``request.rows``), weekend multipliers, per-line fractions and abandonment
+rates, and load-sensitive lognormal answer-time service levels.
+"""
+
 from __future__ import annotations
 
 from datetime import datetime, time
@@ -17,6 +27,7 @@ _DEFAULT_THRESHOLDS = (10.0, 15.0, 20.0, 40.0)
 
 
 def _thresholds(realism: RealismConfig) -> list[float]:
+    """Answer-time thresholds (seconds) for the service-level percentage columns."""
     raw = realism.phone_metrics.get("answer_time_thresholds", list(_DEFAULT_THRESHOLDS))
     if isinstance(raw, list):
         return [float(t) for t in raw]
@@ -49,7 +60,10 @@ def phone_metrics_columns(request: GenerationRequest, realism: RealismConfig) ->
 
 
 class HourlyCallCountGenerator:
+    """Hourly phone-metrics dataset generator (seeded, realism-aware)."""
+
     def generate(self, request: GenerationRequest) -> pd.DataFrame:
+        """Generate hourly call counts for the request's date range."""
         request.validate()
         realism = request.get_realism_config()
         frame = self._generate_with_config(request, realism)
@@ -59,6 +73,7 @@ class HourlyCallCountGenerator:
     def _generate_with_config(
         self, request: GenerationRequest, realism: RealismConfig
     ) -> pd.DataFrame:
+        """Build the hourly frame from a resolved realism config (shared with previews)."""
         rng = np.random.default_rng(request.seed + 101)
         start_datetime = datetime.combine(request.resolved_start_date(), time.min)
         end_datetime = datetime.combine(request.resolved_end_date(), time(hour=23))

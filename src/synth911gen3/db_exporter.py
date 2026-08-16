@@ -1,3 +1,14 @@
+"""SQL database export for generated datasets.
+
+Bridges the pandas/sqlalchemy stack to every supported dialect: DuckDB
+and SQLite (local file databases) plus PostgreSQL, SQL Server, and
+MariaDB (server databases). Handles table existence checks, ``if_exists``
+semantics, schema-qualified names, batch-size capping (SQLite's 999
+bound-parameter limit), column types per dialect, and index creation on
+key columns. Missing optional drivers raise :class:`ExportError` with an
+install hint.
+"""
+
 from __future__ import annotations
 
 from contextlib import contextmanager
@@ -19,14 +30,18 @@ logger = get_logger("db_exporter")
 
 @dataclass(slots=True)
 class DatabaseExporter:
+    """Wraps a SQLAlchemy engine built from a GenerationRequest's DB options."""
+
     request: GenerationRequest
     engine: Engine | None = None
 
     def __post_init__(self) -> None:
+        """Build the engine when one was not injected (e.g. for tests)."""
         if self.engine is None:
             self.engine = self._create_engine()
 
     def _create_engine(self) -> Engine:
+        """Route to the dialect-specific engine factory."""
         dialect = self._get_dialect()
         if dialect == DatabaseDialect.DUCKDB:
             return self._create_duckdb_engine()
@@ -42,6 +57,7 @@ class DatabaseExporter:
             raise ExportError(f"Unsupported database dialect: {dialect}")
 
     def _get_dialect(self) -> DatabaseDialect:
+        """Resolve the dialect from the request (explicit option wins over format)."""
         dialect_map = {
             OutputFormat.POSTGRESQL: DatabaseDialect.POSTGRESQL,
             OutputFormat.SQLSERVER: DatabaseDialect.SQLSERVER,
@@ -52,6 +68,7 @@ class DatabaseExporter:
         return self.request.db_dialect or dialect_map[self.request.output_format]
 
     def _create_duckdb_engine(self) -> Engine:
+        """DuckDB engine over a local ``.duckdb`` file in the output directory."""
         try:
             import duckdb_engine  # noqa: F401
         except ImportError as exc:
@@ -86,6 +103,7 @@ class DatabaseExporter:
             raise ExportError(f"Failed to create SQLite engine: {exc}") from exc
 
     def _create_postgresql_engine(self) -> Engine:
+        """PostgreSQL engine via psycopg2 (requires the optional driver)."""
         try:
             import psycopg2  # noqa: F401
         except ImportError as exc:
@@ -104,6 +122,7 @@ class DatabaseExporter:
         return sa.create_engine(url, pool_pre_ping=True)
 
     def _create_sqlserver_engine(self) -> Engine:
+        """SQL Server engine via pyodbc with the ODBC Driver 17 DSN."""
         pyodbc_module = None
         try:
             import pyodbc
@@ -128,6 +147,7 @@ class DatabaseExporter:
         return sa.create_engine(url, pool_pre_ping=True)
 
     def _create_mariadb_engine(self) -> Engine:
+        """MariaDB/MySQL engine via PyMySQL (requires the optional driver)."""
         try:
             import pymysql  # noqa: F401
         except ImportError as exc:
@@ -147,6 +167,7 @@ class DatabaseExporter:
 
     @contextmanager
     def _connection(self) -> Iterator[Connection]:
+        """Yield a committed-on-success connection; roll back on any exception."""
         if self.engine is None:
             raise ExportError("Database engine not initialized")
         conn = self.engine.connect()
@@ -160,12 +181,15 @@ class DatabaseExporter:
             conn.close()
 
     def export_incidents(self, frame: pd.DataFrame) -> int:
+        """Write the incidents frame to the configured incidents table; returns row count."""
         return self._export_table(frame, self.request.db_table_incidents)
 
     def export_phone_metrics(self, frame: pd.DataFrame) -> int:
+        """Write the phone-metrics frame to its table; returns row count."""
         return self._export_table(frame, self.request.db_table_phone)
 
     def _export_table(self, frame: pd.DataFrame, table_name: str) -> int:
+        """Create (if needed) and stream a frame into ``table_name`` in batches."""
         if frame.empty:
             logger.info("No data to export for table %s", table_name)
             return 0
@@ -234,6 +258,7 @@ class DatabaseExporter:
         return total_rows
 
     def _table_exists(self, conn: Connection, table_name: str, schema: str | None) -> bool:
+        """Dialect-specific existence check against the catalog tables."""
         dialect = self._get_dialect()
         if dialect == DatabaseDialect.DUCKDB:
             result = conn.execute(
@@ -274,6 +299,7 @@ class DatabaseExporter:
         return result is not None
 
     def _drop_table(self, conn: Connection, table_name: str, schema: str | None) -> None:
+        """Dialect-specific ``DROP TABLE IF EXISTS`` (quotes/schema syntax vary)."""
         dialect = self._get_dialect()
         if dialect == DatabaseDialect.DUCKDB:
             conn.execute(text(f'DROP TABLE IF EXISTS "{table_name}"'))
@@ -298,6 +324,7 @@ class DatabaseExporter:
         dtype: dict[str, sa.types.TypeEngine],
         dialect: DatabaseDialect,
     ) -> None:
+        """Create the table structure via pandas ``to_sql`` on an empty head."""
         # Use pandas to_sql with a single row to create the table structure
         frame.head(0).to_sql(
             name=table_name,
@@ -316,6 +343,7 @@ class DatabaseExporter:
         frame: pd.DataFrame,
         dialect: DatabaseDialect,
     ) -> None:
+        """Create indexes on common query columns present in the frame."""
         # Common indexes for incident data
         index_columns = [
             "call_start_time",
@@ -335,6 +363,7 @@ class DatabaseExporter:
         column: str,
         dialect: DatabaseDialect,
     ) -> None:
+        """Create one index with dialect-appropriate quoting; failures are logged, not fatal."""
         schema_prefix = f"{schema}." if schema else ""
         idx_name = f"idx_{table_name}_{column}"
 
@@ -372,6 +401,7 @@ class DatabaseExporter:
     def _get_column_types(
         self, frame: pd.DataFrame, dialect: DatabaseDialect
     ) -> dict[str, sa.types.TypeEngine]:
+        """Map pandas dtypes to SQLAlchemy column types appropriate for the dialect."""
         dtype: dict[str, sa.types.TypeEngine] = {}
         for col in frame.columns:
             series = frame[col]
@@ -397,6 +427,7 @@ class DatabaseExporter:
         return dtype
 
     def close(self) -> None:
+        """Dispose the engine (releases pooled connections)."""
         if self.engine:
             self.engine.dispose()
             self.engine = None

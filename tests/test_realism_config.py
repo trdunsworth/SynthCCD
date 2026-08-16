@@ -1,3 +1,4 @@
+"""Tests for RealismConfig: validation, normalization, and YAML round-trips."""
 from pathlib import Path
 
 import numpy as np

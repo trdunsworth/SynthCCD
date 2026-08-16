@@ -1,3 +1,4 @@
+"""Tests for chunked generation and the max_memory_bytes budget."""
 from pathlib import Path
 
 import pandas as pd

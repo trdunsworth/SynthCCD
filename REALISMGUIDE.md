@@ -553,11 +553,11 @@ and 2 dispatchers. This same structure is used when no `--shift-preset` or
 
 ### Problem Natures (Weighted by Agency)
 
-**LAW** (33): Shots Fired, Burglary In Progress, Vehicle Collision w/ Injury, Assault, Reckless Driving, Weapons Violation, DUI / Impaired Driver, Domestic Disturbance, Missing Person, Burglary, Drug/Narcotic Violation, Motor Vehicle Theft, Robbery, Disorderly Conduct, Theft Report, Burglary Alarm, Traffic Crash, Fraud, Harassment, Shoplifting, Vandalism, Trespass, Suspicious Person, Welfare Check, Noise Complaint, Traffic Stop, Animal Complaint, Found Property, Animal Bite, Public Assist, **Assist Fire**, **Assist EMS**
+**LAW** (32): Shots Fired, Burglary In Progress, Vehicle Collision w/ Injury, Assault, Reckless Driving, Weapons Violation, DUI / Impaired Driver, Domestic Disturbance, Missing Person, Burglary, Drug/Narcotic Violation, Motor Vehicle Theft, Robbery, Disorderly Conduct, Theft Report, Burglary Alarm, Traffic Crash, Fraud, Harassment, Shoplifting, Vandalism, Trespass, Suspicious Person, Welfare Check, Noise Complaint, Traffic Stop, Animal Complaint, Found Property, Animal Bite, Public Assist, **Assist Fire**, **Assist EMS**
 
-**FIRE** (22): Fire Alarm, Smoke Investigation, Medical Assist, Structure Fire, Vehicle Fire, Cooking Fire, Brush/Grass Fire, Gas Leak, CO Investigation, Hazardous Condition, Rescue Call, Mutual Aid, Odor Investigation, Overheat Investigation, Electrical Wiring Problem, Lockout / Public Service, Water Rescue, Vehicle Extrication, Assist Police, Elevator Rescue, **Assist EMS**
+**FIRE** (22): Fire Alarm, Smoke Investigation, Medical Assist, Structure Fire, Vehicle Fire, Cooking Fire, Chimney Fire, Brush/Grass Fire, Gas Leak, CO Investigation, Hazardous Condition, Rescue Call, Mutual Aid, Odor Investigation, Overheat Investigation, Electrical Wiring Problem, Lockout / Public Service, Water Rescue, Vehicle Extrication, Assist Police, Elevator Rescue, **Assist EMS**
 
-**EMS** (24): Chest Pain, Difficulty Breathing, Fall Injury, Motor Vehicle Crash, Sick Person, Unconscious Person, Seizure, Altered Mental Status, Abdominal Pain, Overdose, Psychiatric Emergency, Stroke, Diabetic Problem, Heart Problems, Allergic Reaction, Hemorrhage / Bleeding, Traumatic Injury, Head Injury, Choking, Heat/Cold Exposure, Pregnancy / Childbirth, Animal Bite, **Assist Police**, **Assist Fire**
+**EMS** (25): Chest Pain, Difficulty Breathing, Fall Injury, Motor Vehicle Crash, Sick Person, Unconscious Person, Cardiac Arrest, Seizure, Altered Mental Status, Abdominal Pain, Overdose, Psychiatric Emergency, Stroke, Diabetic Problem, Heart Problems, Allergic Reaction, Hemorrhage / Bleeding, Traumatic Injury, Head Injury, Choking, Heat/Cold Exposure, Pregnancy / Childbirth, Animal Bite, **Assist Police**, **Assist Fire**
 
 > The problem vocabulary is keyed by agency and **priority pool**, so low-acuity
 > problems do not appear at urgent priorities (and vice versa).
@@ -569,8 +569,8 @@ Each agency/priority combination has calibrated time profiles (mean seconds):
 | Interval | Description | Distribution |
 |----------|-------------|--------------|
 | Pickup Delay | Ring to answer | Lognormal(3s, σ=0.45) |
-| Interview | Caller questioning | Lognormal(14-105s by priority) |
-| Dispatch Queue | Queue to dispatch | Lognormal(4-320s by priority) |
+| Interview | Caller questioning | Lognormal(12-105s by priority) |
+| Dispatch Queue | Queue to dispatch | Lognormal(4-330s by priority) |
 | Turnout | Station to wheels rolling | Lognormal(10-84s by priority) |
 | Travel | Wheels rolling to on-scene | Lognormal(220-560s by priority) |
 | On Scene | On-scene duration | Lognormal(1380-3060s by priority) |
@@ -579,7 +579,7 @@ Each agency/priority combination has calibrated time profiles (mean seconds):
 ### Diurnal Call Patterns
 
 Hourly weights follow real 9-1-1 center patterns:
-**Peak**: 13:00-18:00 (6.2% per hour). **Valley**: 03:00-05:00 (2.0-2.2% per hour).
+**Peak**: 12:00-14:00 (5.7-5.8% per hour). **Valley**: 03:00-05:00 (1.9-2.1% per hour).
 A weekend multiplier (+12% Fri/Sat) is configurable via `phone_metrics.weekend_multiplier`.
 
 ### Hourly Phone Metrics
@@ -724,8 +724,7 @@ Incident data can be exported with geographic coordinates (latitude/longitude) d
 # GeoJSON (no extra dependencies)
 uv run synth911gen3 generate --format geojson --rows 50000 --area "Portland, OR"
 
-# Shapefile (requires optional deps)
-uv add geopandas shapely
+# Shapefile (uses geopandas + shapely, included in the base dependencies)
 uv run synth911gen3 generate --format shapefile --rows 50000 --area "Portland, OR"
 ```
 
@@ -1046,5 +1045,3 @@ Before deploying a custom config:
 - [ ] Config committed to version control
 
 ---
-
-## Geospatial Exports

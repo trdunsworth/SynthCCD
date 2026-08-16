@@ -1,3 +1,4 @@
+"""Tests for the TUI: field parsing, validation, and worker callbacks."""
 import asyncio
 from datetime import date
 from pathlib import Path

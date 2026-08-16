@@ -1,3 +1,4 @@
+"""Tests for address providers (static pool and OpenStreetMap query builders)."""
 from pathlib import Path
 from typing import Any
 

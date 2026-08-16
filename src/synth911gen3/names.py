@@ -1,3 +1,14 @@
+"""Personnel name generation with per-country locale profiles.
+
+Realistic calltaker/dispatcher rosters should match the region the data
+simulates. This module maps ISO countries to Faker locales
+(:data:`COUNTRY_LOCALES`), provides a weighted multi-ethnic blend for US
+deployments (:data:`US_ETHNIC_BLEND`), and exposes
+:class:`PersonnelNameGenerator`, which produces unique full names from a
+chosen locale profile. The realism config's ``name_locales`` section can
+override the country mapping via :func:`normalize_name_locales`.
+"""
+
 from __future__ import annotations
 
 import random as _random
@@ -203,6 +214,18 @@ class PersonnelNameGenerator:
     _MAX_UNIQUE_ATTEMPTS = 5_000
 
     def __init__(self, locales: list[tuple[str, float]], seed: int) -> None:
+        """Initialize one seeded Faker instance per locale plus a shared RNG.
+
+        Args:
+            locales: ``(locale, weight)`` pairs; weights are normalized at
+                draw time.
+            seed: Master seed; each locale's Faker gets a derived seed so
+                rosters are reproducible across runs.
+
+        Raises:
+            ValidationError: If ``locales`` is empty or names an unknown
+                Faker locale.
+        """
         if not locales:
             raise ValidationError("At least one name locale is required.")
         self._rng = _random.Random(seed)
@@ -219,6 +242,7 @@ class PersonnelNameGenerator:
         self._used: set[str] = set()
 
     def _draw(self) -> str:
+        """Draw one raw name from a locale picked by the shared weighted RNG."""
         index = self._rng.choices(range(len(self._fakers)), weights=self._weights, k=1)[0]
         faker = self._fakers[index]
         first = str(faker.first_name())
@@ -230,6 +254,11 @@ class PersonnelNameGenerator:
         return f"{first} {last}".strip()
 
     def unique_name(self) -> str:
+        """Return a fresh name not previously returned by this generator.
+
+        Retries up to ``_MAX_UNIQUE_ATTEMPTS`` draws per call; raises when
+        the underlying locale pool is exhausted.
+        """
         for _ in range(self._MAX_UNIQUE_ATTEMPTS):
             name = self._draw()
             if name not in self._used:

@@ -1,3 +1,13 @@
+"""Schema and sample-preview helpers for dry runs and schema reports.
+
+``--dry-run`` and ``--schema`` need a small peek at what a full run would
+produce without hitting OpenStreetMap or writing files. This module runs
+the real generators against a static address pool on a tiny row count and
+assembles either preview frames (:func:`build_preview_datasets`) or a
+serializable schema definition (:func:`build_schema_definition`) that
+mirrors the manifest hash.
+"""
+
 from __future__ import annotations
 
 from dataclasses import replace

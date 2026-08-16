@@ -1,3 +1,13 @@
+"""Package logging configuration and progress reporting.
+
+All modules log through :func:`get_logger`, which scopes loggers under
+the ``synth911gen3`` package name. The effective level is configured once
+by :func:`configure_logging` using, in order of precedence: the ``--quiet``
+flag, the ``--verbose`` flag, the ``SYNTH911_LOG_LEVEL`` environment
+variable, then INFO. :class:`ProgressReporter` provides coarse completion
+percentages for long-running loops without spamming small runs.
+"""
+
 from __future__ import annotations
 
 import logging
@@ -19,6 +29,11 @@ def get_logger(name: str | None = None) -> logging.Logger:
 
 
 def _env_level() -> int | None:
+    """Resolve the SYNTH911_LOG_LEVEL variable to a logging level.
+
+    Returns ``None`` when the variable is unset, empty, or names an
+    unknown level, so the caller can fall back to the INFO default.
+    """
     value = os.environ.get(_LOG_LEVEL_ENV, "").strip().upper()
     if not value:
         return None
@@ -73,6 +88,11 @@ class ProgressReporter:
         self._intermediate = total >= min_total
 
     def update(self, done: int) -> None:
+        """Report progress once ``done`` crosses the next percentage step.
+
+        Silent for runs below the configured total threshold, so small
+        generations produce no intermediate chatter.
+        """
         if not self._intermediate:
             return
         if done >= self._next:
@@ -81,4 +101,5 @@ class ProgressReporter:
             self._next += self._increment
 
     def finish(self) -> None:
+        """Log the final completion line at the full total."""
         self._logger.info("done (%d/%d)", self._total, self._total)

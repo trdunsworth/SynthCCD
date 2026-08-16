@@ -1,3 +1,17 @@
+"""Real address acquisition from OpenStreetMap with local caching.
+
+The CAD generator needs a pool of real street addresses for the chosen
+geography. :class:`OpenStreetMapAddressProvider` geocodes an area query
+(place name or bounding box) via Nominatim, pulls addressed
+buildings/ways from the Overpass API, classifies each into a geographic
+zone (URBAN/SUBURBAN/RURAL), and caches the result as parquet plus a
+small JSON metadata file. :class:`StaticAddressProvider` wraps a fixed
+in-memory pool for tests and offline runs.
+
+Nominatim rate limits and retry/backoff are handled inside the provider;
+see the module constants for the request policy.
+"""
+
 from __future__ import annotations
 
 import hashlib
@@ -96,10 +110,14 @@ class AddressProvider(Protocol):
 
 
 class StaticAddressProvider:
+    """Address provider backed by a fixed in-memory list (tests, offline runs)."""
+
     def __init__(self, addresses: Sequence[Address]) -> None:
+        """Store the address pool; the area query is ignored."""
         self._addresses = list(addresses)
 
     def load_addresses(self, area_query: str) -> list[Address]:
+        """Return the static pool; raises when the pool is empty."""
         if not self._addresses:
             raise AddressLookupError("StaticAddressProvider requires at least one address.")
         return list(self._addresses)
@@ -111,6 +129,8 @@ class StaticAddressProvider:
 
 @dataclass(frozen=True, slots=True)
 class _GeocodedArea:
+    """A bounding box plus the place-name metadata Nominatim returned for it."""
+
     south: float
     west: float
     north: float
@@ -172,6 +192,7 @@ def _describe_http_error(exc: httpx.HTTPError) -> str:
 
 
 def _normalize_state(state: str) -> str:
+    """Expand US state abbreviations to full names; pass through anything else."""
     normalized = state.strip()
     if normalized.upper() in _US_STATE_NAMES:
         return _US_STATE_NAMES[normalized.upper()]
@@ -179,6 +200,7 @@ def _normalize_state(state: str) -> str:
 
 
 def _extract_city(components: dict[str, Any]) -> str:
+    """Pick the first populated place-name component (city, town, county, ...)."""
     for key in ("city", "town", "village", "hamlet", "municipality", "county"):
         value = components.get(key)
         if isinstance(value, str) and value.strip():
@@ -189,6 +211,7 @@ def _extract_city(components: dict[str, Any]) -> str:
 def _build_real_address_query(
     south: float, west: float, north: float, east: float, limit: int
 ) -> str:
+    """Overpass query for ways/nodes carrying addr:housenumber + addr:street tags."""
     bbox = f"{south},{west},{north},{east}"
     return (
         "[out:xml][timeout:60];("
@@ -201,6 +224,7 @@ def _build_real_address_query(
 def _build_named_street_query(
     south: float, west: float, north: float, east: float, limit: int
 ) -> str:
+    """Overpass query for named local streets (fallback pool when addressed ways are scarce)."""
     bbox = f"{south},{west},{north},{east}"
     return (
         "[out:xml][timeout:60];"
@@ -210,6 +234,15 @@ def _build_named_street_query(
 
 
 class OpenStreetMapAddressProvider:
+    """Fetch, cache, and classify real addresses from OpenStreetMap.
+
+    Two-step pipeline: geocode the area query (place name or bbox) via
+    Nominatim, then query Overpass for addressed elements inside the
+    bounding box. Results are cached as parquet keyed by the area query so
+    repeat runs are offline. ``query_runner`` overrides the Overpass call
+    for tests.
+    """
+
     def __init__(
         self,
         client: httpx.Client | None = None,
@@ -220,6 +253,7 @@ class OpenStreetMapAddressProvider:
         max_retries: int = 3,
         nominatim_min_interval: float = _NOMINATIM_MIN_REQUEST_INTERVAL,
     ) -> None:
+        """Configure the HTTP client, cache location, and fetch limits."""
         self._client = client or httpx.Client(
             headers={
                 "User-Agent": _USER_AGENT,
@@ -237,6 +271,7 @@ class OpenStreetMapAddressProvider:
         self._resolved_country = ""
 
     def load_addresses(self, area_query: str) -> list[Address]:
+        """Return the address pool for ``area_query``, using cache when possible."""
         cache_path = self._cache_path(area_query)
         meta_path = self._meta_path(area_query)
         cached = self._load_cache(cache_path)
@@ -258,21 +293,26 @@ class OpenStreetMapAddressProvider:
 
     @staticmethod
     def _digest(area_query: str) -> str:
+        """Stable short hex digest of an area query, used as the cache key."""
         return hashlib.md5(area_query.strip().lower().encode("utf-8")).hexdigest()[:12]
 
     def _cache_path(self, area_query: str) -> Path:
+        """Path to the parquet cache file for an area query."""
         return self._cache_dir / f"addresses_{self._digest(area_query)}.parquet"
 
     def _meta_path(self, area_query: str) -> Path:
+        """Path to the JSON metadata file (country code) for an area query."""
         return self._cache_dir / f"addresses_{self._digest(area_query)}.meta.json"
 
     @staticmethod
     def _write_meta(path: Path, country_code: str) -> None:
+        """Persist the resolved country code next to the cached address pool."""
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps({"country_code": country_code}), encoding="utf-8")
 
     @staticmethod
     def _load_meta(path: Path) -> str:
+        """Read the cached country code; returns ``""`` when absent or unreadable."""
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
             return str(data.get("country_code") or "")
@@ -280,6 +320,7 @@ class OpenStreetMapAddressProvider:
             return ""
 
     def _load_cache(self, path: Path) -> list[Address] | None:
+        """Read the parquet cache into Address objects; ``None`` on miss/corruption."""
         if not path.is_file():
             return None
         try:
@@ -314,6 +355,7 @@ class OpenStreetMapAddressProvider:
         ]
 
     def _write_cache(self, path: Path, addresses: list[Address]) -> None:
+        """Persist the address pool as parquet for offline repeat runs."""
         frame = pd.DataFrame(
             {
                 "street_address": [address.street_address for address in addresses],
@@ -334,6 +376,7 @@ class OpenStreetMapAddressProvider:
         frame.to_parquet(path, index=False)
 
     def _fetch_addresses(self, area_query: str) -> list[Address]:
+        """Geocode the area, pull addressed elements, and fall back to named streets."""
         bbox = _parse_bbox(area_query)
         if bbox is None:
             area = self._geocode_area(area_query)
@@ -388,6 +431,7 @@ class OpenStreetMapAddressProvider:
         )
 
     def _geocode_area(self, area_query: str) -> _GeocodedArea:
+        """Resolve a place-name query to a bounding box via Nominatim search."""
         payload = self._nominatim_get(
             _NOMINATIM_SEARCH_URL,
             params={"q": area_query, "format": "jsonv2", "addressdetails": 1, "limit": 1},
@@ -413,6 +457,7 @@ class OpenStreetMapAddressProvider:
         )
 
     def _geocode_bbox(self, bbox: tuple[float, float, float, float]) -> _GeocodedArea:
+        """Attach place metadata to a caller-supplied bbox via Nominatim reverse lookup."""
         south, west, north, east = bbox
         payload = self._nominatim_get(
             _NOMINATIM_REVERSE_URL,
@@ -436,6 +481,7 @@ class OpenStreetMapAddressProvider:
         )
 
     def _run_overpass_query(self, query: str) -> overpy.Result:
+        """POST an Overpass QL query to the public API with retry/backoff."""
         last_status: int | None = None
         for attempt in range(self._max_retries):
             try:
@@ -455,6 +501,7 @@ class OpenStreetMapAddressProvider:
         raise AddressLookupError(f"Overpass API request failed (HTTP {last_status}).")
 
     def _query_real_addresses(self, area: _GeocodedArea) -> list[Address]:
+        """Query Overpass for addressed elements in the area's bounding box."""
         query = _build_real_address_query(
             area.south, area.west, area.north, area.east, self._max_addresses
         )
@@ -502,6 +549,7 @@ class OpenStreetMapAddressProvider:
         return "URBAN"
 
     def _query_named_streets(self, area: _GeocodedArea) -> list[Address]:
+        """Fallback: synthesize addresses on named local streets when real ones are scarce."""
         query = _build_named_street_query(
             area.south, area.west, area.north, area.east, self._max_addresses
         )
@@ -517,6 +565,7 @@ class OpenStreetMapAddressProvider:
     def _parse_elements(
         self, result: overpy.Result, fallback_city: str, fallback_state: str
     ) -> list[Address]:
+        """Convert Overpass ways/nodes with address tags into deduplicated Addresses."""
         addresses: list[Address] = []
         for element in [*result.ways, *result.nodes]:
             tags = element.tags or {}
@@ -556,6 +605,7 @@ class OpenStreetMapAddressProvider:
 
     @staticmethod
     def _named_streets(result: overpy.Result) -> list[str]:
+        """Unique street names from the named-street query results, in order."""
         names: list[str] = []
         seen: set[str] = set()
         for way in result.ways:
@@ -572,6 +622,7 @@ class OpenStreetMapAddressProvider:
         state: str,
         count: int,
     ) -> list[Address]:
+        """Build plausible house numbers on the given streets (deterministic by name)."""
         if not street_names:
             return []
         addresses: list[Address] = []
@@ -593,6 +644,7 @@ class OpenStreetMapAddressProvider:
 
     @staticmethod
     def _dedupe(addresses: list[Address]) -> list[Address]:
+        """Drop exact (street_address, city, state) duplicates, keeping first occurrence."""
         seen: set[tuple[str, str, str]] = set()
         unique: list[Address] = []
         for address in addresses:

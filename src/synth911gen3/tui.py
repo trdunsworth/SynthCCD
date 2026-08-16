@@ -1,3 +1,11 @@
+"""Textual terminal UI for generating synthetic 911 data.
+
+A forms-based interface with Parameters and Help tabs. Field values are
+parsed into a :class:`~synth911gen3.config.GenerationRequest`; generation
+runs on a background worker with a progress bar and status panel. Launch
+with ``synth911gen3 tui``.
+"""
+
 from __future__ import annotations
 
 from collections.abc import Callable, Sequence
@@ -46,6 +54,7 @@ class FieldValidationError(ValueError):
     """
 
     def __init__(self, message: str, fields: Sequence[str]) -> None:
+        """Store the offending field IDs alongside the error message."""
         super().__init__(message)
         self.fields = list(fields)
 
@@ -54,6 +63,7 @@ _T = TypeVar("_T")
 
 
 def _parse_int(value: str, field: str, min_value: int | None = None) -> int:
+    """Parse an integer field, raising a field-specific ValueError on failure."""
     try:
         parsed = int(value.strip())
     except ValueError as exc:
@@ -64,6 +74,7 @@ def _parse_int(value: str, field: str, min_value: int | None = None) -> int:
 
 
 def _parse_date_field(value: str, field: str) -> date | None:
+    """Parse a YYYY-MM-DD field, returning ``None`` when left blank."""
     stripped = value.strip()
     if not stripped:
         return None
@@ -74,6 +85,7 @@ def _parse_date_field(value: str, field: str) -> date | None:
 
 
 def _field(label: str, widget_id: str, widget: Input | Select) -> Vertical:
+    """Wrap a labeled input widget in a styled Vertical container."""
     return Vertical(
         Static(label, classes="field-label"),
         widget,
@@ -83,6 +95,7 @@ def _field(label: str, widget_id: str, widget: Input | Select) -> Vertical:
 
 
 def _section_title(title: str) -> Static:
+    """Build a styled section heading."""
     return Static(title, classes="section-title")
 
 
@@ -92,7 +105,9 @@ _HELP_TEXT = (
     "  Rows               Number of incident rows to generate (default: 10000).\n"
     "  Seed               Random seed for reproducible output (default: 911).\n"
     "  Dataset            incidents, phone, or all (default: incidents).\n"
-    "  Output format      csv, parquet, json, yaml, pandas, or polars (default: csv).\n"
+    "  Output format      csv, parquet, json, yaml, pandas, polars, geojson,\n"
+    "                     shapefile, postgresql, sqlserver, mariadb, duckdb,\n"
+    "                     sqlite (default: csv).\n"
     "  ID format          integer or guid for id_number (default: integer).\n"
     "  Area query         OpenStreetMap search area for addresses (default: Kansas City, MO).\n"
     "  Output directory   Directory for exported files (default: output).\n"
@@ -120,6 +135,8 @@ _HELP_TEXT = (
 
 
 class Synth911Tui(App[None]):
+    """The Textual application: parameter form, help tab, and progress area."""
+
     TITLE = "Synth911Gen3"
     SUB_TITLE = "Synthetic CAD incidents and hourly phone-center call counts"
     CSS = """
@@ -232,10 +249,12 @@ class Synth911Tui(App[None]):
     ]
 
     def __init__(self) -> None:
+        """Initialize the app with no active worker."""
         super().__init__()
         self._worker: Worker[None] | None = None
 
     def compose(self) -> ComposeResult:
+        """Lay out the parameter form, help tab, and output area."""
         defaults = GenerationRequest()
         yield Header(show_clock=True)
         with Vertical(id="app"):
@@ -392,15 +411,19 @@ class Synth911Tui(App[None]):
         yield Footer()
 
     def action_generate(self) -> None:
+        """Binding ``g``: kick off generation from the current form values."""
         self._generate()
 
     def action_load_params(self) -> None:
+        """Binding ``p``: load a params file into the form fields."""
         self._load_params()
 
     def action_reset(self) -> None:
+        """Binding ``r``: restore default parameter values."""
         self._reset()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Route button presses to the corresponding action."""
         if event.button.id == "generate":
             self._generate()
         elif event.button.id == "load_params":
@@ -409,24 +432,29 @@ class Synth911Tui(App[None]):
             self._reset()
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        """Clear the invalid style once the user starts editing a field."""
         event.input.remove_class("invalid")
 
     def _set_status(self, message: str, level: str = "info") -> None:
+        """Update the status panel text and style (info/success/error)."""
         status = self.query_one("#status", Static)
         status.update(message)
         for candidate in ("info", "success", "error"):
             status.set_class(candidate == level, candidate)
 
     def _clear_invalid_fields(self) -> None:
+        """Remove the invalid style from every marked field."""
         for widget in self.query(".invalid"):
             widget.remove_class("invalid")
 
     def _style_invalid_fields(self, fields: Sequence[str]) -> None:
+        """Mark the given widget IDs as invalid for visual feedback."""
         for field_id in fields:
             widget = self.query_one(f"#{field_id}")
             widget.add_class("invalid")
 
     def _apply_request(self, request: GenerationRequest) -> None:
+        """Populate every form widget from a GenerationRequest."""
         self.query_one("#rows", Input).value = str(request.rows)
         self.query_one("#seed", Input).value = str(request.seed)
         self.query_one("#area", Input).value = request.area_query
@@ -459,6 +487,7 @@ class Synth911Tui(App[None]):
         )
 
     def _load_params(self) -> None:
+        """Load a params file from the Params file field and apply it to the form."""
         status = self.query_one("#status", Static)
         raw = self.query_one("#params", Input).value.strip()
         if not raw:
@@ -479,12 +508,14 @@ class Synth911Tui(App[None]):
         status.update(f"Loaded params from {path}")
 
     def _reset(self) -> None:
+        """Restore default parameter values and clear the params file field."""
         self._clear_invalid_fields()
         self._apply_request(GenerationRequest())
         self.query_one("#params", Input).value = ""
         self.query_one("#status", Static).update("Defaults restored.")
 
     def _build_request(self) -> GenerationRequest:
+        """Parse the form into a GenerationRequest, collecting per-field errors."""
         errors: dict[str, str] = {}
 
         def parse(field_id: str, fn: Callable[[], _T]) -> _T | None:
@@ -577,6 +608,7 @@ class Synth911Tui(App[None]):
         )
 
     def _generate(self) -> None:
+        """Validate the form and launch the generation worker."""
         self._clear_invalid_fields()
         try:
             request = self._build_request()
@@ -595,6 +627,7 @@ class Synth911Tui(App[None]):
         )
 
     def _generation_worker(self, request: GenerationRequest) -> None:
+        """Background thread: run generation and report back on the UI thread."""
         def on_progress(dataset: str, done: int, total: int) -> None:
             self.call_from_thread(self._report_progress, dataset, done, total)
 
@@ -611,16 +644,19 @@ class Synth911Tui(App[None]):
         self.call_from_thread(self._on_generation_success, result, request.output_format)
 
     def _report_progress(self, dataset: str, done: int, total: int) -> None:
+        """Update the progress bar and status text from the worker thread."""
         progress = self.query_one("#progress", ProgressBar)
         progress.update(total=total, progress=done)
         self._set_status(f"Generating {dataset}: {done:,} / {total:,}", "info")
 
     def _on_generation_error(self, message: str) -> None:
+        """Re-enable the UI and show an error status."""
         self.query_one("#progress", ProgressBar).display = False
         self.query_one("#generate", Button).disabled = False
         self._set_status(message, "error")
 
     def _on_generation_success(self, result: GenerationResult, output_format: OutputFormat) -> None:
+        """Report success: exported file paths, or frame shapes for in-memory formats."""
         self.query_one("#progress", ProgressBar).display = False
         self.query_one("#generate", Button).disabled = False
 
@@ -647,5 +683,6 @@ class Synth911Tui(App[None]):
 
 
 def run() -> None:
+    """Launch the TUI (injects system TLS trust first, then runs the app)."""
     maybe_inject_system_trust()
     Synth911Tui().run()

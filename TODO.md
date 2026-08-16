@@ -195,8 +195,8 @@ recommendation docs in `docs/`, and direct code review.
       `shift_config` section to `RealismConfig`/YAML (`ShiftConfig`/`Shift` in
       `shifts.py`): crew rotation pattern, per-shift hours/label/rotation group, and
       staffing; four presets (`2x12h-4shift-14day` default, `2x12h-2shift`, `3x8h-3shift`,
-      `4x10h-4shift`) selectable via `--shift-preset`/TUI/params. Still open from the
-      AGENTS.md list: **geographic zones** (URBAN/SUBURBAN/RURAL) — none implemented yet.
+      `4x10h-4shift`) selectable via `--shift-preset`/TUI/params. Geographic zones
+      (URBAN/SUBURBAN/RURAL) are implemented — see below.
 - [x] **Enhanced address generation via overpy/Overpass** — done.
 - [x] **Personnel modeling — workload weighting.** Separate calltaker/dispatcher pools with
       Zipf-like workload weighting are in place (see below). Deliberately not done: ASCII
@@ -302,7 +302,10 @@ recommendation docs in `docs/`, and direct code review.
 
 ### Core Functionality
 - [ ] **P1 — Business/landmark indicator column.** AGENTS.md: "If an address is a business address or a known landmark then that should be reflected in a column on its own." Requires mapping `amenity`/`shop`/`tourism` OSM tags onto address results.
-- [ ] **P1 — Geographic zone multipliers** (URBAN/SUBURBAN/RURAL) applied to travel time. Requires geocoding addresses to zones and adding zone-based travel time multipliers to realism config.
+- [x] **P1 — Geographic zone multipliers** (URBAN/SUBURBAN/RURAL) applied to travel time.
+  Implemented via `zone_travel_multipliers` in realism config and OSM-based zone
+  classification on the `Address` model (see the checked item under "Realism
+  Improvements" above); kept here as a reference to the completed work.
 - [ ] **P2 — Multi-agency incidents with unit counts.** Extend current assist problem types to full multi-record incidents where one call spawns LAW+FIRE+EMS records with unit counts and availability tracking.
 - [ ] **P2 — Cadence/queueing simulation.** Constrained simulation with unit availability queues (simpy) for dispatch realism. Prototype at P2/P3.
 - [ ] **P2 — Weather and seasonal correlation enhancements.** Current seasonal multipliers are static; integrate real weather data (temperature, precipitation) to drive problem type correlations dynamically.

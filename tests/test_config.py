@@ -1,3 +1,4 @@
+"""Tests for the GenerationRequest dataclass and its validation."""
 from pathlib import Path
 
 import pytest

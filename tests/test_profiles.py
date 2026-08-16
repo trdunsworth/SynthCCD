@@ -1,3 +1,4 @@
+"""Tests that constant realism profiles produce valid, varied distributions."""
 from synth911gen3.constants import (
     AGENCY_WEIGHTS,
     CALL_RECEPTION_WEIGHTS,

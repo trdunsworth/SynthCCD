@@ -11,7 +11,8 @@ TUI-first scaffold for generating synthetic 9-1-1 CAD incidents and hourly phone
   `postfix_directional`, `postal_code`, plus the combined `street_address` and `location`
 - Time-derived columns from `call_start_time`: `hour`, `dow` (MON–SUN), `week_no` (ISO week)
 - Hourly call-count generation for 9-1-1, non-emergency, abandoned, and outbound calls
-- Export routing for CSV, Parquet, JSON, YAML, pandas, and polars
+- Export routing for CSV, Parquet, JSON, YAML, pandas, polars, GeoJSON, Shapefile,
+  and direct database targets (PostgreSQL, SQL Server, MariaDB, DuckDB, SQLite)
 - OpenStreetMap-backed address provider abstraction with local caching
 - Typer CLI and Textual TUI entrypoints
 - Pytest coverage for defaults, generation flow, and export behavior
@@ -61,7 +62,7 @@ uv run synth911gen3 tui
 ```powershell
 uv run pytest tests/
 uv run ruff check .
-uv run ty check
+uv run ty check src
 uv run scripts/audit_deps.py   # dependency security audit (pip-audit)
 ```
 

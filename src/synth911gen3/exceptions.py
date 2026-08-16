@@ -1,3 +1,13 @@
+"""Exception hierarchy for synth911gen3.
+
+All package errors derive from :class:`Synth911GenError`, so callers can
+catch one base type and still distinguish failure classes when they need
+to. Validation problems, address-provider failures, and export failures
+are deliberately separate so UI and API layers can react differently
+(e.g. show a field error vs. suggest a network fix).
+"""
+
+
 class Synth911GenError(Exception):
     """Base exception for synth911gen3."""
 

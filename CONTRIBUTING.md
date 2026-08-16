@@ -44,12 +44,12 @@ on):
 ## Project structure
 
 ```
-src/          Source material for review (read-only — do not alter)
-docs/         v2-era reference scripts and guidance (not part of the package)
-output/       Generated datasets (gitignored)
-tests/        pytest suite
-config/       Example params and realism-config files
-scripts/      Developer/CI helpers (e.g. scripts/audit_deps.py)
+src/synth911gen3/  Live package (CLI, TUI, server, generators)
+docs/              Read-only v2-era reference scripts and guidance (not part of the package)
+output/            Generated datasets (gitignored)
+tests/             pytest suite
+config/            Example params and realism-config files
+scripts/           Developer/CI helpers (e.g. scripts/audit_deps.py)
 ```
 
 ## Code style
@@ -136,7 +136,7 @@ A change is not complete until the relevant guides are updated.
 - All CI checks must pass: ruff, ty, pytest, coverage ≥ 80%, and the
   dependency audit (`.github/workflows/ci.yml` runs these on every push/PR).
 - Tests are required for new features.
-- Do not alter files under `src/` (source material for review) and never delete
+- Do not alter files under `docs/` (read-only v2-era reference material) and never delete
   the project.
 
 ## Permissions summary
@@ -155,5 +155,5 @@ Require approval:
 
 Not allowed:
 
-- Altering files in `src/`
+- Altering files in `docs/` (read-only v2-era reference material)
 - Deleting the project

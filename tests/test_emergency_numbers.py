@@ -1,3 +1,4 @@
+"""Tests for the emergency-number registry and parsing/resolution helpers."""
 import pytest
 
 from synth911gen3.constants import DEFAULT_COUNTRY

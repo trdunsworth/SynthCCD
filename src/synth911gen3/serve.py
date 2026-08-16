@@ -1,3 +1,12 @@
+"""FastAPI HTTP server exposing generation as a service.
+
+Endpoints: ``GET /health``, ``GET /schema`` (preview without fetching
+addresses), ``POST /generate`` (JSON summary or file download), and
+``POST /generate/stream`` (chunked CSV/Parquet response). The API mirrors
+the CLI's params-file semantics through :class:`GenerationRequestModel`.
+Run with ``python -m synth911gen3.serve`` or the CLI serve command.
+"""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -50,6 +59,7 @@ class GenerationRequestModel(BaseModel):
     @field_validator("output_format", mode="before")
     @classmethod
     def _validate_output_format(cls, v: str | None) -> str | None:
+        """Normalize and validate the output_format string."""
         if v is None:
             return None
         valid = {"csv", "parquet", "json", "yaml", "pandas", "polars"}
@@ -60,6 +70,7 @@ class GenerationRequestModel(BaseModel):
     @field_validator("dataset", mode="before")
     @classmethod
     def _validate_dataset(cls, v: str | None) -> str | None:
+        """Normalize and validate the dataset string."""
         if v is None:
             return None
         valid = {"incidents", "phone", "all"}
@@ -70,6 +81,7 @@ class GenerationRequestModel(BaseModel):
     @field_validator("id_format", mode="before")
     @classmethod
     def _validate_id_format(cls, v: str | None) -> str | None:
+        """Normalize and validate the id_format string."""
         if v is None:
             return None
         valid = {"integer", "guid"}

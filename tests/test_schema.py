@@ -1,3 +1,4 @@
+"""Tests for the pydantic schema models backing config, params, and output."""
 import pytest
 from datetime import date
 from pathlib import Path
