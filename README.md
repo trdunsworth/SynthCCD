@@ -75,3 +75,7 @@ On networks behind a TLS-inspecting proxy, prefix the audit with
 - `REALISMGUIDE.md` — realism YAML configuration reference, validation rules, and default distributions
 - `docs/adr/` — architecture decision records explaining the significant design decisions
 - `CHANGELOG.md` — release history
+- HTML API reference (Sphinx): `uv run python scripts/build_docs.py`, then open `output/docs/index.html`
+
+The API reference is generated with Sphinx from the package docstrings
+(`docsrc/` sources, `autodoc` + `napoleon`, `bizstyle` theme).

@@ -1956,12 +1956,29 @@ A: `CHANGELOG.md` in the repository root.
 uv run pytest tests/              # Run the test suite (enforces >= 80% coverage)
 uv run ruff check .               # Lint
 uv run ty check src               # Type-check
+uv run python scripts/build_docs.py    # Build the HTML docs site into output/docs/
 ```
 
 Coverage is enforced on every test run: `pyproject.toml` configures `--cov`
 with a `fail_under = 80` threshold, so a run that drops below 80% exits non-zero.
 CI also runs an explicit coverage check. Run just the summary without failing
 with `uv run pytest tests/ -q --no-cov`.
+
+### Building the Documentation
+
+The API reference is generated from docstrings with Sphinx (`autodoc` +
+`napoleon`, `bizstyle` theme). Source lives in `docsrc/` (`docs/` is reserved
+for read-only v2-era reference material); the built site goes to
+`output/docs/` and is not tracked by git.
+
+```bash
+uv run python scripts/build_docs.py          # build (HTML)
+uv run python scripts/build_docs.py --clean  # wipe output/docs/ first
+uv run python scripts/build_docs.py --strict # treat warnings as errors
+```
+
+Open `output/docs/index.html` in a browser to view the site. A clean,
+warning-free build is required before publishing or in CI.
 
 ---
 

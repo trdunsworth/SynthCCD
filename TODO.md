@@ -185,6 +185,13 @@ recommendation docs in `docs/`, and direct code review.
       version `0.1.0` in `pyproject.toml`; all core features documented under [Unreleased] and
       [0.1.0] sections. Future releases will follow semver with entries moved from
       [Unreleased] to versioned sections on tag.
+- [x] **P2 — Add a Sphinx HTML documentation site.** Every module, class, and public
+      method in `src/synth911gen3/` (and every test module) now carries a
+      Sphinx-autodoc-ready docstring (Google style, `sphinx.ext.napoleon`-compatible).
+      `docsrc/` holds the Sphinx sources (`conf.py`, `index.rst`, `api/*.rst`, `bizstyle`
+      theme, `autodoc` + `napoleon` + `viewcode`); `scripts/build_docs.py` builds the site
+      into `output/docs/` (`--clean`/`--strict` flags). `docs/` remains read-only v2-era
+      material. Build is warning-free under `--strict`.
 
 ---
 
