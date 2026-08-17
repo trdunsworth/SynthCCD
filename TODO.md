@@ -408,6 +408,12 @@ recommendation docs in `docs/`, and direct code review.
 - [ ] **P2 — Load testing benchmarks.** CI benchmarks for generation throughput at various scales (10K, 100K, 1M, 10M rows).
 
 ### Documentation
+- [ ] **P2 — Enable GitHub Pages for the documentation site.** The Sphinx docs workflow
+  (`.github/workflows/docs.yml`) builds and deploys to `dunsworth-mann.com/SynthCCD`, but
+  the deploy step fails because the repo is private and GitHub Pages is not yet enabled.
+  When the repo is made public, enable **Settings → Pages → Source: GitHub Actions** so
+  the workflow can deploy. The CNAME file (`docsrc/CNAME`) and 404 page are already in
+  place.
 - [ ] **P2 — Video tutorials.** Short screen-capture demos for tutorials.
 - [x] **P2 — Architecture decision records (ADRs).** Document key design decisions (vectorization approach, pydantic vs dataclass, etc.).
   Added `docs/adr/` with a format/index README plus ten records: `0001` vectorized
