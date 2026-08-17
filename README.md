@@ -36,25 +36,25 @@ Generate the default dataset (10,000 incidents) into `output\`. Add `--dataset a
 to also produce hourly phone counts, or `--dataset phone` for phone metrics only:
 
 ```powershell
-uv run synth911gen3 generate
+uv run SynthCCD generate
 ```
 
 Generate only incidents in parquet format:
 
 ```powershell
-uv run synth911gen3 generate --dataset incidents --format parquet --rows 5000
+uv run SynthCCD generate --dataset incidents --format parquet --rows 5000
 ```
 
 Generate incidents with GUID IDs:
 
 ```powershell
-uv run synth911gen3 generate --id-format guid
+uv run SynthCCD generate --id-format guid
 ```
 
 Launch the TUI:
 
 ```powershell
-uv run synth911gen3 tui
+uv run SynthCCD tui
 ```
 
 ## Quality checks
@@ -67,7 +67,7 @@ uv run scripts/audit_deps.py   # dependency security audit (pip-audit)
 ```
 
 On networks behind a TLS-inspecting proxy, prefix the audit with
-`$env:SYNTH911_SYSTEM_TRUST = "1"` so it verifies against the OS trust store.
+`$env:SYNTHCCD_SYSTEM_TRUST = "1"` so it verifies against the OS trust store.
 
 ## Documentation
 

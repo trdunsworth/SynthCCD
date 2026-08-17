@@ -64,8 +64,8 @@ def test_configure_logging_verbose_sets_debug_level() -> None:
 
 
 def test_get_logger_is_package_scoped() -> None:
-    assert get_logger("incidents").name == "synth911gen3.incidents"
-    assert get_logger().name == "synth911gen3"
+    assert get_logger("incidents").name == "SynthCCD.incidents"
+    assert get_logger().name == "SynthCCD"
 
 
 def test_progress_reporter_emits_only_finish_for_small_totals() -> None:
@@ -91,7 +91,7 @@ def test_progress_reporter_emits_intermediates_for_large_totals() -> None:
 
 
 def test_application_logs_build_status(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO, logger="synth911gen3")
+    caplog.set_level(logging.INFO, logger="SynthCCD")
     provider = StaticAddressProvider(
         [
             Address("101 N Main St", "Kansas City", "Missouri"),
@@ -112,7 +112,7 @@ def test_application_logs_build_status(caplog: pytest.LogCaptureFixture) -> None
 
 
 def test_incident_generator_logs_progress_for_large_run(caplog: pytest.LogCaptureFixture) -> None:
-    caplog.set_level(logging.INFO, logger="synth911gen3")
+    caplog.set_level(logging.INFO, logger="SynthCCD")
     provider = StaticAddressProvider(
         [
             Address("101 N Main St", "Kansas City", "Missouri"),

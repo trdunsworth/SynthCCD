@@ -409,7 +409,7 @@ class SchemaVersion(BaseModel):
 
     version: str = "1.0"
     generated_at: str
-    package: str = "synth911gen3"
+    package: str = "SynthCCD"
     package_version: str
     python_version: str
     platform: str

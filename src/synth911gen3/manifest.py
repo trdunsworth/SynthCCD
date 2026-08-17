@@ -14,7 +14,7 @@ import json
 import platform
 import sys
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pandas as pd
@@ -23,9 +23,8 @@ from .config import GenerationRequest, OutputFormat
 from .constants import DATA_SCHEMA_VERSION
 from .realism_config import RealismConfig
 
-
 MANIFEST_VERSION = "1.0"
-PACKAGE_NAME = "synth911gen3"
+PACKAGE_NAME = "SynthCCD"
 
 
 @dataclass(slots=True)
@@ -99,7 +98,7 @@ class Manifest:
 
         return cls(
             version=MANIFEST_VERSION,
-            generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
             package=PACKAGE_NAME,
             package_version=_get_package_version(),
             python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",

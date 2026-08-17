@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://dunsworth-mann.com/SynthCCD/sitemap.xml

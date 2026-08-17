@@ -15,12 +15,12 @@ from itertools import chain
 
 from .addresses import AddressProvider, OpenStreetMapAddressProvider
 from .config import DatasetKind, GenerationRequest, OutputFormat
+from .db_exporter import export_to_database
 from .domain import GenerationResult
 from .exporters import export_chunked_generator, export_generated_data, export_manifest
 from .generators import HourlyCallCountGenerator, IncidentGenerator
 from .logging_conf import get_logger
 from .manifest import Manifest
-from .db_exporter import export_to_database
 
 logger = get_logger("app")
 

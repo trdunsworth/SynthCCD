@@ -1,4 +1,4 @@
-"""synth911gen3 — synthetic CAD dispatch and phone-equipment data.
+"""SynthCCD — synthetic CAD dispatch and phone-equipment data.
 
 Emulates dispatch archival records (incident lifecycle, personnel,
 addresses) and hourly call-center phone metrics, seeded and configurable

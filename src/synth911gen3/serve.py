@@ -24,7 +24,7 @@ from synth911gen3.exceptions import AddressLookupError, ExportError, ValidationE
 from synth911gen3.params import build_request_from_params, load_params_file
 
 app = FastAPI(
-    title="synth911gen3 API",
+    title="SynthCCD API",
     description="Synthetic 911 CAD incident and hourly phone-center data generator",
     version="0.1.0",
 )
@@ -146,7 +146,7 @@ def _build_request(model: GenerationRequestModel) -> GenerationRequest:
 @app.get("/health")
 async def health_check() -> dict[str, str]:
     """Health check endpoint."""
-    return {"status": "healthy", "service": "synth911gen3"}
+    return {"status": "healthy", "service": "SynthCCD"}
 
 
 @app.get("/schema")
@@ -237,7 +237,7 @@ async def generate_data(
 
             if download and len(artifacts) == 1:
                 # Single file download
-                dataset_name, path = next(iter(artifacts.items()))
+                _dataset_name, path = next(iter(artifacts.items()))
                 return FileResponse(
                     path=path,
                     filename=Path(path).name,

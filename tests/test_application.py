@@ -1,8 +1,7 @@
 """End-to-end tests for Synth911Application generation across datasets and formats."""
+import sqlite3
 from datetime import date
 from uuid import UUID
-
-import sqlite3
 
 from synth911gen3.addresses import StaticAddressProvider
 from synth911gen3.app import Synth911Application

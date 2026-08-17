@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import numpy as np
@@ -186,7 +186,7 @@ def _tolerance_for(
         if "answered" in key:
             return tolerances.pct_abs
         return max(tolerances.mean_rel * abs(baseline_value), 1.0)
-    if key.startswith("timing.") or key.startswith("total_elapsed"):
+    if key.startswith(("timing.", "total_elapsed")):
         return max(tolerances.mean_rel * abs(baseline_value), tolerances.mean_abs_floor)
     return tolerances.fraction_abs
 
@@ -272,7 +272,7 @@ def _package_version() -> str:
     try:
         from importlib.metadata import version
 
-        return version("synth911gen3")
+        return version("SynthCCD")
     except Exception:
         return "0.0.0-dev"
 
@@ -305,7 +305,7 @@ def build_baseline(
             "phone_days": phone_days,
             "start_date": start_date.isoformat(),
             "end_date": end_date.isoformat(),
-            "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
         },
         "incidents": incident_sig,
         "phone": phone_sig,

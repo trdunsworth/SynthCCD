@@ -1,7 +1,8 @@
 """Tests for the pydantic schema models backing config, params, and output."""
-import pytest
 from datetime import date
 from pathlib import Path
+
+import pytest
 
 from synth911gen3.schema import (
     DatabaseDialect,
@@ -379,4 +380,4 @@ class TestSchemaVersion:
             platform="linux",
         )
         assert version.version == "1.0"
-        assert version.package == "synth911gen3"
+        assert version.package == "SynthCCD"

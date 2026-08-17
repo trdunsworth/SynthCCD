@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from textual.widgets import Input, ProgressBar, Select, Static
 
 from synth911gen3.addresses import StaticAddressProvider
 from synth911gen3.app import Synth911Application
@@ -12,8 +13,6 @@ from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat, Output
 from synth911gen3.domain import Address, GenerationResult
 from synth911gen3.generators.incidents import IncidentGenerator
 from synth911gen3.tui import FieldValidationError, Synth911Tui
-
-from textual.widgets import Input, ProgressBar, Select, Static
 
 TUI_INPUT_IDS = {
     "rows",

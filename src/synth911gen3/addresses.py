@@ -37,8 +37,8 @@ logger = get_logger("addresses")
 _NOMINATIM_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 _NOMINATIM_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
 _OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-_USER_AGENT = "synth911gen3/0.1.0 (synthetic CAD data generator)"
-_DEFAULT_CACHE_DIR = Path.home() / ".cache" / "synth911gen3"
+_USER_AGENT = "SynthCCD/0.1.0 (synthetic CAD data generator)"
+_DEFAULT_CACHE_DIR = Path.home() / ".cache" / "SynthCCD"
 _NOMINATIM_MIN_REQUEST_INTERVAL = 1.0  # seconds; Nominatim usage policy: max 1 req/s
 _RETRYABLE_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
 
@@ -184,7 +184,7 @@ def _describe_http_error(exc: httpx.HTTPError) -> str:
         message = getattr(tls, "verify_message", "") or str(tls)
         return (
             f"certificate verification failed ({message}). If you are behind a "
-            "TLS-inspecting proxy, set SYNTH911_SYSTEM_TRUST=1 to verify against the "
+            "TLS-inspecting proxy, set SYNTHCCD_SYSTEM_TRUST=1 to verify against the "
             "OS trust store."
         )
     detail = str(exc.__cause__ or exc)

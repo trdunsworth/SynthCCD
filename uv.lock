@@ -1998,7 +1998,7 @@ wheels = [
 ]
 
 [[package]]
-name = "synth911gen3"
+name = "synthccd"
 version = "0.9.5"
 source = { editable = "." }
 dependencies = [

@@ -1,4 +1,4 @@
-# CHANGELOG.md — Synth911Gen3
+# CHANGELOG.md — SynthCCD
 
 All notable changes to this project will be documented in this file.
 
@@ -37,15 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **International personnel names**: country-matched name locales derived from the geocoded OSM region (`resolved_country()` on address providers, cached in a `.meta.json` sidecar), weighted multi-ethnic blend for US deployments, per-country overrides via the realism config `name_locales` section, CJK family-name-first ordering, and `PersonnelNameGenerator` replacing single-locale Faker rosters
 - **SQLite database target**: `sqlite` output format/dialect using the stdlib `sqlite3` driver (no extra dependencies); file-based engine with `db_name` defaulting to `{output_stem}.sqlite3` in `output_dir`; SQLite-aware table-exists/drop/index/type handling; `db_schema` ignored with a warning (SQLite has no schemas); per-statement batch cap (`999 // columns`) honoring SQLite's bound-parameter limit; full CLI `--db-*` flag set, params-file keys, and Python API support
 - **Parquet metadata embedding**: generation provenance (seed, realism config hash, schema hash, schema version, timestamps, request summary) written into each Parquet file's key-value footer metadata as namespaced `synth911:*` pairs — self-documenting files readable by any Parquet tool; embedded at write time for both full and chunked exports (chunked mode derives `schema_hash` from the first chunk); new `DATA_SCHEMA_VERSION` constant and `Manifest.schema_version`/`Manifest.to_kv_metadata()`
-- **Params-file generation CLI**: `synth911gen3 generate --save-params my_run.yaml` writes the
+- **Params-file generation CLI**: `SynthCCD generate --save-params my_run.yaml` writes the
   effective parameters (CLI flags merged over any `--params` file) to a JSON/YAML/TOML params file
   and exits without generating — a convenience for capturing a run's options for later reuse
-- **Config validation CLI**: `synth911gen3 validate-config path/to/config.yaml` validates one or
+- **Config validation CLI**: `SynthCCD validate-config path/to/config.yaml` validates one or
   more realism config YAML files without generating data — parses and runs every realism
   validation rule (weight sums, time-profile keys, dispatch-init-fraction bounds, phone-metric
   bounds, shift config, name locales), printing `OK` per file and exiting non-zero on failure
   (exit 1 for invalid configs, exit 2 for argument errors)
-- **Schema export CLI**: `synth911gen3 schema --format json|yaml --dataset incidents` exports
+- **Schema export CLI**: `SynthCCD schema --format json|yaml --dataset incidents` exports
   the output schema definition (column names and dtypes per dataset, schema version,
   deterministic `schema_hash` matching the manifest/Parquet metadata hash, and
   package/environment provenance) without generating data or fetching addresses — respects
@@ -75,7 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   or `--dataset all` for phone metrics or both; selecting `incidents` or `phone` already
   generated only that dataset.
 - OSM address lookups now surface the underlying network/TLS cause instead of generic "unable to
-  reach" messages; certificate failures include a hint pointing at `SYNTH911_SYSTEM_TRUST=1`.
+  reach" messages; certificate failures include a hint pointing at `SYNTHCCD_SYSTEM_TRUST=1`.
   Connectivity failures raise the new `AddressConnectionError` (subclass of `AddressLookupError`),
   and Overpass network errors no longer slip through the street-name fallback uncaught
 - Personnel names now follow the OSM region's country (falling back to the request `--country`, then `US`) instead of a fixed `en_US` Faker locale
@@ -147,10 +147,10 @@ Initial release candidate. All core AGENTS.md goals implemented.
 - Memory-budget guard with chunked CSV/Parquet export (`max_memory_bytes`)
 - CLI with Typer: generate, schema, dry-run, config file support, params file (JSON/YAML/TOML)
 - TUI with Textual: live progress, field validation, params loading, worker-thread generation
-- Structured logging (`SYNTH911_LOG_LEVEL`, `--verbose/-v`, `--quiet/-q`)
+- Structured logging (`SYNTHCCD_LOG_LEVEL`, `--verbose/-v`, `--quiet/-q`)
 - `--schema` and `--dry-run` flags for preview without full generation
-- TLS trust store injection for corporate proxies (`SYNTH911_SYSTEM_TRUST=1`)
-- FastAPI REST API server (`synth911gen3 serve`) with endpoints: `/health`, `/schema`, `/generate`, `/generate/stream`
+- TLS trust store injection for corporate proxies (`SYNTHCCD_SYSTEM_TRUST=1`)
+- FastAPI REST API server (`SynthCCD serve`) with endpoints: `/health`, `/schema`, `/generate`, `/generate/stream`
 - Multi-stage Docker build with non-root user, health checks, and persistent volumes
 - Docker Compose for API server and one-off generation jobs
 - Pydantic models for request validation

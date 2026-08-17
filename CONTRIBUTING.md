@@ -1,4 +1,4 @@
-# Contributing to synth911gen3
+# Contributing to SynthCCD
 
 Thanks for contributing. This guide covers the development setup, code style,
 testing expectations, and the pull-request process. It is a companion to
@@ -22,7 +22,7 @@ uv self update   # when available
 ### First-time setup
 
 ```powershell
-uv init synth911gen3     # new project (skip if cloning)
+uv init SynthCCD         # new project (skip if cloning)
 uv venv
 uv sync                  # install dependencies from uv.lock
 ```
@@ -38,7 +38,7 @@ uv's default rustls roots do not trust the proxy's issuer, so TLS fails with
 on):
 
 - `uv sync` / `uv add`: prefix with `UV_SYSTEM_CERTS=true`
-- Runtime OSM lookups: set `SYNTH911_SYSTEM_TRUST=1` (uses the dev-only
+- Runtime OSM lookups: set `SYNTHCCD_SYSTEM_TRUST=1` (uses the dev-only
   `truststore` package via `synth911gen3.tls.maybe_inject_system_trust()`)
 
 ## Project structure

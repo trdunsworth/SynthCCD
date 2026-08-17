@@ -1,4 +1,4 @@
-"""Typer command-line interface for synth911gen3.
+"""Typer command-line interface for SynthCCD.
 
 Commands: ``generate`` (default workflow, with params-file support and
 schema/dry-run previews), ``validate-config``, ``schema`` (export the
@@ -32,9 +32,11 @@ from .exceptions import AddressLookupError, ExportError, ValidationError
 from .logging_conf import configure_logging, get_logger
 from .params import (
     build_request_from_params,
-    coerce_param as _coerce_param,  # noqa: F401  (re-exported for tests)
     load_params_file,
     save_params_file,
+)
+from .params import (
+    coerce_param as _coerce_param,  # noqa: F401  (re-exported for tests)
 )
 from .tls import maybe_inject_system_trust
 from .tui import run as run_tui

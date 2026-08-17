@@ -25,7 +25,7 @@ OUTPUT = ROOT / "output" / "docs"
 
 def main(argv: list[str] | None = None) -> int:
     """Parse arguments and invoke Sphinx, returning its exit status."""
-    parser = argparse.ArgumentParser(description="Build the synth911gen3 documentation site.")
+    parser = argparse.ArgumentParser(description="Build the SynthCCD documentation site.")
     parser.add_argument(
         "--clean",
         action="store_true",
@@ -50,6 +50,14 @@ def main(argv: list[str] | None = None) -> int:
     status = build_main(cmd)
 
     if status == 0:
+        # Copy deployment files to the output directory
+        for deploy_file in ("CNAME",):
+            src = DOCSRC / deploy_file
+            if src.exists():
+                shutil.copy2(src, OUTPUT / deploy_file)
+        static_404 = DOCSRC / "_static" / "404.html"
+        if static_404.exists():
+            shutil.copy2(static_404, OUTPUT / "404.html")
         print(f"\nDocumentation built: {OUTPUT}/index.html")
     else:
         print(f"\nSphinx exited with status {status}", file=sys.stderr)

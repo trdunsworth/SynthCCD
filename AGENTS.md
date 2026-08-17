@@ -164,7 +164,7 @@ source .venv/bin/activate  # Linux/Mac
 ## Environment Setup
 
 - Python 3.12+
-- Initialize project: `uv init synth911gen3`
+- Initialize project: `uv init SynthCCD`
 - Create environment: `uv venv && source .venv/bin/activate`
 - Install dependencies: `uv sync`
 - Lock environment: `uv lock`
@@ -176,7 +176,7 @@ rustls roots do not trust the proxy's issuer, so TLS fails with `invalid peer ce
 UnknownIssuer`. Safe workaround (verification stays on):
 
 - `uv sync` / `uv add`: prefix with `UV_SYSTEM_CERTS=true`
-- Runtime OSM lookups: set `SYNTH911_SYSTEM_TRUST=1` (uses the dev-only `truststore` package
+- Runtime OSM lookups: set `SYNTHCCD_SYSTEM_TRUST=1` (uses the dev-only `truststore` package
   via `synth911gen3.tls.maybe_inject_system_trust()` to verify against the OS trust store)
 
 ## Commands

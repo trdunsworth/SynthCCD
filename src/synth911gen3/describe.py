@@ -11,7 +11,7 @@ mirrors the manifest hash.
 from __future__ import annotations
 
 from dataclasses import replace
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from typing import Any
 
 import pandas as pd
@@ -54,7 +54,7 @@ def build_preview_datasets(
             StaticAddressProvider(_STATIC_ADDRESSES)
         ).generate(probe)
     if request.dataset in (DatasetKind.PHONE, DatasetKind.ALL):
-        today = date.today()
+        today = date.today()  # noqa: DTZ011
         probe = replace(request, start_date=today, end_date=today)
         datasets["hourly_call_counts"] = HourlyCallCountGenerator().generate(probe)
     return datasets
@@ -74,20 +74,19 @@ def build_schema_definition(
     """
     import platform
     import sys
-
     from importlib.metadata import version
 
     preview = build_preview_datasets(request, schema_only=True)
     try:
-        package_version = version("synth911gen3")
+        package_version = version("SynthCCD")
     except Exception:
         package_version = "0.0.0-dev"
 
     return {
         "version": DATA_SCHEMA_VERSION,
         "schema_hash": _hash_schema(preview),
-        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "package": "synth911gen3",
+        "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        "package": "SynthCCD",
         "package_version": package_version,
         "python_version": (
             f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"

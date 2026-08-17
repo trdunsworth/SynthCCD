@@ -1,4 +1,4 @@
-"""Exception hierarchy for synth911gen3.
+"""Exception hierarchy for SynthCCD.
 
 All package errors derive from :class:`Synth911GenError`, so callers can
 catch one base type and still distinguish failure classes when they need
@@ -9,7 +9,7 @@ are deliberately separate so UI and API layers can react differently
 
 
 class Synth911GenError(Exception):
-    """Base exception for synth911gen3."""
+    """Base exception for SynthCCD."""
 
 
 class ValidationError(Synth911GenError):

@@ -3,8 +3,8 @@ import pandas as pd
 
 from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat
 from synth911gen3.describe import (
-    SCHEMA_ROWS,
     SAMPLE_ROWS,
+    SCHEMA_ROWS,
     build_preview_datasets,
     build_schema_definition,
 )

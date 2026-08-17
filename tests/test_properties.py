@@ -26,7 +26,8 @@ from uuid import UUID
 
 import numpy as np
 import pandas as pd
-from hypothesis import given, settings, strategies as st
+from hypothesis import given, settings
+from hypothesis import strategies as st
 from scipy.stats import chi2
 
 from synth911gen3.addresses import StaticAddressProvider

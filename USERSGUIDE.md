@@ -1,4 +1,4 @@
-# synth911gen3 User Guide
+# SynthCCD User Guide
 
 A synthetic data generator for 9-1-1 CAD incidents and hourly phone-center metrics.
 
@@ -56,13 +56,13 @@ Pass `--dataset all` to also generate hourly phone counts, or `--dataset phone`
 for phone metrics only:
 
 ```bash
-uv run synth911gen3 generate
+uv run SynthCCD generate
 ```
 
 Launch the interactive TUI:
 
 ```bash
-uv run synth911gen3 tui
+uv run SynthCCD tui
 ```
 
 ---
@@ -78,13 +78,13 @@ This tutorial walks you through generating your first synthetic 911 dataset.
 git clone https://github.com/trdunsworth/synth911gen3.git
 cd synth911gen3
 uv venv && uv sync
-uv run synth911gen3 generate --schema --dataset incidents
+uv run SynthCCD generate --schema --dataset incidents
 ```
 The `--schema` flag shows the column structure without generating data or fetching addresses.
 
 **Step 2: Generate a small dataset**
 ```bash
-uv run synth911gen3 generate --rows 1000 --format parquet --area "Seattle, WA"
+uv run SynthCCD generate --rows 1000 --format parquet --area "Seattle, WA"
 ```
 This generates 1,000 incidents for Seattle, WA in Parquet format. First run will fetch addresses from OpenStreetMap (cached for future runs).
 
@@ -127,7 +127,7 @@ This tutorial focuses on generating the **hourly phone metrics dataset** — agg
 
 **Step 1: Generate one week of hourly data (168 rows = 7 days × 24 hours)**
 ```bash
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --dataset phone \
   --start-date 2026-08-04 \
   --end-date 2026-08-10 \
@@ -154,7 +154,7 @@ print(df.head())
 
 **Step 3b: Generate a full year (8,760 rows = 365 days × 24 hours)**
 ```bash
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --dataset phone \
   --start-date 2026-01-01 \
   --end-date 2026-12-31 \
@@ -237,7 +237,7 @@ phone_metrics:
   answer_time_mu_noise_sd: 0.05
 EOF
 
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --dataset phone \
   --config config/call_center.yaml \
   --start-date 2026-01-01 \
@@ -253,7 +253,7 @@ uv run synth911gen3 generate \
 The registry selects emergency lines by country; see [Emergency Number Registry](#emergency-number-registry). For example, model a UK center (999 + 112):
 
 ```bash
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --dataset phone \
   --country GB \
   --start-date 2026-08-04 \
@@ -334,7 +334,7 @@ time_profiles:
 **Step 4: Test and iterate**
 ```bash
 # Generate test data
-uv run synth911gen3 generate --config config/my_center.yaml --rows 5000 --format pandas
+uv run SynthCCD generate --config config/my_center.yaml --rows 5000 --format pandas
 
 # Compare statistics with your real data
 # Adjust config and repeat until distributions match
@@ -350,7 +350,7 @@ config: "config/my_center.yaml"
 seed: 2024
 ```
 ```bash
-uv run synth911gen3 generate --params params_my_center.yaml
+uv run SynthCCD generate --params params_my_center.yaml
 ```
 
 ---
@@ -364,7 +364,7 @@ Generate millions of rows efficiently using chunked exports and cloud storage.
 **Step 1: Use Parquet with chunked export**
 ```bash
 # 5 million incidents with 1 GiB memory budget
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --rows 5000000 \
   --format parquet \
   --max-memory-bytes 1073741824 \
@@ -391,7 +391,7 @@ seed: 20241219
 ```
 ```bash
 # In CI pipeline
-uv run synth911gen3 generate --params ci_large_scale.yaml
+uv run SynthCCD generate --params ci_large_scale.yaml
 ```
 
 **Step 4: Verify at scale**
@@ -414,7 +414,7 @@ Visualize synthetic incidents on a map using GeoJSON export.
 
 **Step 1: Generate GeoJSON**
 ```bash
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --format geojson \
   --rows 20000 \
   --area "Portland, OR" \
@@ -498,7 +498,7 @@ GRANT ALL PRIVILEGES ON DATABASE cad_warehouse TO etl_user;
 
 **Step 2: Stream data directly**
 ```bash
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --format postgresql \
   --rows 100000 \
   --area "Chicago, IL" \
@@ -544,7 +544,7 @@ SELECT agency, count(*) FROM chicago_incidents GROUP BY agency;
 ### Generate Command Options
 
 ```bash
-uv run synth911gen3 generate [OPTIONS]
+uv run SynthCCD generate [OPTIONS]
 ```
 
 | Option | Short | Default | Description |
@@ -586,22 +586,22 @@ uv run synth911gen3 generate [OPTIONS]
 
 ### Global Options
 
-Global options are accepted before the subcommand (e.g. `uv run synth911gen3 --verbose generate ...`).
+Global options are accepted before the subcommand (e.g. `uv run SynthCCD --verbose generate ...`).
 
 | Option | Short | Default | Description |
 |--------|-------|---------|-------------|
 | `--verbose` | `-v` | *(off)* | Enable debug-level logging to stderr |
 | `--quiet` | `-q` | *(off)* | Suppress all non-error logging |
 
-Logging writes to stderr. The `SYNTH911_LOG_LEVEL` environment variable
+Logging writes to stderr. The `SYNTHCCD_LOG_LEVEL` environment variable
 (`DEBUG`, `INFO`, `WARNING`, `ERROR`) also controls verbosity and is used when
 neither `--verbose` nor `--quiet` is given. On large runs the incident
 generator reports percentage progress (5% steps) once `rows` exceeds 10,000.
 
 ```bash
-uv run synth911gen3 --help          # Show all commands and options
-uv run synth911gen3 generate --help # Show generate-specific options
-uv run synth911gen3 --verbose generate --rows 50000 --format parquet
+uv run SynthCCD --help          # Show all commands and options
+uv run SynthCCD generate --help # Show generate-specific options
+uv run SynthCCD --verbose generate --rows 50000 --format parquet
 ```
 
 ### Schema Preview and Dry Run
@@ -616,16 +616,16 @@ long generation, or fetching addresses from OpenStreetMap.
 
 ```bash
 # Show the incident schema (1-row probe, static addresses)
-uv run synth911gen3 generate --schema --dataset incidents
+uv run SynthCCD generate --schema --dataset incidents
 
 # Show the phone-metrics schema
-uv run synth911gen3 generate --schema --dataset phone
+uv run SynthCCD generate --schema --dataset phone
 
 # Show both schemas plus sample rows
-uv run synth911gen3 generate --dry-run
+uv run SynthCCD generate --dry-run
 
 # Preview with a realism config and GUID ids
-uv run synth911gen3 generate --dry-run --config my_center.yaml --id-format guid
+uv run SynthCCD generate --dry-run --config my_center.yaml --id-format guid
 ```
 
 Sample rows use a small static address pool (never the OSM network) and a
@@ -640,9 +640,9 @@ dtypes for each dataset) as JSON or YAML without generating data or fetching
 addresses:
 
 ```bash
-uv run synth911gen3 schema --format json --dataset incidents
-uv run synth911gen3 schema --format yaml --dataset phone
-uv run synth911gen3 schema --dataset all
+uv run SynthCCD schema --format json --dataset incidents
+uv run SynthCCD schema --format yaml --dataset phone
+uv run SynthCCD schema --dataset all
 ```
 
 | Option | Short | Default | Description |
@@ -661,10 +661,10 @@ dtypes per dataset, and package/environment provenance. The definition reflects
 
 ```bash
 # Write the incidents schema to a file
-uv run synth911gen3 schema --format json --output schema.json
+uv run SynthCCD schema --format json --output schema.json
 
 # Inspect the schema your configured center would produce
-uv run synth911gen3 schema --config my_center.yaml --id-format guid
+uv run SynthCCD schema --config my_center.yaml --id-format guid
 ```
 
 ---
@@ -674,7 +674,7 @@ uv run synth911gen3 schema --config my_center.yaml --id-format guid
 Launch the TUI for interactive data generation:
 
 ```bash
-uv run synth911gen3 tui
+uv run SynthCCD tui
 ```
 
 ### TUI Controls
@@ -731,7 +731,7 @@ The status panel and help tab explain each field.
 Launch the REST API server for programmatic access:
 
 ```bash
-uv run synth911gen3 serve
+uv run SynthCCD serve
 ```
 
 The server runs on `http://0.0.0.0:8000` by default and provides:
@@ -805,41 +805,41 @@ Query parameters:
 
 ```bash
 # Start the API server
-docker compose up -d synth911gen3
+docker compose up -d SynthCCD
 
 # Check health
 curl http://localhost:8000/health
 
 # Run a one-off generation job
-docker compose --profile generate run synth911gen3-generate
+docker compose --profile generate run SynthCCD-generate
 ```
 
 ### Using Docker Directly
 
 ```bash
 # Build the image
-docker build -t synth911gen3:0.1.0 .
+docker build -t SynthCCD:0.1.0 .
 
 # Run the API server
-docker run -d   -p 8000:8000   -v synth911gen3-cache:/home/synth911/.cache/synth911gen3   -v synth911gen3-output:/app/output   --name synth911gen3-api   synth911gen3:0.1.0
+docker run -d   -p 8000:8000   -v SynthCCD-cache:/home/synth911/.cache/synth911gen3   -v SynthCCD-output:/app/output   --name SynthCCD-api   SynthCCD:0.1.0
 
 # Run a one-off generation
-docker run --rm   -v synth911gen3-cache:/home/synth911/.cache/synth911gen3   -v synth911gen3-output:/app/output   synth911gen3:0.1.0   synth911gen3 generate --rows 50000 --format parquet
+docker run --rm   -v SynthCCD-cache:/home/synth911/.cache/synth911gen3   -v SynthCCD-output:/app/output   SynthCCD:0.1.0   SynthCCD generate --rows 50000 --format parquet
 ```
 
 ### Persistent Volumes
 
 | Volume | Purpose |
 |--------|---------|
-| `synth911gen3-cache` | OSM address cache (speeds up subsequent runs) |
-| `synth911gen3-output` | Generated output files |
+| `SynthCCD-cache` | OSM address cache (speeds up subsequent runs) |
+| `SynthCCD-output` | Generated output files |
 
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SYNTH911_LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
-| `SYNTH911_SYSTEM_TRUST` | `0` | Set to `1` to use OS trust store for TLS (corporate proxies) |
+| `SYNTHCCD_LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
+| `SYNTHCCD_SYSTEM_TRUST` | `0` | Set to `1` to use OS trust store for TLS (corporate proxies) |
 
 ---
 
@@ -885,13 +885,13 @@ are named.
 
 ```bash
 # Model UK emergency lines (999 + 112) instead of US 911
-uv run synth911gen3 generate --dataset phone --country GB --start-date 2026-01-01 --end-date 2026-01-07
+uv run SynthCCD generate --dataset phone --country GB --start-date 2026-01-01 --end-date 2026-01-07
 
 # Override with an explicit number set
-uv run synth911gen3 generate --dataset phone --emergency-numbers "999,112"
+uv run SynthCCD generate --dataset phone --emergency-numbers "999,112"
 
 # Add 10-digit direct-dial lines on top of the registry
-uv run synth911gen3 generate --dataset phone --country US --include-10-digit-emergency
+uv run SynthCCD generate --dataset phone --country US --include-10-digit-emergency
 ```
 
 The registry contains short codes for US, CA, GB, IE, FR, DE, AU, NZ, NL, IT, JP,
@@ -919,7 +919,7 @@ Available presets:
 
 ```bash
 # Use a different shift structure from the CLI
-uv run synth911gen3 generate --shift-preset 3x8h-3shift
+uv run SynthCCD generate --shift-preset 3x8h-3shift
 
 # Or programmatically
 GenerationRequest(rows=10000, shift_preset="4x10h-4shift")
@@ -998,8 +998,8 @@ Key facts:
 Validate one or more realism config files without generating any data:
 
 ```bash
-uv run synth911gen3 validate-config config/example_realism.yaml
-uv run synth911gen3 validate-config config/center_a.yaml config/center_b.yaml
+uv run SynthCCD validate-config config/example_realism.yaml
+uv run SynthCCD validate-config config/center_a.yaml config/center_b.yaml
 ```
 
 Each file is parsed and checked against all validation rules (weight sums,
@@ -1013,10 +1013,10 @@ shift config, name locales, etc.). Exit codes:
 | `2` | Argument error (e.g., missing file) |
 
 ```bash
-uv run synth911gen3 validate-config my_center.yaml
+uv run SynthCCD validate-config my_center.yaml
 # my_center.yaml: OK
 
-uv run synth911gen3 validate-config broken.yaml
+uv run SynthCCD validate-config broken.yaml
 # broken.yaml: Priority weights defined for unknown agency: UNKNOWN
 ```
 
@@ -1029,7 +1029,7 @@ Instead of typing every flag on the command line, you can store all generation p
 ### Using a Params File
 
 ```bash
-uv run synth911gen3 generate --params config/example_params.json
+uv run SynthCCD generate --params config/example_params.json
 ```
 
 ### Supported Formats
@@ -1123,22 +1123,22 @@ Omitted keys fall through to the next source, so a params file may contain only 
 
 ```bash
 # File sets rows/area/dates; CLI overrides format and rows
-uv run synth911gen3 generate --params my_run.json --format json --rows 75000
+uv run SynthCCD generate --params my_run.json --format json --rows 75000
 ```
 
 ### Examples
 
 ```bash
 # Full run from a params file
-uv run synth911gen3 generate --params config/example_params.json
+uv run SynthCCD generate --params config/example_params.json
 
 # Override selected values on top of a file
-uv run synth911gen3 generate --params denver.json --rows 1000000 --format parquet
+uv run SynthCCD generate --params denver.json --rows 1000000 --format parquet
 
 # YAML or TOML params files work too
-uv run synth911gen3 generate --params config/example_params.yaml
-uv run synth911gen3 generate --params config/example_params.toml
-uv run synth911gen3 generate --params run.toml
+uv run SynthCCD generate --params config/example_params.yaml
+uv run SynthCCD generate --params config/example_params.toml
+uv run SynthCCD generate --params run.toml
 ```
 
 Three ready-made examples are included in the repo: `config/example_params.json`, `config/example_params.yaml`, and `config/example_params.toml`.
@@ -1153,7 +1153,7 @@ saved file loads directly with `--params`.
 
 ```bash
 # Capture a run's settings as YAML
-uv run synth911gen3 generate --rows 2500 --area "Denver, CO" --format parquet --seed 77 --save-params denver.yaml
+uv run SynthCCD generate --rows 2500 --area "Denver, CO" --format parquet --seed 77 --save-params denver.yaml
 
 # Saved file (denver.yaml)
 #   rows: 2500
@@ -1162,10 +1162,10 @@ uv run synth911gen3 generate --rows 2500 --area "Denver, CO" --format parquet --
 #   seed: 77
 
 # Reuse it later
-uv run synth911gen3 generate --params denver.yaml
+uv run SynthCCD generate --params denver.yaml
 
 # Combine a --params file with overrides, capturing the merged result
-uv run synth911gen3 generate --params config/example_params.yaml --rows 500 --save-params my_run.json
+uv run SynthCCD generate --params config/example_params.yaml --rows 500 --save-params my_run.json
 ```
 
 ---
@@ -1280,7 +1280,7 @@ The `geojson` and `shapefile` formats export the **incidents dataset** as spatia
 - Ideal for web mapping (Leaflet, Mapbox, OpenLayers), GIS software, and spatial databases
 
 ```bash
-uv run synth911gen3 generate --format geojson --rows 10000 --area "Seattle, WA"
+uv run SynthCCD generate --format geojson --rows 10000 --area "Seattle, WA"
 ```
 
 #### Shapefile (ESRI)
@@ -1293,7 +1293,7 @@ uv run synth911gen3 generate --format geojson --rows 10000 --area "Seattle, WA"
 
 ```bash
 # Generate shapefile
-uv run synth911gen3 generate --format shapefile --rows 10000 --area "Denver, CO"
+uv run SynthCCD generate --format shapefile --rows 10000 --area "Denver, CO"
 ```
 
 #### Coordinate Availability
@@ -1337,7 +1337,7 @@ Database exports require connection parameters. These can be provided via CLI fl
 
 **PostgreSQL:**
 ```bash
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --format postgresql \
   --rows 100000 \
   --area "Seattle, WA" \
@@ -1351,7 +1351,7 @@ uv run synth911gen3 generate \
 
 **DuckDB (local file, no server needed):**
 ```bash
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --format duckdb \
   --rows 500000 \
   --area "Portland, OR" \
@@ -1360,7 +1360,7 @@ uv run synth911gen3 generate \
 
 **SQLite (local file, no server or extra dependencies):**
 ```bash
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --format sqlite \
   --rows 500000 \
   --area "Kansas City, MO" \
@@ -1376,12 +1376,12 @@ sqlite3 output/kc_cad.sqlite3 "SELECT agency, priority, COUNT(*) FROM incidents 
 
 **Skip index creation for faster bulk loads (all dialects):**
 ```bash
-uv run synth911gen3 generate --format sqlite --rows 100000 --no-db-indexes
+uv run SynthCCD generate --format sqlite --rows 100000 --no-db-indexes
 ```
 
 **MariaDB with custom schema and replace mode:**
 ```bash
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --format mariadb \
   --rows 200000 \
   --area "Denver, CO" \
@@ -1453,7 +1453,7 @@ chunked; the hourly phone-metrics dataset is tiny and always built in one pass.
 
 ```bash
 # Stream a 5M-row run under a 1 GiB per-chunk budget
-uv run synth911gen3 generate --rows 5000000 --format parquet --max-memory-bytes 1073741824
+uv run SynthCCD generate --rows 5000000 --format parquet --max-memory-bytes 1073741824
 ```
 
 ---
@@ -1562,86 +1562,86 @@ call reception methods, and disposition codes — are described in the
 
 ```bash
 # Default: 10K incidents + hourly counts, CSV, Kansas City
-uv run synth911gen3 generate
+uv run SynthCCD generate
 
 # Custom row count
-uv run synth911gen3 generate --rows 50000
+uv run SynthCCD generate --rows 50000
 
 # Different area
-uv run synth911gen3 generate --area "Seattle, WA"
+uv run SynthCCD generate --area "Seattle, WA"
 ```
 
 ### Output Formats
 
 ```bash
 # Parquet for analytics
-uv run synth911gen3 generate --format parquet --rows 100000
+uv run SynthCCD generate --format parquet --rows 100000
 
 # JSON bundle for web API
-uv run synth911gen3 generate --format json
+uv run SynthCCD generate --format json
 
 # In-memory pandas (for Jupyter/notebooks)
-uv run synth911gen3 generate --format pandas
+uv run SynthCCD generate --format pandas
 ```
 
 ### Dataset Selection
 
 ```bash
 # Only CAD incidents
-uv run synth911gen3 generate --dataset incidents
+uv run SynthCCD generate --dataset incidents
 
 # Only hourly phone metrics
-uv run synth911gen3 generate --dataset phone
+uv run SynthCCD generate --dataset phone
 
 # Both incidents and hourly phone metrics
-uv run synth911gen3 generate --dataset all
+uv run SynthCCD generate --dataset all
 ```
 
 ### Date Range
 
 ```bash
 # Specific date range
-uv run synth911gen3 generate --start-date 2024-01-01 --end-date 2024-03-31
+uv run SynthCCD generate --start-date 2024-01-01 --end-date 2024-03-31
 
 # Single day
-uv run synth911gen3 generate --start-date 2024-07-04 --end-date 2024-07-04
+uv run SynthCCD generate --start-date 2024-07-04 --end-date 2024-07-04
 ```
 
 ### Reproducibility
 
 ```bash
 # Fixed seed for reproducible results
-uv run synth911gen3 generate --seed 42
+uv run SynthCCD generate --seed 42
 
 # Different personnel pools
-uv run synth911gen3 generate --calltaker-pool-size 20 --dispatcher-pool-size 15
+uv run SynthCCD generate --calltaker-pool-size 20 --dispatcher-pool-size 15
 ```
 
 ### Custom Output Location
 
 ```bash
 # Custom directory and filename stem
-uv run synth911gen3 generate --output-dir /data/exports --output-stem kc_911_2024
+uv run SynthCCD generate --output-dir /data/exports --output-stem kc_911_2024
 ```
 
 ### Large-Scale Generation
 
 ```bash
 # 1 million incidents in Parquet (efficient for large datasets)
-uv run synth911gen3 generate --rows 1000000 --format parquet --output-dir /big/data
+uv run SynthCCD generate --rows 1000000 --format parquet --output-dir /big/data
 
 # 5 million incidents with a tighter per-chunk memory budget
-uv run synth911gen3 generate --rows 5000000 --format parquet --max-memory-bytes 536870912
+uv run SynthCCD generate --rows 5000000 --format parquet --max-memory-bytes 536870912
 ```
 
 ### Realism Configuration
 
 ```bash
 # Use custom realism config to match a specific 9-1-1 center
-uv run synth911gen3 generate --config config/example_realism.yaml --rows 50000 --format parquet
+uv run SynthCCD generate --config config/example_realism.yaml --rows 50000 --format parquet
 
 # With custom output location
-uv run synth911gen3 generate --config my_center.yaml --rows 100000 --output-dir /data/exports --output-stem my_center_2024
+uv run SynthCCD generate --config my_center.yaml --rows 100000 --output-dir /data/exports --output-stem my_center_2024
 ```
 
 See `REALISMGUIDE.md` for the full YAML reference, including the `name_locales`
@@ -1652,13 +1652,13 @@ names follow the country of the geocoded OSM area).
 
 ```bash
 # Run with all parameters defined in a single file
-uv run synth911gen3 generate --params config/example_params.json
+uv run SynthCCD generate --params config/example_params.json
 
 # Override individual values on top of the file
-uv run synth911gen3 generate --params config/example_params.json --rows 250000 --format csv
+uv run SynthCCD generate --params config/example_params.json --rows 250000 --format csv
 
 # YAML params file
-uv run synth911gen3 generate --params config/example_params.yaml
+uv run SynthCCD generate --params config/example_params.yaml
 ```
 
 ---
@@ -1754,9 +1754,9 @@ $env:UV_SYSTEM_CERTS = "true"      # PowerShell
 uv sync
 
 # 2. Let the generator use the OS trust store for OSM lookups (dev dependency: truststore)
-$env:SYNTH911_SYSTEM_TRUST = "1"   # PowerShell
-# export SYNTH911_SYSTEM_TRUST=1     # Linux/macOS
-uv run synth911gen3 generate
+$env:SYNTHCCD_SYSTEM_TRUST = "1"   # PowerShell
+# export SYNTHCCD_SYSTEM_TRUST=1     # Linux/macOS
+uv run SynthCCD generate
 ```
 
 The runtime flag is a no-op unless set, so production behavior is unchanged. If the OS trust
@@ -1769,7 +1769,7 @@ underlying cause and points to this workaround, e.g.:
 ```
 Unable to reach the OpenStreetMap Nominatim service: certificate verification failed
 (unable to get local issuer certificate). If you are behind a TLS-inspecting proxy, set
-SYNTH911_SYSTEM_TRUST=1 to verify against the OS trust store.
+SYNTHCCD_SYSTEM_TRUST=1 to verify against the OS trust store.
 ```
 
 These connectivity failures raise `AddressConnectionError` (a subclass of
@@ -1820,7 +1820,7 @@ cache hits. Delete both files to force a re-fetch for updated area boundaries.
 
 ### General
 
-**Q: What is synth911gen3?**
+**Q: What is SynthCCD?**
 A: A synthetic data generator that creates realistic 9-1-1 CAD incident data and hourly phone-center metrics. It simulates call volumes, response times, agency distributions, and geographic patterns based on configurable statistical models.
 
 **Q: What data does it generate?**
@@ -1904,7 +1904,7 @@ A: Yes. Use `--format postgresql` (or `sqlserver`, `mariadb`, `duckdb`, `sqlite`
 A: Check internet connectivity. Try simpler area query. Addresses cached after first fetch.
 
 **Q: TLS errors behind corporate proxy**
-A: Set `UV_SYSTEM_CERTS=true` for `uv sync`, and `SYNTH911_SYSTEM_TRUST=1` for OSM lookups. Uses OS trust store.
+A: Set `UV_SYSTEM_CERTS=true` for `uv sync`, and `SYNTHCCD_SYSTEM_TRUST=1` for OSM lookups. Uses OS trust store.
 
 **Q: Generation is slow**
 A: Use Parquet format. First run fetches OSM addresses (cached). For large runs, lower `--max-memory-bytes` to stream chunks.
@@ -1988,7 +1988,7 @@ warning-free build is required before publishing or in CI.
 
 | Variable | Description |
 |----------|-------------|
-| `SYNTH911_LOG_LEVEL` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, or `ERROR` (used when no `--verbose`/`--quiet` flag is given) |
+| `SYNTHCCD_LOG_LEVEL` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, or `ERROR` (used when no `--verbose`/`--quiet` flag is given) |
 
 ### Extending with Custom Providers
 

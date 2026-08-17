@@ -1,9 +1,9 @@
 """Package logging configuration and progress reporting.
 
 All modules log through :func:`get_logger`, which scopes loggers under
-the ``synth911gen3`` package name. The effective level is configured once
+the ``SynthCCD`` package name. The effective level is configured once
 by :func:`configure_logging` using, in order of precedence: the ``--quiet``
-flag, the ``--verbose`` flag, the ``SYNTH911_LOG_LEVEL`` environment
+flag, the ``--verbose`` flag, the ``SYNTHCCD_LOG_LEVEL`` environment
 variable, then INFO. :class:`ProgressReporter` provides coarse completion
 percentages for long-running loops without spamming small runs.
 """
@@ -13,8 +13,8 @@ from __future__ import annotations
 import logging
 import os
 
-PACKAGE_LOGGER = "synth911gen3"
-_LOG_LEVEL_ENV = "SYNTH911_LOG_LEVEL"
+PACKAGE_LOGGER = "SynthCCD"
+_LOG_LEVEL_ENV = "SYNTHCCD_LOG_LEVEL"
 _PROGRESS_MIN_TOTAL = 10_000
 _PROGRESS_PERCENT_STEP = 0.05
 
@@ -22,14 +22,14 @@ _ROOT_LOGGER = logging.getLogger(PACKAGE_LOGGER)
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
-    """Return a package-scoped logger, e.g. ``synth911gen3.incidents``."""
+    """Return a package-scoped logger, e.g. ``SynthCCD.incidents``."""
     if name is None:
         return _ROOT_LOGGER
     return logging.getLogger(f"{PACKAGE_LOGGER}.{name}")
 
 
 def _env_level() -> int | None:
-    """Resolve the SYNTH911_LOG_LEVEL variable to a logging level.
+    """Resolve the SYNTHCCD_LOG_LEVEL variable to a logging level.
 
     Returns ``None`` when the variable is unset, empty, or names an
     unknown level, so the caller can fall back to the INFO default.
@@ -46,7 +46,7 @@ def _env_level() -> int | None:
 def configure_logging(*, verbose: bool = False, quiet: bool = False) -> None:
     """Set up the package logger on first use.
 
-    Level precedence: ``--quiet`` > ``--verbose`` > ``SYNTH911_LOG_LEVEL`` > INFO.
+    Level precedence: ``--quiet`` > ``--verbose`` > ``SYNTHCCD_LOG_LEVEL`` > INFO.
     Handlers are attached once; later calls only adjust the effective level so
     repeated invocation (e.g. from tests or the TUI) is idempotent.
     """

@@ -1,4 +1,4 @@
-# synth911gen3 Realism Guide
+# SynthCCD Realism Guide
 
 A companion to the [User Guide](USERSGUIDE.md) describing how the generator produces
 realistic CAD and hourly phone-center statistics, the YAML realism configuration
@@ -12,14 +12,14 @@ file, and the default distribution parameters baked in at build time.
 ## Realism Configuration
 
 For users who want to emulate a specific 9-1-1 center with known operational
-characteristics, synth911gen3 supports a **YAML realism configuration file** that
+characteristics, SynthCCD supports a **YAML realism configuration file** that
 overrides all default statistical distributions.
 
 ### Using a Config File
 
 ```bash
 # Generate with custom realism config
-uv run synth911gen3 generate --config path/to/realism_config.yaml --rows 50000
+uv run SynthCCD generate --config path/to/realism_config.yaml --rows 50000
 ```
 
 ### Validating a Config File
@@ -29,7 +29,7 @@ described below (weight sums, required time-profile keys, dispatch-init-fraction
 bounds, phone-metric bounds, shift config, name locales) are applied:
 
 ```bash
-uv run synth911gen3 validate-config path/to/realism_config.yaml
+uv run SynthCCD validate-config path/to/realism_config.yaml
 ```
 
 Prints `OK` for valid files and exits non-zero (1) if any file fails validation,
@@ -441,7 +441,7 @@ included in the manifest's `realism_config_hash`.
 
 3. **Validate** by running a small test generation:
    ```bash
-   uv run synth911gen3 generate --config your_config.yaml --rows 1000 --format pandas
+   uv run SynthCCD generate --config your_config.yaml --rows 1000 --format pandas
    ```
 
 4. **Iterate** until generated statistics match your real data
@@ -722,10 +722,10 @@ Incident data can be exported with geographic coordinates (latitude/longitude) d
 
 ```bash
 # GeoJSON (no extra dependencies)
-uv run synth911gen3 generate --format geojson --rows 50000 --area "Portland, OR"
+uv run SynthCCD generate --format geojson --rows 50000 --area "Portland, OR"
 
 # Shapefile (uses geopandas + shapely, included in the base dependencies)
-uv run synth911gen3 generate --format shapefile --rows 50000 --area "Portland, OR"
+uv run SynthCCD generate --format shapefile --rows 50000 --area "Portland, OR"
 ```
 
 ### Schema
@@ -741,7 +741,7 @@ The hourly phone metrics dataset has no spatial component and is exported as JSO
 
 ## Realism Tuning Guide
 
-This section provides a systematic approach to calibrating synth911gen3 to match your specific 9-1-1 center's operational characteristics.
+This section provides a systematic approach to calibrating SynthCCD to match your specific 9-1-1 center's operational characteristics.
 
 ### Tuning Workflow
 
@@ -911,7 +911,7 @@ Copy `config/example_realism.yaml` and replace with your computed values. Key ti
 
 ```bash
 # Small test for quick iteration
-uv run synth911gen3 generate \
+uv run SynthCCD generate \
   --config config/my_center.yaml \
   --rows 2000 \
   --format pandas \

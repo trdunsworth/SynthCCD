@@ -1,6 +1,6 @@
-# synth911gen3 Realism Configuration
+# SynthCCD Realism Configuration
 # Copy this file and customize to match your specific 9-1-1 center's characteristics
-# Usage: uv run synth911gen3 generate --config path/to/this_file.yaml
+# Usage: uv run SynthCCD generate --config path/to/this_file.yaml
 
 # Agency distribution (must sum to 1.0)
 agency_weights:

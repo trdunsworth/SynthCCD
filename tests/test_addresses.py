@@ -504,7 +504,7 @@ def test_nominatim_tls_error_surfaces_workaround_hint(tmp_path: Path) -> None:
         cache_dir=tmp_path,
         nominatim_min_interval=0.0,
     )
-    with pytest.raises(AddressLookupError, match="SYNTH911_SYSTEM_TRUST"):
+    with pytest.raises(AddressLookupError, match="SYNTHCCD_SYSTEM_TRUST"):
         provider.load_addresses("Kansas City, MO")
 
 

@@ -65,7 +65,7 @@ jobs:
 
       - name: Test JSON params file
         run: |
-          uv run synth911gen3 generate \
+          uv run SynthCCD generate \
             --params config/example_params.json \
             --rows 100 \
             --output-dir output \
@@ -76,7 +76,7 @@ jobs:
 
       - name: Test YAML params file
         run: |
-          uv run synth911gen3 generate \
+          uv run SynthCCD generate \
             --params config/example_params.yaml \
             --rows 100 \
             --output-dir output \
@@ -87,7 +87,7 @@ jobs:
 
       - name: Test TOML params file
         run: |
-          uv run synth911gen3 generate \
+          uv run SynthCCD generate \
             --params config/example_params.toml \
             --rows 100 \
             --output-dir output \
@@ -98,12 +98,12 @@ jobs:
 
       - name: Verify params file round-trip (save + load)
         run: |
-          uv run synth911gen3 generate \
+          uv run SynthCCD generate \
             --params config/example_params.json \
             --save-params /tmp/roundtrip.toml \
             --rows 10 \
             --output-dir output
-          uv run synth911gen3 generate \
+          uv run SynthCCD generate \
             --params /tmp/roundtrip.toml \
             --rows 10 \
             --output-dir output \

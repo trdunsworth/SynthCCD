@@ -1,4 +1,4 @@
-# TODO.md — Synth911Gen3 Backlog
+# TODO.md — SynthCCD Backlog
 
 Priorities use **P0** (must fix before release), **P1** (should have), **P2** (nice to have).
 Items are sourced from `AGENTS.md` goals, the realism-improvement list, the previous-version
@@ -20,7 +20,7 @@ recommendation docs in `docs/`, and direct code review.
       excluded read-only `docs/` scripts from ruff scope in `pyproject.toml`.
 - [x] **P1 — Add a dependency/security audit check.** Added `pip-audit` (dev group) and a
       wrapper script `scripts/audit_deps.py` (injects the OS trust store when
-      `SYNTH911_SYSTEM_TRUST=1`). Ran it and fixed the findings: pinned `idna>=3.15`
+      `SYNTHCCD_SYSTEM_TRUST=1`). Ran it and fixed the findings: pinned `idna>=3.15`
       (PYSEC-2026-215) and `click>=8.3.3` (PYSEC-2026-2132). Audit is currently clean
       and wired into the CI gate via `scripts/audit_deps.py`. Remaining: enable
       dependabot for `uv.lock` (GitHub dependabot has no native `uv.lock` support; a
@@ -112,7 +112,7 @@ recommendation docs in `docs/`, and direct code review.
 
 - [x] **P1 — Add `logging` throughout the app.** Added `logging_conf.py` (package-scoped
       loggers, `configure_logging` with `--verbose/-v` and `--quiet/-q` global CLI flags and
-      `SYNTH911_LOG_LEVEL` env support, plus a `ProgressReporter` that logs 5% completion steps
+      `SYNTHCCD_LOG_LEVEL` env support, plus a `ProgressReporter` that logs 5% completion steps
       for runs over 10k rows). Instrumented `app.py`, `incidents.py`, `phone_metrics.py`,
       `addresses.py`, `exporters.py`, and `cli.py`; status summaries still print via `typer.echo`
       while granular detail goes to the stderr logger.
@@ -133,10 +133,10 @@ recommendation docs in `docs/`, and direct code review.
 - [ ] **P2 — Implement the PyQt6 GUI** (AGENTS.md goal: "TUI or a GUI"). Requires re-adding
       the `pyqt6` dependency (removed in the dependency trim); a desktop GUI would serve
       non-technical operators. **Deferred** — not being pursued for now.
-- [x] **P2 — Document/reconcile env vars.** `USERSGUIDE.md` previously documented `SYNTH911_SEED` and
-      `SYNTH911_OUTPUT_DIR`, but neither is read anywhere in `src/` (verified). Removed both rows from
-      the env-var table, leaving only the implemented `SYNTH911_LOG_LEVEL` (and the documented
-      `SYNTH911_SYSTEM_TRUST` TLS flag in Troubleshooting).
+- [x] **P2 — Document/reconcile env vars.** `USERSGUIDE.md` previously documented `SYNTHCCD_SEED` and
+      `SYNTHCCD_OUTPUT_DIR`, but neither is read anywhere in `src/` (verified). Removed both rows from
+      the env-var table, leaving only the implemented `SYNTHCCD_LOG_LEVEL` (and the documented
+      `SYNTHCCD_SYSTEM_TRUST` TLS flag in Troubleshooting).
 - [x] **P2 — Split the oversized `USERSGUIDE.md`.** It was ~1000 lines; moved all realism
       content (YAML realism configuration reference and default distribution tables) into a
       new companion `REALISMGUIDE.md` and kept the user guide to quick-start, CLI reference,
@@ -279,10 +279,10 @@ recommendation docs in `docs/`, and direct code review.
   `--params` and `--save-params` flags. Added a `params-regression` CI job that exercises
   each example file and verifies TOML round-trip.
 - [x] **Packaging/distribution.** Publish on PyPI and/or containerize; add a `uv.lock`-driven
-      Docker build and a `synth911gen3 serve` (FastAPI) entrypoint for a hosted API.
+      Docker build and a `SynthCCD serve` (FastAPI) entrypoint for a hosted API.
       Created `Dockerfile` (multi-stage build), `docker-compose.yml` (with API server and
       generation job profiles), `.dockerignore`, added `fastapi`, `uvicorn`, `pydantic` to
-      dependencies, and new `synth911gen3-serve` entry point in `pyproject.toml` pointing to
+      dependencies, and new `SynthCCD-serve` entry point in `pyproject.toml` pointing to
       `serve.py` with endpoints: `/health`, `/schema`, `/generate`, `/generate/stream`.
 - [x] **Schema evolution** (pydantic models for `GenerationRequest`/`RealismConfig`) to
   formalize validation and produce versioned output schemas.
@@ -335,20 +335,20 @@ recommendation docs in `docs/`, and direct code review.
 ### Usability / Developer Experience
 - [x] **P2 — `config/example_params` parity.** Add TOML example alongside JSON/YAML, and params-driven CI regression run. Created `config/example_params.toml` with a distinct example configuration; all three formats (JSON/YAML/TOML) load and round-trip via the CLI `--params` and `--save-params` flags. Added a `params-regression` CI job that exercises each example file and verifies TOML round-trip.
 - [ ] **P2 — PyQt6 GUI.** Requires re-adding `pyqt6` dependency; desktop GUI for non-technical operators. **Deferred** — not being pursued for now.
-- [x] **P2 — Param file generation CLI.** `synth911gen3 generate --save-params my_run.yaml`
+- [x] **P2 — Param file generation CLI.** `SynthCCD generate --save-params my_run.yaml`
       writes the effective parameters (CLI flags merged over any `--params` file) to a JSON/YAML/TOML
       params file and exits without generating. Canonical `GenerationRequest` keys are serialized
       (enums/paths/dates to plain values), `None` values are dropped, and the file round-trips
       through `--params`. Covered by `tests/test_cli.py` (all three formats, round-trip, CLI
       short-circuit, params-file merge, help listing).
-- [x] **P2 — Config validation CLI.** `synth911gen3 validate-config path/to/config.yaml` parses and
+- [x] **P2 — Config validation CLI.** `SynthCCD validate-config path/to/config.yaml` parses and
       validates one or more realism config files without generating data, reusing the
       `RealismConfig.from_yaml` validation rules (weight sums, time-profile keys,
       dispatch-init-fraction bounds, phone-metric bounds, shift config, name locales). Prints
       `OK` per file, exits 1 on any invalid file, exits 2 on argument errors. Covered by
       `tests/test_cli.py` (valid, invalid YAML, validation error, missing file, mixed paths,
       help listing) and documented in `USERSGUIDE.md` and `REALISMGUIDE.md`.
-- [x] **P2 — Schema export CLI.** `synth911gen3 schema --format json|yaml --dataset incidents`
+- [x] **P2 — Schema export CLI.** `SynthCCD schema --format json|yaml --dataset incidents`
       exports the output schema definition (column names and dtypes per dataset, schema
       `version`, deterministic `schema_hash` matching the manifest/Parquet metadata hash, and
       package/environment provenance) without generating data or fetching addresses. Probes via

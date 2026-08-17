@@ -1,5 +1,5 @@
-# synth911gen3 Generation Parameters (TOML format)
-# Usage: uv run synth911gen3 generate --params config/example_params.toml
+# SynthCCD Generation Parameters (TOML format)
+# Usage: uv run SynthCCD generate --params config/example_params.toml
 # Keys mirror the CLI options (area, format, config) or the GenerationRequest fields
 # (area_query, output_format, realism_config_path). CLI flags override file values.
 

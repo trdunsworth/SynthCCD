@@ -11,15 +11,16 @@ install hint.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, cast
+from typing import Any, cast
 
 import pandas as pd
 import sqlalchemy as sa
 from sqlalchemy import text
-from sqlalchemy.engine import Engine, Connection
+from sqlalchemy.engine import Connection, Engine
 
 from .config import DatabaseDialect, GenerationRequest, OutputFormat
 from .exceptions import ExportError
@@ -227,9 +228,8 @@ class DatabaseExporter:
             # Handle if_exists behavior
             if if_exists == "replace":
                 self._drop_table(conn, table_name, schema)
-            elif if_exists == "fail":
-                if self._table_exists(conn, table_name, schema):
-                    raise ExportError(f"Table {table_name} already exists and if_exists='fail'")
+            elif if_exists == "fail" and self._table_exists(conn, table_name, schema):
+                raise ExportError(f"Table {table_name} already exists and if_exists='fail'")
 
             # Create table if it doesn't exist
             if not self._table_exists(conn, table_name, schema):
@@ -301,9 +301,7 @@ class DatabaseExporter:
     def _drop_table(self, conn: Connection, table_name: str, schema: str | None) -> None:
         """Dialect-specific ``DROP TABLE IF EXISTS`` (quotes/schema syntax vary)."""
         dialect = self._get_dialect()
-        if dialect == DatabaseDialect.DUCKDB:
-            conn.execute(text(f'DROP TABLE IF EXISTS "{table_name}"'))
-        elif dialect == DatabaseDialect.SQLITE:
+        if dialect == DatabaseDialect.DUCKDB or dialect == DatabaseDialect.SQLITE:
             conn.execute(text(f'DROP TABLE IF EXISTS "{table_name}"'))
         elif dialect == DatabaseDialect.POSTGRESQL:
             schema_part = f'"{schema}".' if schema else ""
@@ -368,19 +366,7 @@ class DatabaseExporter:
         idx_name = f"idx_{table_name}_{column}"
 
         try:
-            if dialect == DatabaseDialect.DUCKDB:
-                conn.execute(
-                    text(
-                        f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON {schema_prefix}"{table_name}" ("{column}")'
-                    )
-                )
-            elif dialect == DatabaseDialect.SQLITE:
-                conn.execute(
-                    text(
-                        f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON {schema_prefix}"{table_name}" ("{column}")'
-                    )
-                )
-            elif dialect == DatabaseDialect.POSTGRESQL:
+            if dialect == DatabaseDialect.DUCKDB or dialect == DatabaseDialect.SQLITE or dialect == DatabaseDialect.POSTGRESQL:
                 conn.execute(
                     text(
                         f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON {schema_prefix}"{table_name}" ("{column}")'
@@ -412,9 +398,7 @@ class DatabaseExporter:
                     dtype[col] = sa.DateTime()
                 elif dialect == DatabaseDialect.POSTGRESQL:
                     dtype[col] = sa.TIMESTAMP(timezone=False)
-                elif dialect == DatabaseDialect.SQLSERVER:
-                    dtype[col] = sa.DateTime()
-                elif dialect == DatabaseDialect.MARIADB:
+                elif dialect == DatabaseDialect.SQLSERVER or dialect == DatabaseDialect.MARIADB:
                     dtype[col] = sa.DateTime()
             elif pd.api.types.is_integer_dtype(series):
                 dtype[col] = sa.BIGINT()

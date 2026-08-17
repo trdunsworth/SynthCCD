@@ -1,5 +1,5 @@
-synth911gen3
-=============
+SynthCCD
+=========
 
 Synthetic 911 CAD and phone data generator.
 

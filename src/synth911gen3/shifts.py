@@ -241,7 +241,7 @@ def _covers_full_day(shifts: list[Shift]) -> bool:
         else:
             for minute in range(start, _MINUTES_PER_DAY):
                 covered[minute] = True
-            for minute in range(0, end):
+            for minute in range(end):
                 covered[minute] = True
     return all(covered)
 

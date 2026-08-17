@@ -3,7 +3,7 @@
 A forms-based interface with Parameters and Help tabs. Field values are
 parsed into a :class:`~synth911gen3.config.GenerationRequest`; generation
 runs on a background worker with a progress bar and status panel. Launch
-with ``synth911gen3 tui``.
+with ``SynthCCD tui``.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ from typing import TypeVar
 import typer
 from textual.app import App, ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
-from textual.worker import Worker
 from textual.widgets import (
     Button,
     Footer,
@@ -28,6 +27,7 @@ from textual.widgets import (
     TabbedContent,
     TabPane,
 )
+from textual.worker import Worker
 
 from .addresses import OpenStreetMapAddressProvider
 from .app import Synth911Application
@@ -100,7 +100,7 @@ def _section_title(title: str) -> Static:
 
 
 _HELP_TEXT = (
-    "Synth911Gen3 — synthetic CAD incidents and hourly phone-center call counts.\n\n"
+    "SynthCCD — synthetic CAD incidents and hourly phone-center call counts.\n\n"
     "PARAMETERS\n"
     "  Rows               Number of incident rows to generate (default: 10000).\n"
     "  Seed               Random seed for reproducible output (default: 911).\n"
@@ -137,7 +137,7 @@ _HELP_TEXT = (
 class Synth911Tui(App[None]):
     """The Textual application: parameter form, help tab, and progress area."""
 
-    TITLE = "Synth911Gen3"
+    TITLE = "SynthCCD"
     SUB_TITLE = "Synthetic CAD incidents and hourly phone-center call counts"
     CSS = """
     #app {
@@ -241,7 +241,7 @@ class Synth911Tui(App[None]):
     }
     """
 
-    BINDINGS = [
+    BINDINGS = [  # noqa: RUF012
         ("g", "generate", "Generate"),
         ("p", "load_params", "Load Params"),
         ("r", "reset", "Reset"),
@@ -259,7 +259,7 @@ class Synth911Tui(App[None]):
         yield Header(show_clock=True)
         with Vertical(id="app"):
             with TabbedContent(id="tabs"):
-                with TabPane("Parameters", id="tab-parameters"):
+                with TabPane("Parameters", id="tab-parameters"):  # noqa: SIM117
                     with VerticalScroll(id="parameters-scroll"):
                         with Vertical(id="form"):
                             yield _section_title("General")
@@ -402,7 +402,7 @@ class Synth911Tui(App[None]):
                                 yield Button("Load Params", id="load_params")
                                 yield Button("Reset", id="reset")
                                 yield Button("Generate", id="generate", variant="primary")
-                with TabPane("Help", id="tab-help"):
+                with TabPane("Help", id="tab-help"):  # noqa: SIM117
                     with VerticalScroll(id="help-scroll"):
                         yield Static(_HELP_TEXT, id="help-text")
             with Vertical(id="output-area"):

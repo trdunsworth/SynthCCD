@@ -1,10 +1,9 @@
 """Tests for the DatabaseExporter across dialects and table modes."""
 import sqlite3
-
-import pytest
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
+import pytest
 
 from synth911gen3.config import (
     DatabaseDialect,

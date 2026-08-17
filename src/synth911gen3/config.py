@@ -138,12 +138,12 @@ class GenerationRequest:
 
     def resolved_start_date(self) -> date:
         """Effective start date: the request value, or Jan 1 of this year."""
-        today = date.today()
+        today = date.today()  # noqa: DTZ011
         return self.start_date or date(today.year, 1, 1)
 
     def resolved_end_date(self) -> date:
         """Effective end date: the request value, or Dec 31 of this year."""
-        today = date.today()
+        today = date.today()  # noqa: DTZ011
         return self.end_date or date(today.year, 12, 31)
 
     def get_realism_config(self) -> RealismConfig:

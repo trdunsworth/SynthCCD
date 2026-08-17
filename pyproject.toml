@@ -1,5 +1,5 @@
 [project]
-name = "synth911gen3"
+name = "SynthCCD"
 version = "0.9.5"
 description = "Synthetic 911 CAD and phone data generator"
 readme = "README.md"
@@ -39,13 +39,17 @@ dependencies = [
 ]
 
 [project.scripts]
-synth911gen3 = "synth911gen3.cli:main"
-synth911gen3-tui = "synth911gen3.tui:run"
-synth911gen3-serve = "synth911gen3.serve:run"
+SynthCCD = "synth911gen3.cli:main"
+SynthCCD-tui = "synth911gen3.tui:run"
+SynthCCD-serve = "synth911gen3.serve:run"
 
 [build-system]
 requires = ["uv_build>=0.10.5,<0.11.0"]
 build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-name = "synth911gen3"
+module-root = "src"
 
 [dependency-groups]
 dev = [
@@ -73,7 +77,20 @@ show_missing = true
 line-length = 100
 # `docs/` contains read-only v2-era reference scripts (see AGENTS.md) that are
 # intentionally excluded from linting; they are not part of the package.
-exclude = ["docs"]
+exclude = ["docs", "scripts", "generate_copyright_pdf.py"]
+
+[tool.ruff.lint]
+# B008: typer.Option/Argument in defaults is idiomatic typer
+# BLE001: blind Exception catches are used for graceful fallbacks
+ignore = ["B008", "BLE001"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = [
+    "B017",   # pytest.raises(Exception) is intentional for validation tests
+    "DTZ001", # naive datetimes are fine in test fixtures
+    "PLW1510",# subprocess.run without check is intentional in tests
+    "SIM201", # negated comparison is readable in assertions
+]
 
 [tool.uv.workspace]
 members = [

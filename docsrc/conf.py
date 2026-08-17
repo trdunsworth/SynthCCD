@@ -1,4 +1,4 @@
-"""Sphinx configuration for the synth911gen3 documentation site.
+"""Sphinx configuration for the SynthCCD documentation site.
 
 Source lives in ``docsrc/`` (``docs/`` is reserved for read-only v2-era
 reference material). Build with:
@@ -20,12 +20,12 @@ SRC_DIR = ROOT / "src"
 if str(SRC_DIR) not in sys.path:
     sys.path.insert(0, str(SRC_DIR))
 
-project = "synth911gen3"
+project = "SynthCCD"
 author = "Tony Dunsworth"
 copyright = "2026, Tony Dunsworth"
 
 try:
-    release = _metadata_version("synth911gen3")
+    release = _metadata_version("SynthCCD")
 except PackageNotFoundError:  # package not installed; fall back to pyproject value
     release = "0.9.5"
 version = release.split("+")[0]
@@ -41,7 +41,9 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 # -- Options for HTML output -------------------------------------------------
 html_theme = "bizstyle"
-html_static_path: list[str] = []
+html_baseurl = "https://dunsworth-mann.com/SynthCCD/"
+html_static_path = ["_static"]
+html_title = "SynthCCD"
 
 # -- Options for autodoc ------------------------------------------------------
 autodoc_default_options = {
