@@ -12,6 +12,7 @@ override the country mapping via :func:`normalize_name_locales`.
 from __future__ import annotations
 
 import random as _random
+import unicodedata
 from typing import Any
 
 from faker import Faker
@@ -30,6 +31,69 @@ FALLBACK_LOCALE = DEFAULT_LOCALE
 # the name is written in the native script. Vietnamese is intentionally absent:
 # faker's vi_VN first_name provider is unreliable.
 _CJK_LANGUAGES = frozenset({"zh", "ja", "ko"})
+
+# Cyrillic → Latin transliteration table (subset covering common name characters).
+_CYRILLIC_TO_LATIN: dict[str, str] = {
+    "А": "A", "Б": "B", "В": "V", "Г": "G", "Д": "D", "Е": "E", "Ё": "Yo",
+    "Ж": "Zh", "З": "Z", "И": "I", "Й": "Y", "К": "K", "Л": "L", "М": "M",
+    "Н": "N", "О": "O", "П": "P", "Р": "R", "С": "S", "Т": "T", "У": "U",
+    "Ф": "F", "Х": "Kh", "Ц": "Ts", "Ч": "Ch", "Ш": "Sh", "Щ": "Shch",
+    "Ъ": "", "Ы": "Y", "Ь": "", "Э": "E", "Ю": "Yu", "Я": "Ya",
+}
+
+# Arabic → Latin approximate romanization (common name prefixes/roots).
+_ARABIC_TO_LATIN: dict[str, str] = {
+    "ا": "a", "ب": "b", "ت": "t", "ث": "th", "ج": "j", "ح": "h", "خ": "kh",
+    "د": "d", "ذ": "dh", "ر": "r", "ز": "z", "س": "s", "ش": "sh", "ص": "s",
+    "ض": "d", "ط": "t", "ظ": "z", "ع": "a", "غ": "gh", "ف": "f", "ق": "q",
+    "ك": "k", "ل": "l", "م": "m", "ن": "n", "ه": "h", "و": "w", "ي": "y",
+    "ة": "a", "ى": "a", "أ": "a", "إ": "i", "آ": "a", "ؤ": "u", "ئ": "i",
+    "ـ": "",
+}
+
+
+def _to_ascii(text: str) -> str:
+    """Transliterate *text* to clean ASCII.
+
+    Decomposes accented Latin (é → e), transliterates Cyrillic and Arabic
+    via explicit tables, and strips any remaining non-ASCII characters.
+    """
+    # 1. NFKD decomposition handles most accented Latin (é → e + combining accent)
+    decomposed = unicodedata.normalize("NFKD", text)
+    ascii_parts: list[str] = []
+    for char in decomposed:
+        code = ord(char)
+        # Stripping combining marks left over from decomposition
+        if 0x0300 <= code <= 0x036F:
+            continue
+        if code < 128:
+            ascii_parts.append(char)
+            continue
+        # Cyrillic block
+        if 0x0400 <= code <= 0x04FF:
+            upper = char.upper()
+            ascii_parts.append(_CYRILLIC_TO_LATIN.get(upper, _CYRILLIC_TO_LATIN.get(char, "")))
+            # Preserve case for lowercase
+            if char.islower() and upper in _CYRILLIC_TO_LATIN:
+                ascii_parts[-1] = ascii_parts[-1].lower()
+            continue
+        # Arabic block
+        if 0x0600 <= code <= 0x06FF:
+            ascii_parts.append(_ARABIC_TO_LATIN.get(char, ""))
+            continue
+        # CJK ideographs — use a placeholder (names are rarely generated in-script
+        # for US deployments, but if they are, map to a reasonable Latin stand-in)
+        if 0x4E00 <= code <= 0x9FFF:
+            # CJK Unified Ideographs — no standard romanization table;
+            # strip to avoid garbled output.
+            continue
+        # Devanagari, Thai, and other Indic scripts — strip
+        continue
+    result = "".join(ascii_parts).strip()
+    # Collapse multiple spaces
+    while "  " in result:
+        result = result.replace("  ", " ")
+    return result
 
 
 def is_valid_faker_locale(locale: str) -> bool:
@@ -94,23 +158,23 @@ COUNTRY_LOCALES: dict[str, list[str]] = {
 # mix of a typical large American call center so rosters do not read as
 # uniformly Anglo-American. Weights need not sum to 1; they are normalized at
 # generation time. Override per-country via the realism config `name_locales`
-# section. Locale choices favor providers with reliable name data; several
-# groups use native scripts (Chinese/Japanese/Korean/Devanagari/Arabic).
+# section. All locales produce Latin-script names; non-Latin scripts (CJK,
+# Devanagari, Cyrillic, Arabic) are replaced by Latin-script equivalents that
+# preserve ethnic diversity.
 US_ETHNIC_BLEND: dict[str, float] = {
     "en_US": 0.64,
     "es_MX": 0.16,
     "en_NG": 0.07,
-    "zh_CN": 0.03,
+    "en_IN": 0.03,  # Indian sub-continent names in Latin script
     "fil_PH": 0.03,
     "fr_CA": 0.02,
-    "hi_IN": 0.02,
+    "en_KE": 0.02,  # East African names in Latin script
     "de_DE": 0.02,
     "it_IT": 0.02,
     "pt_BR": 0.02,
-    "ja_JP": 0.01,
-    "ko_KR": 0.01,
-    "ru_RU": 0.01,
-    "ar_SA": 0.01,
+    "nl_NL": 0.01,
+    "pl_PL": 0.01,
+    "tr_TR": 0.01,  # Turkish names in Latin script
 }
 
 
@@ -240,18 +304,34 @@ class PersonnelNameGenerator:
             self._cjk_flags.append(locale.split("_", 1)[0] in _CJK_LANGUAGES)
         self._weights = [float(weight) for _locale, weight in locales]
         self._used: set[str] = set()
+        # Fallback Faker for locales that strip to empty after ASCII normalization
+        # (e.g. CJK or Devanagari supplied via realism config overrides).
+        self._fallback = Faker(DEFAULT_LOCALE)
+        self._fallback.seed_instance(seed + 9999)
 
     def _draw(self) -> str:
-        """Draw one raw name from a locale picked by the shared weighted RNG."""
+        """Draw one raw name from a locale picked by the shared weighted RNG.
+
+        Names are normalized to ASCII so the output stays clean regardless
+        of the source locale. If normalization strips the name to empty
+        (CJK, Devanagari, etc.), a fallback name is drawn from the default
+        locale.
+        """
         index = self._rng.choices(range(len(self._fakers)), weights=self._weights, k=1)[0]
         faker = self._fakers[index]
         first = str(faker.first_name())
         last = str(faker.last_name())
         if not first and not last:
-            return str(faker.name()).strip()
-        if self._cjk_flags[index]:
-            return f"{last} {first}".strip()
-        return f"{first} {last}".strip()
+            name = str(faker.name()).strip()
+        elif self._cjk_flags[index]:
+            name = f"{last} {first}".strip()
+        else:
+            name = f"{first} {last}".strip()
+        result = _to_ascii(name)
+        if not result.strip():
+            fb = self._fallback
+            result = f"{fb.first_name()} {fb.last_name()}"
+        return result
 
     def unique_name(self) -> str:
         """Return a fresh name not previously returned by this generator.

@@ -206,10 +206,12 @@ recommendation docs in `docs/`, and direct code review.
       (URBAN/SUBURBAN/RURAL) are implemented — see below.
 - [x] **Enhanced address generation via overpy/Overpass** — done.
 - [x] **Personnel modeling — workload weighting.** Separate calltaker/dispatcher pools with
-      Zipf-like workload weighting are in place (see below). Deliberately not done: ASCII
-      name normalization (output stays UTF-8 so localized names render correctly, e.g. for
-      Tokyo or Moscow deployments) and a late-shift dispatch-time penalty (dropped as not
-      needed for now).
+      Zipf-like workload weighting are in place (see below). ASCII name normalization is
+      implemented: all output names are clean ASCII via `_to_ascii()` transliteration
+      (Cyrillic, Arabic, accented Latin → ASCII; CJK/Devanagari fall back to en_US).
+      US ethnic blend updated to use only Latin-script locales (`en_IN`, `en_KE`,
+      `nl_NL`, `pl_PL`, `tr_TR` replace `zh_CN`, `hi_IN`, `ja_JP`, `ko_KR`,
+      `ru_RU`, `ar_SA`). Non-Latin locales still work via realism config overrides.
 - [x] **Diurnal call volume patterns** — done via `hourly_weights`.
 - [x] **Geographic zone multipliers** (URBAN/SUBURBAN/RURAL) applied to travel time. Added `zone` field to `Address` model with OSM-based classification (landuse, place, highway, building tags), `ZONE_TRAVEL_MULTIPLIERS` in constants (URBAN=0.8, SUBURBAN=1.0, RURAL=1.5), configurable via `zone_travel_multipliers` in `RealismConfig`/YAML, applied to `travel_mean` in incident generation.
 - [x] **Parallel dispatch/call-taking timelines** — see Functionality above.

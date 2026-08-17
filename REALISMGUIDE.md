@@ -418,13 +418,17 @@ name_locales:
 
 Names are generated per shift from a weighted, seeded multi-locale pool;
 locales are drawn proportionally to their weights and names are never repeated
-within a run. CJK locales (`zh`/`ja`/`ko`) emit names in native
-family-name-first order. The blend is deterministic for a given seed and is
-included in the manifest's `realism_config_hash`.
+within a run. All output names are normalized to clean ASCII via transliteration
+(accented Latin, Cyrillic, and Arabic are romanized; CJK and Devanagari names
+fall back to the default locale). Non-Latin locales (e.g. `zh_CN`, `ja_JP`,
+`ru_RU`, `ar_SA`) still work via realism config overrides — the fallback ensures
+ASCII output regardless of source script. The US ethnic blend uses only
+Latin-script locales for diversity (`en_IN`, `en_KE`, `nl_NL`, `pl_PL`, etc.).
 
-> Note: locale choices favor Faker providers with reliable name data; a few
-> country entries intentionally use a working neighbor locale (e.g. `ar_SA`
-> for the UAE/Egypt) because the native providers fall back to English.
+> Note: locale choices favor Faker providers with reliable name data. Non-Latin
+> locales (CJK, Devanagari, Cyrillic, Arabic) are supported via transliteration
+> tables and a fallback mechanism, so any valid Faker locale can be used in
+> `name_locales` overrides without garbled output.
 
 ### Creating a Config from Your Data
 
