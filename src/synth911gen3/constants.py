@@ -37,6 +37,7 @@ DEFAULT_OUTPUT_DIR = "output"
 DEFAULT_OUTPUT_STEM = "synthetic_911"
 DEFAULT_LOCALE = "en_US"
 DEFAULT_COUNTRY = "US"
+DEFAULT_PSAP_AGENCY = "all"
 
 # Version of the generated incident / phone-metrics data schema. Bump when
 # columns change in a breaking way. Embedded in Parquet file metadata and in
@@ -64,6 +65,16 @@ AGENCY_WEIGHTS = {
     "LAW": 0.52,
     "FIRE": 0.20,
     "EMS": 0.28,
+}
+
+# PSAP agency filter: maps a PSAP scope label to the set of agency keys
+# it handles. Used to restrict which agencies appear in generated output.
+PSAP_AGENCY_FILTERS: dict[str, frozenset[str]] = {
+    "all": frozenset({"LAW", "FIRE", "EMS"}),
+    "law": frozenset({"LAW"}),
+    "fire": frozenset({"FIRE"}),
+    "ems": frozenset({"EMS"}),
+    "fire_ems": frozenset({"FIRE", "EMS"}),
 }
 
 PRIORITY_WEIGHTS = {

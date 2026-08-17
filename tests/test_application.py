@@ -651,3 +651,88 @@ def test_application_problem_phone_duration_correlation() -> None:
             f"should have longer phone durations than low-multiplier problems "
             f"(avg {low_avg:.1f}s)"
         )
+
+
+# ---------------------------------------------------------------------------
+# PSAP agency filter
+# ---------------------------------------------------------------------------
+
+_PROVIDER = StaticAddressProvider(
+    [
+        Address("101 N Main St", "Kansas City", "Missouri"),
+        Address("204 E 12th St", "Kansas City", "Missouri"),
+    ]
+)
+
+
+def _make_request(**kwargs) -> GenerationRequest:
+    defaults = {
+        "rows": 200,
+        "dataset": DatasetKind.INCIDENTS,
+        "output_format": OutputFormat.PANDAS,
+        "seed": 42,
+    }
+    defaults.update(kwargs)
+    return GenerationRequest(**defaults)
+
+
+def test_psap_agency_all_produces_all_agencies() -> None:
+    request = _make_request(psap_agency="all")
+    result = Synth911Application(address_provider=_PROVIDER).generate(request)
+    agencies = set(result.incidents["agency"].unique())
+    assert "LAW" in agencies
+    assert "FIRE" in agencies
+    assert "EMS" in agencies
+
+
+def test_psap_agency_law_produces_only_law() -> None:
+    request = _make_request(psap_agency="law")
+    result = Synth911Application(address_provider=_PROVIDER).generate(request)
+    agencies = set(result.incidents["agency"].unique())
+    assert agencies == {"LAW"}
+
+
+def test_psap_agency_fire_produces_only_fire() -> None:
+    request = _make_request(psap_agency="fire")
+    result = Synth911Application(address_provider=_PROVIDER).generate(request)
+    agencies = set(result.incidents["agency"].unique())
+    assert agencies == {"FIRE"}
+
+
+def test_psap_agency_ems_produces_only_ems() -> None:
+    request = _make_request(psap_agency="ems")
+    result = Synth911Application(address_provider=_PROVIDER).generate(request)
+    agencies = set(result.incidents["agency"].unique())
+    assert agencies == {"EMS"}
+
+
+def test_psap_agency_fire_ems_produces_fire_and_ems() -> None:
+    request = _make_request(psap_agency="fire_ems")
+    result = Synth911Application(address_provider=_PROVIDER).generate(request)
+    agencies = set(result.incidents["agency"].unique())
+    assert agencies == {"FIRE", "EMS"}
+
+
+def test_psap_agency_law_row_count_matches() -> None:
+    request = _make_request(psap_agency="law", rows=100)
+    result = Synth911Application(address_provider=_PROVIDER).generate(request)
+    assert len(result.incidents) == 100
+    assert (result.incidents["agency"] == "LAW").all()
+
+
+def test_psap_agency_fire_ems_priority_valid() -> None:
+    """Fire & EMS filter should only produce valid priority values (1-5)."""
+    request = _make_request(psap_agency="fire_ems", rows=500)
+    result = Synth911Application(address_provider=_PROVIDER).generate(request)
+    priorities = result.incidents["priority"].unique()
+    assert all(1 <= p <= 5 for p in priorities)
+
+
+def test_psap_agency_law_reception_methods_valid() -> None:
+    """Law filter should only produce valid reception methods."""
+    request = _make_request(psap_agency="law", rows=200)
+    result = Synth911Application(address_provider=_PROVIDER).generate(request)
+    methods = set(result.incidents["method_of_call_reception"].unique())
+    from synth911gen3.constants import CALL_RECEPTION_WEIGHTS
+
+    assert methods.issubset(set(CALL_RECEPTION_WEIGHTS.keys()))

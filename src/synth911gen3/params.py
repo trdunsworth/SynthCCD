@@ -123,6 +123,8 @@ def coerce_param(key: str, value: Any) -> Any:
         return DatasetKind(str(value))
     if key in ("id_format",):
         return IdFormat(str(value))
+    if key in ("psap_agency",):
+        return str(value).strip().lower()
     if key in ("db_dialect",):
         return DatabaseDialect(str(value))
     if key in ("output_dir", "realism_config_path"):

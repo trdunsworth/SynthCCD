@@ -22,6 +22,7 @@ from .constants import (
     DEFAULT_COUNTRY,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_OUTPUT_STEM,
+    DEFAULT_PSAP_AGENCY,
     DEFAULT_ROWS,
 )
 
@@ -302,6 +303,11 @@ class GenerationRequest(BaseModel):
         gt=0,
         description="Population of the service area for phone-volume scaling",
     )
+    psap_agency: str = Field(
+        default=DEFAULT_PSAP_AGENCY,
+        min_length=1,
+        description="PSAP agency filter: all, law, fire, ems, fire_ems",
+    )
     country: str = Field(
         default=DEFAULT_COUNTRY, min_length=1, description="ISO 3166-1 alpha-2 country code"
     )
@@ -358,6 +364,19 @@ class GenerationRequest(BaseModel):
         if any(part == ".." for part in v.parts):
             raise ValueError("output_dir must not contain '..' path segments")
         return v
+
+    @field_validator("psap_agency")
+    @classmethod
+    def validate_psap_agency(cls, v: str) -> str:
+        """Normalize and validate the PSAP agency filter string."""
+        from .constants import PSAP_AGENCY_FILTERS
+
+        normalized = v.strip().lower()
+        if normalized not in PSAP_AGENCY_FILTERS:
+            raise ValueError(
+                f"psap_agency must be one of {sorted(PSAP_AGENCY_FILTERS)}, got {v!r}"
+            )
+        return normalized
 
     @model_validator(mode="after")
     def validate_dates(self) -> GenerationRequest:

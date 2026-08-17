@@ -304,6 +304,21 @@ class Synth911Tui(App[None]):
                                     ),
                                 )
                                 yield _field(
+                                    "PSAP agency",
+                                    "psap_agency",
+                                    Select(
+                                        [
+                                            ("All", "all"),
+                                            ("Law", "law"),
+                                            ("Fire", "fire"),
+                                            ("EMS", "ems"),
+                                            ("Fire & EMS", "fire_ems"),
+                                        ],
+                                        value=defaults.psap_agency,
+                                        id="psap_agency",
+                                    ),
+                                )
+                                yield _field(
                                     "Max memory (bytes)",
                                     "max_memory_bytes",
                                     Input(
@@ -605,6 +620,7 @@ class Synth911Tui(App[None]):
         include_10_digit_emergency = (
             str(self.query_one("#include_10_digit_emergency", Select).value) == "1"
         )
+        psap_agency = str(self.query_one("#psap_agency", Select).value)
 
         return GenerationRequest(
             rows=rows,
@@ -623,6 +639,7 @@ class Synth911Tui(App[None]):
             realism_config_path=realism_config_path,
             max_memory_bytes=max_memory_bytes,
             population=population,
+            psap_agency=psap_agency,
             country=country,
             emergency_numbers=emergency_numbers,
             include_10_digit_emergency=include_10_digit_emergency,

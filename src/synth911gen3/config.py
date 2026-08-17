@@ -24,6 +24,7 @@ from .constants import (
     DEFAULT_COUNTRY,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_OUTPUT_STEM,
+    DEFAULT_PSAP_AGENCY,
     DEFAULT_ROWS,
 )
 from .emergency_numbers import EmergencyNumber, resolve_emergency_numbers
@@ -122,6 +123,9 @@ class GenerationRequest:
     # derived from population (calls per 1 000 residents per year) instead
     # of the incident row count.
     population: int | None = None
+    # PSAP agency filter — restricts which agencies appear in the output.
+    # Valid values: "all", "law", "fire", "ems", "fire_ems".
+    psap_agency: str = DEFAULT_PSAP_AGENCY
     # Emergency-number registry selection
     country: str = DEFAULT_COUNTRY
     emergency_numbers: str | None = None
@@ -184,6 +188,14 @@ class GenerationRequest:
             raise ValidationError("max_memory_bytes must be greater than zero when set.")
         if self.population is not None and self.population <= 0:
             raise ValidationError("population must be greater than zero when set.")
+        from .constants import PSAP_AGENCY_FILTERS
+
+        psap_normalized = self.psap_agency.strip().lower()
+        if psap_normalized not in PSAP_AGENCY_FILTERS:
+            raise ValidationError(
+                f"Unknown psap_agency {self.psap_agency!r}. "
+                f"Valid values: {', '.join(sorted(PSAP_AGENCY_FILTERS))}."
+            )
         if self.resolved_start_date() > self.resolved_end_date():
             raise ValidationError("start_date must be on or before end_date.")
         if self.shift_preset is not None and self.shift_preset not in SHIFT_PRESETS:

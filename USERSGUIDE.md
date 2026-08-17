@@ -566,6 +566,7 @@ uv run SynthCCD generate [OPTIONS]
 | `--shift-preset` | | *(realism config)* | Shift structure preset: `2x12h-4shift-14day`, `2x12h-2shift`, `3x8h-3shift`, or `4x10h-4shift` |
 | `--max-memory-bytes` | | `2147483648` | Approximate in-memory budget per incident chunk in bytes; CSV/Parquet exports stream in chunks to stay under it |
 | `--population` | | *(none)* | Population of the service area. When set, phone-metrics volume is derived from population (calls per 1,000 residents per year) instead of the incident row count |
+| `--psap-agency` | | `all` | PSAP agency filter: `all`, `law`, `fire`, `ems`, `fire_ems`. Restricts which agency types appear in the output |
 | `--config` | | *(none)* | Path to YAML realism configuration file |
 | `--country` | | `US` | ISO 3166-1 alpha-2 country code selecting the emergency-number registry (see [Emergency Number Registry](#emergency-number-registry)) |
 | `--emergency-numbers` | | *(registry)* | Comma-separated emergency numbers to model, overriding the country registry (e.g. `"999,112"`) |
@@ -1095,6 +1096,8 @@ shift_preset: "4x10h-4shift"
 | `dispatcher_pool_size` | | int | Unique dispatcher names |
 | `shift_preset` | | str | Shift structure preset name |
 | `max_memory_bytes` | | int | Per-chunk memory budget for CSV/Parquet streaming |
+| `population` | | int | Service area population for phone-volume scaling |
+| `psap_agency` | | str | PSAP agency filter: `all`, `law`, `fire`, `ems`, `fire_ems` |
 | `realism_config_path` | `config` | str | Path to YAML realism config |
 | `country` | | str | ISO 3166-1 alpha-2 code selecting the emergency-number registry (see [Emergency Number Registry](#emergency-number-registry)) |
 | `emergency_numbers` | | str | Comma-separated emergency numbers, overriding the country registry |
@@ -1691,6 +1694,7 @@ request = GenerationRequest(
     seed=12345,
     shift_preset="2x12h-4shift-14day",
     max_memory_bytes=2 * 1024**3,  # per-chunk budget for CSV/Parquet streaming
+    psap_agency="law",  # only LAW calls (PSAP filter)
 )
 
 # Generate (returns GenerationResult with DataFrames and file paths)

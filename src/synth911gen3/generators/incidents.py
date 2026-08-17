@@ -250,6 +250,27 @@ class IncidentGenerator:
         """Validate, merge realism config, load addresses, and build personnel rosters."""
         request.validate()
         realism = request.get_realism_config()
+
+        # Apply PSAP agency filter: restrict agency_weights to the selected
+        # agencies so all downstream tables (priority, problem, disposition,
+        # timing) adapt automatically.
+        from ..constants import PSAP_AGENCY_FILTERS
+
+        allowed_agencies = PSAP_AGENCY_FILTERS[request.psap_agency]
+        if allowed_agencies != frozenset(realism.agency_weights):
+            filtered = {
+                k: v for k, v in realism.agency_weights.items() if k in allowed_agencies
+            }
+            total = sum(filtered.values())
+            if total > 0:
+                filtered = {k: v / total for k, v in filtered.items()}
+            # Replace agency_weights on a copy so the original config is untouched
+            from copy import copy
+
+            realism = copy(realism)
+            realism.agency_weights = filtered
+            logger.info("PSAP agency filter '%s': agencies=%s", request.psap_agency, list(filtered))
+
         shift_config = apply_shift_preset(realism.shift_config, request.shift_preset)
         rng = np.random.default_rng(request.seed)
 

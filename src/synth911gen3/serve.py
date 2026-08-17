@@ -57,6 +57,10 @@ class GenerationRequestModel(BaseModel):
     population: int | None = Field(
         default=None, ge=1, description="Service area population for phone-volume scaling"
     )
+    psap_agency: str | None = Field(
+        default=None,
+        description="PSAP agency filter: all, law, fire, ems, fire_ems",
+    )
     realism_config_path: str | None = Field(default=None, description="Path to YAML realism config")
 
     @field_validator("output_format", mode="before")
@@ -90,6 +94,17 @@ class GenerationRequestModel(BaseModel):
         valid = {"integer", "guid"}
         if v.lower() not in valid:
             raise ValueError(f"id_format must be one of {valid}")
+        return v.lower()
+
+    @field_validator("psap_agency", mode="before")
+    @classmethod
+    def _validate_psap_agency(cls, v: str | None) -> str | None:
+        """Normalize and validate the psap_agency string."""
+        if v is None:
+            return None
+        valid = {"all", "law", "fire", "ems", "fire_ems"}
+        if v.lower() not in valid:
+            raise ValueError(f"psap_agency must be one of {valid}")
         return v.lower()
 
 
@@ -141,6 +156,8 @@ def _build_request(model: GenerationRequestModel) -> GenerationRequest:
         cli_params["max_memory_bytes"] = model.max_memory_bytes
     if model.population is not None:
         cli_params["population"] = model.population
+    if model.psap_agency is not None:
+        cli_params["psap_agency"] = model.psap_agency
     if model.realism_config_path is not None:
         cli_params["realism_config_path"] = Path(model.realism_config_path)
 

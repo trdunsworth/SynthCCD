@@ -124,3 +124,34 @@ def test_sqlite_rejects_non_positive_batch_size() -> None:
     )
     with pytest.raises(ValidationError, match="db_batch_size must be greater"):
         request.validate()
+
+
+# ---------------------------------------------------------------------------
+# PSAP agency filter
+# ---------------------------------------------------------------------------
+
+
+def test_psap_agency_defaults_to_all() -> None:
+    request = GenerationRequest()
+    assert request.psap_agency == "all"
+
+
+@pytest.mark.parametrize("agency", ["all", "law", "fire", "ems", "fire_ems"])
+def test_psap_agency_accepts_valid_values(agency: str) -> None:
+    request = GenerationRequest(psap_agency=agency)
+    assert request.psap_agency == agency
+
+
+@pytest.mark.parametrize(
+    "agency", ["ALL", "Law", "FIRE_ems", "  all  "],
+)
+def test_psap_agency_normalizes_case_and_whitespace(agency: str) -> None:
+    """Validation normalizes before checking — case/whitespace variants should be accepted."""
+    request = GenerationRequest(psap_agency=agency)
+    request.validate()  # should not raise
+
+
+@pytest.mark.parametrize("agency", ["invalid", "both", "police", "law_and_fire"])
+def test_psap_agency_rejects_invalid_values(agency: str) -> None:
+    with pytest.raises(ValidationError):
+        GenerationRequest(psap_agency=agency).validate()

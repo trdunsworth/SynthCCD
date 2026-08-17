@@ -51,6 +51,7 @@ class Manifest:
     realism_config_hash: str | None
     max_memory_bytes: int | None
     population: int | None
+    psap_agency: str
     schema_hash: str
     schema_version: str
     datasets_generated: list[str]
@@ -118,6 +119,7 @@ class Manifest:
             realism_config_hash=config_hash,
             max_memory_bytes=request.max_memory_bytes,
             population=request.population,
+            psap_agency=request.psap_agency,
             schema_hash=schema_hash,
             schema_version=DATA_SCHEMA_VERSION,
             datasets_generated=list(datasets.keys()) if datasets else [],

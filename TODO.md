@@ -84,6 +84,11 @@ recommendation docs in `docs/`, and direct code review.
       add per-hour random noise respectively. Verified: 9-1-1 10 s answered percentages
       now span a multi-point range with dozens of unique values across hours. Covered by
       `tests/test_application.py`.
+- [x] **P1 — PSAP agency filter.** Added `psap_agency` field to `GenerationRequest`
+      (CLI `--psap-agency`, TUI select, params file, API) with five options: `all` (default),
+      `law`, `fire`, `ems`, `fire_ems`. Filters `agency_weights` before generation so all
+      downstream tables (priority, problem, disposition, timing) adapt automatically.
+      Covered by tests in `test_config.py` and `test_application.py`.
 
 ---
 

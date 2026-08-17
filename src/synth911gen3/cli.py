@@ -262,6 +262,17 @@ def generate(
         "--include-10-digit-emergency",
         help="Include 10-digit direct-dial emergency lines from the registry.",
     ),
+    psap_agency: str | None = typer.Option(
+        None,
+        "--psap-agency",
+        metavar="AGENCY",
+        case_sensitive=False,
+        show_default=False,
+        help=(
+            "PSAP agency filter: all, law, fire, ems, fire_ems (default: all). "
+            "Restricts which agency types appear in the output."
+        ),
+    ),
     db_dialect: DatabaseDialect | None = typer.Option(
         None,
         "--db-dialect",
@@ -389,6 +400,8 @@ def generate(
         cli_params["emergency_numbers"] = emergency_numbers
     if include_10_digit_emergency:
         cli_params["include_10_digit_emergency"] = True
+    if psap_agency is not None:
+        cli_params["psap_agency"] = psap_agency.lower()
     if db_dialect is not None:
         cli_params["db_dialect"] = db_dialect
     if db_host is not None:

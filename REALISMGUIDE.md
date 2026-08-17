@@ -242,6 +242,11 @@ shift_config:
 | `name_locales` | Faker locale blend for personnel rosters, per country | Valid Faker locales, positive weights, uppercase ISO country keys |
 | `problem_phone_multipliers` | Per-problem-type phone duration multipliers | Positive floats; unlisted problems default to 1.0 |
 
+The `psap_agency` field on `GenerationRequest` (not the realism config) filters which
+agencies appear in the output. Valid values: `all`, `law`, `fire`, `ems`, `fire_ems`.
+This filters `agency_weights` before generation, so all downstream tables (priority,
+problem, disposition, timing) adapt automatically.
+
 > Note: the config key is `problem_profiles` (not `problem_problems`).
 
 ### Time Profile Intervals
@@ -1060,6 +1065,10 @@ seasonal_multipliers:
 | `name_locales` | Personnel roster diversity | Low | Per-country locale blends |
 | `disposition_profiles` | Outcome realism | Low | Fine-tune last |
 | `call_reception_weights` | Source realism | Low | Often similar across centers |
+
+The `psap_agency` field (on `GenerationRequest`, not the realism config) is a top-level
+filter that restricts which agencies appear in the output. It is applied before generation
+so all downstream tables adapt automatically.
 
 ---
 
