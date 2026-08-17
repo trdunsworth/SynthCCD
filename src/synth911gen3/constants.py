@@ -41,13 +41,24 @@ DEFAULT_COUNTRY = "US"
 # Version of the generated incident / phone-metrics data schema. Bump when
 # columns change in a breaking way. Embedded in Parquet file metadata and in
 # the data-governance manifest so consumers can detect schema drift.
-DATA_SCHEMA_VERSION = "1.0"
+DATA_SCHEMA_VERSION = "1.1"
 
 # When ``max_memory_bytes`` is unset, incident CSV/Parquet generation is
 # chunked once the estimated in-memory DataFrame would exceed this budget.
 DEFAULT_MAX_MEMORY_BYTES = 2 * 1024**3
 # Probe rows used to estimate per-row memory for the budget guard.
 MEMORY_PROBE_ROWS = 10_000
+
+# Typical US PSAP calls per 1,000 population per year (NFPA/NAEM data).
+# Used when ``population`` is set on the generation request to derive
+# phone-metrics volume independently from the incident row count.
+CALLS_PER_1000_POPULATION_YEARLY: float = 2_500.0
+
+# Minimum ratio of non-emergency to emergency received calls.
+# After independent Poisson draws, non-emergency is floored to at least
+# this ratio × emergency so the output always reflects the real-world
+# pattern of non-emergency calls exceeding emergency calls.
+NON_EMERGENCY_FLOOR_RATIO: float = 1.2
 
 AGENCY_WEIGHTS = {
     "LAW": 0.52,

@@ -607,6 +607,37 @@ binomial on the received counts:
 | `answer_time_load_sensitivity` | 0.25 | How strongly the answer-time lognormal μ shifts with hourly load (busy hours answer slower) |
 | `answer_time_mu_noise_sd` | 0.05 | Std-dev of per-hour random noise applied to lognormal μ, so answer-time percentages vary hour-to-hour |
 
+### Population-Based Volume Scaling
+
+When the `--population` flag (or `population` params-file key) is set, phone-metrics
+volume is derived from the service area population instead of the incident row count.
+The formula is:
+
+```
+total_annual_calls = (population / 1000) × CALLS_PER_1000_POPULATION_YEARLY
+base_hourly_volume = total_annual_calls / hours_in_year × hours_in_date_range
+```
+
+The default `CALLS_PER_1000_POPULATION_YEARLY` is 2,500 (NFPA/NAEM data for US
+PSAPs). This constant is defined in `constants.py` and can be overridden by editing
+the source.
+
+When `population` is not set (the default), the legacy behaviour is preserved:
+`base_hourly_volume = rows / total_hours`.
+
+### Non-Eergency Floor
+
+To guarantee that non-emergency calls always exceed emergency calls — the
+real-world norm for every PSAP — a floor constraint is applied after the
+independent Poisson draws:
+
+```
+non_emergency_received ≥ ceil(total_emergency_received × NON_EMERGENCY_FLOOR_RATIO)
+```
+
+The default `NON_EMERGENCY_FLOOR_RATIO` is 1.2 (non-emergency must be at least
+20% higher than emergency). This constant is defined in `constants.py`.
+
 ### Answer Time Percentages
 
 For each hour the generator computes the cumulative probability of a call being

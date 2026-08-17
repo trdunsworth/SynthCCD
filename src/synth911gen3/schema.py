@@ -297,6 +297,11 @@ class GenerationRequest(BaseModel):
     max_memory_bytes: int | None = Field(
         default=None, gt=0, description="Memory budget for chunked export"
     )
+    population: int | None = Field(
+        default=None,
+        gt=0,
+        description="Population of the service area for phone-volume scaling",
+    )
     country: str = Field(
         default=DEFAULT_COUNTRY, min_length=1, description="ISO 3166-1 alpha-2 country code"
     )

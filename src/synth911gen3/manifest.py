@@ -50,6 +50,7 @@ class Manifest:
     shift_preset: str | None
     realism_config_hash: str | None
     max_memory_bytes: int | None
+    population: int | None
     schema_hash: str
     schema_version: str
     datasets_generated: list[str]
@@ -116,6 +117,7 @@ class Manifest:
             shift_preset=request.shift_preset,
             realism_config_hash=config_hash,
             max_memory_bytes=request.max_memory_bytes,
+            population=request.population,
             schema_hash=schema_hash,
             schema_version=DATA_SCHEMA_VERSION,
             datasets_generated=list(datasets.keys()) if datasets else [],

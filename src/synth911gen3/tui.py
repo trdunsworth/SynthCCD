@@ -104,6 +104,8 @@ _HELP_TEXT = (
     "PARAMETERS\n"
     "  Rows               Number of incident rows to generate (default: 10000).\n"
     "  Seed               Random seed for reproducible output (default: 911).\n"
+    "  Population         Service area population for phone-volume scaling\n"
+    "                     (optional; when set, overrides row-based scaling).\n"
     "  Dataset            incidents, phone, or all (default: incidents).\n"
     "  Output format      csv, parquet, json, yaml, pandas, polars, geojson,\n"
     "                     shapefile, postgresql, sqlserver, mariadb, duckdb,\n"
@@ -266,6 +268,14 @@ class Synth911Tui(App[None]):
                             with Grid(classes="fields"):
                                 yield _field("Rows", "rows", Input(str(defaults.rows), id="rows"))
                                 yield _field("Seed", "seed", Input(str(defaults.seed), id="seed"))
+                                yield _field(
+                                    "Population",
+                                    "population",
+                                    Input(
+                                        str(defaults.population) if defaults.population else "",
+                                        id="population",
+                                    ),
+                                )
                                 yield _field(
                                     "Dataset",
                                     "dataset",
@@ -457,6 +467,9 @@ class Synth911Tui(App[None]):
         """Populate every form widget from a GenerationRequest."""
         self.query_one("#rows", Input).value = str(request.rows)
         self.query_one("#seed", Input).value = str(request.seed)
+        self.query_one("#population", Input).value = (
+            str(request.population) if request.population else ""
+        )
         self.query_one("#area", Input).value = request.area_query
         self.query_one("#format", Select).value = request.output_format.value
         self.query_one("#dataset", Select).value = request.dataset.value
@@ -530,6 +543,13 @@ class Synth911Tui(App[None]):
             lambda: _parse_int(self.query_one("#rows", Input).value, "rows", min_value=1),
         )
         seed = parse("seed", lambda: _parse_int(self.query_one("#seed", Input).value, "seed"))
+        population_raw = self.query_one("#population", Input).value.strip()
+        population: int | None = None
+        if population_raw:
+            population = parse(
+                "population",
+                lambda: _parse_int(population_raw, "population", min_value=1),
+            )
         calltaker_pool_size = parse(
             "calltaker_pool_size",
             lambda: _parse_int(
@@ -602,6 +622,7 @@ class Synth911Tui(App[None]):
             shift_preset=shift_preset,
             realism_config_path=realism_config_path,
             max_memory_bytes=max_memory_bytes,
+            population=population,
             country=country,
             emergency_numbers=emergency_numbers,
             include_10_digit_emergency=include_10_digit_emergency,

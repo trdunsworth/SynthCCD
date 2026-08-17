@@ -317,6 +317,12 @@ recommendation docs in `docs/`, and direct code review.
 - [ ] **P2 — Cadence/queueing simulation.** Constrained simulation with unit availability queues (simpy) for dispatch realism. Prototype at P2/P3.
 - [ ] **P2 — Weather and seasonal correlation enhancements.** Current seasonal multipliers are static; integrate real weather data (temperature, precipitation) to drive problem type correlations dynamically.
 - [ ] **P2 — Timezone-aware timestamps.** Support non-UTC timestamps and hourly-metric localization for deployments outside single timezone.
+- [x] **P2 — Population-based phone-metrics volume.** Added `--population` flag to derive
+  phone-metrics call volume from service-area population (calls per 1,000 residents per year)
+  instead of the incident row count. Also added non-emergency floor constraint ensuring
+  non-emergency calls always exceed emergency calls (ratio ≥ 1.2×). Added `total_emergency_calls`,
+  `total_nonemergency_calls`, and `total_calls` aggregate columns to the phone-metrics output.
+  Schema version bumped to 1.1.
 - [x] **P2 — SQLite database target.** Add SQLite as a lightweight database export option alongside PostgreSQL/SQL Server/MariaDB/DuckDB.
   Added `SQLITE` to `OutputFormat`/`DatabaseDialect` (config + pydantic schema), a file-based
   `_create_sqlite_engine()` in `db_exporter.py` (stdlib `sqlite3` driver, `db_name` defaults to
@@ -369,6 +375,10 @@ recommendation docs in `docs/`, and direct code review.
 - [x] **P2 — Correlation between fields.** Implemented geographic zone (URBAN/SUBURBAN/RURAL) correlation with travel time via OSM-based zone classification and configurable `zone_travel_multipliers` (URBAN=0.8, SUBURBAN=1.0, RURAL=1.5). Priority-weighted time distributions already correlate priority with interview/dispatch/turnout/travel times via `TIME_PROFILES` per agency/priority.
 - [x] **P2 — Person name diversity.** Added `name_locales` realism-config section and `PersonnelNameGenerator`: country-matched Faker-locale blends derived from the geocoded OSM region (with a weighted multi-ethnic US default), per-country overrides, CJK family-name-first ordering, and `resolved_country()` on address providers persisted in the address-cache `.meta.json` sidecar. Replaces the fixed `en_US` roster.
 - [x] **P2 — Call duration correlation with problem type.** Complex problems (e.g., "Active Shooter") have longer phone durations on average. Added `PROBLEM_PHONE_MULTIPLIERS` in `constants.py` with per-problem multipliers (e.g., Active Shooter=2.5, Cardiac Arrest=1.6, Noise Complaint=1.0). Integrated into `RealismConfig` as `problem_phone_multipliers` with YAML serialization. Incident generator applies multipliers to `phone_mean` per-incident based on selected `problem_nature`, creating realistic correlation where high-acuity problems yield longer call durations within each priority level.
+- [x] **P2 — Non-emergency floor constraint.** Added `NON_EMERGENCY_FLOOR_RATIO` (1.2) in
+  `constants.py` ensuring non-emergency received calls always exceed emergency calls per
+  hour. After independent Poisson draws, non-emergency is floored to at least 1.2× total
+  emergency, reflecting the universal PSAP pattern.
 - [ ] **P2 — Shift handoff effects.** Model increased response times during shift change periods.
 
 ### Integration / Ecosystem

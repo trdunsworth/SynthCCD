@@ -34,7 +34,7 @@ def _footer_metadata(path: Path) -> dict[str, str]:
 
 METADATA = {
     "synth911:seed": "42",
-    "synth911:schema_version": "1.0",
+    "synth911:schema_version": "1.1",
     "synth911:realism_config_hash": "abc123",
 }
 

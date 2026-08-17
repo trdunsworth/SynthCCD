@@ -67,7 +67,7 @@ def test_application_generates_incidents_and_hourly_counts() -> None:
         "call_disposition",
         "total_elapsed_seconds",
     }.issubset(result.incidents.columns)
-    assert len(result.hourly_call_counts.columns) == 15
+    assert len(result.hourly_call_counts.columns) == 18
 
 
 def test_application_sqlite_export_persists_both_tables(tmp_path) -> None:

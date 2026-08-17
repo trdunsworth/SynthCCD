@@ -577,15 +577,12 @@ class OpenStreetMapAddressProvider:
             state = _normalize_state(tags.get("addr:state") or fallback_state)
             if not city or not state:
                 continue
-            # Extract coordinates
+            # Extract coordinates — Nodes have lat/lon; Ways have center_lat/center_lon
             lat = getattr(element, "lat", None)
             lon = getattr(element, "lon", None)
-            # For ways, use center point if available
-            if lat is None and hasattr(element, "center"):
-                center = getattr(element, "center", None)
-                if center is not None:
-                    lat = getattr(center, "lat", None)  # type: ignore[attr-defined]
-                    lon = getattr(center, "lon", None)  # type: ignore[attr-defined]
+            if lat is None:
+                lat = getattr(element, "center_lat", None)
+                lon = getattr(element, "center_lon", None)
             lat_val = float(lat) if lat is not None else 0.0
             lon_val = float(lon) if lon is not None else 0.0
             zone = self._classify_zone(tags, lat_val, lon_val)
@@ -604,37 +601,55 @@ class OpenStreetMapAddressProvider:
         return self._dedupe(addresses)
 
     @staticmethod
-    def _named_streets(result: overpy.Result) -> list[str]:
-        """Unique street names from the named-street query results, in order."""
-        names: list[str] = []
+    def _named_streets(result: overpy.Result) -> list[tuple[str, float, float]]:
+        """Unique (street_name, lat, lon) from named-street query results, in order.
+
+        For Way elements the centre coordinates come from ``center_lat`` /
+        ``center_lon``; for Nodes they come from ``lat`` / ``lon``.
+        """
+        entries: list[tuple[str, float, float]] = []
         seen: set[str] = set()
         for way in result.ways:
             name = (way.tags or {}).get("name")
             if name and name not in seen:
+                lat = getattr(way, "center_lat", None)
+                lon = getattr(way, "center_lon", None)
                 seen.add(name)
-                names.append(name)
-        return names
+                entries.append((name, float(lat) if lat else 0.0, float(lon) if lon else 0.0))
+        return entries
 
     @staticmethod
     def _synthesize_addresses(
-        street_names: list[str],
+        street_names: list[tuple[str, float, float]],
         city: str,
         state: str,
         count: int,
     ) -> list[Address]:
-        """Build plausible house numbers on the given streets (deterministic by name)."""
+        """Build plausible house numbers on the given streets (deterministic by name).
+
+        Each entry in *street_names* is ``(name, lat, lon)`` — the centre
+        coordinate of the source Way.  Synthesised addresses inherit those
+        coordinates so the output carries real location data.
+        """
         if not street_names:
             return []
         addresses: list[Address] = []
         seen: set[tuple[str, str, str]] = set()
         index = 0
         while len(addresses) < count and index < count * len(street_names):
-            name = street_names[index % len(street_names)]
+            name, src_lat, src_lon = street_names[index % len(street_names)]
             offset = index // len(street_names)
             number = (
                 100 + (int(hashlib.md5(name.encode("utf-8")).hexdigest(), 16) + offset * 97) % 8_900
             )
-            address = Address(f"{number} {name}", city, state, zone="SUBURBAN")
+            address = Address(
+                f"{number} {name}",
+                city,
+                state,
+                zone="SUBURBAN",
+                latitude=src_lat,
+                longitude=src_lon,
+            )
             key = (address.street_address, city, state)
             if key not in seen:
                 seen.add(key)

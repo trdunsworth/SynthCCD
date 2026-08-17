@@ -700,7 +700,7 @@ def test_cli_schema_exports_incidents_json() -> None:
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["dataset"] == "incidents"
-    assert data["version"] == "1.0"
+    assert data["version"] == "1.1"
     assert data["schema_hash"]
     assert "id_number" in data["datasets"]["incidents"]
     assert "agency" in data["datasets"]["incidents"]

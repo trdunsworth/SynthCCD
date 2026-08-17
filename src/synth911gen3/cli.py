@@ -225,6 +225,17 @@ def generate(
             "(default: 2147483648 / 2 GiB)."
         ),
     ),
+    population: int | None = typer.Option(
+        None,
+        "--population",
+        min=1,
+        show_default=False,
+        help=(
+            "Population of the service area. When set, phone-metrics volume "
+            "is derived from population (calls per 1,000 residents per year) "
+            "instead of the incident row count."
+        ),
+    ),
     config: Path | None = typer.Option(
         None,
         "--config",
@@ -368,6 +379,8 @@ def generate(
         cli_params["shift_preset"] = shift_preset
     if max_memory_bytes is not None:
         cli_params["max_memory_bytes"] = max_memory_bytes
+    if population is not None:
+        cli_params["population"] = population
     if config is not None:
         cli_params["realism_config_path"] = config
     if country is not None:

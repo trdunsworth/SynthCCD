@@ -565,6 +565,7 @@ uv run SynthCCD generate [OPTIONS]
 | `--dispatcher-pool-size` | | `10` | Number of unique dispatcher names |
 | `--shift-preset` | | *(realism config)* | Shift structure preset: `2x12h-4shift-14day`, `2x12h-2shift`, `3x8h-3shift`, or `4x10h-4shift` |
 | `--max-memory-bytes` | | `2147483648` | Approximate in-memory budget per incident chunk in bytes; CSV/Parquet exports stream in chunks to stay under it |
+| `--population` | | *(none)* | Population of the service area. When set, phone-metrics volume is derived from population (calls per 1,000 residents per year) instead of the incident row count |
 | `--config` | | *(none)* | Path to YAML realism configuration file |
 | `--country` | | `US` | ISO 3166-1 alpha-2 country code selecting the emergency-number registry (see [Emergency Number Registry](#emergency-number-registry)) |
 | `--emergency-numbers` | | *(registry)* | Comma-separated emergency numbers to model, overriding the country registry (e.g. `"999,112"`) |
@@ -1537,6 +1538,9 @@ column set is:
 | `non_emergency_answered_15s_pct` | float | % of non-emergency calls answered within 15 seconds |
 | `non_emergency_answered_20s_pct` | float | % of non-emergency calls answered within 20 seconds |
 | `non_emergency_answered_40s_pct` | float | % of non-emergency calls answered within 40 seconds |
+| `total_emergency_calls` | int | Total emergency calls received across all emergency numbers |
+| `total_nonemergency_calls` | int | Total non-emergency calls received (with floor constraint applied) |
+| `total_calls` | int | Sum of all received + outbound calls |
 
 `911` keeps the legacy `nine_one_one` column prefix for schema stability; every
 other number uses an `emergency_<digits>` prefix. For example, `--country GB`

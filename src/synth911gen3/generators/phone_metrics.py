@@ -4,7 +4,8 @@
 requested date range with received/abandoned/answered counts for each
 emergency line plus the non-emergency and outbound lines. Volumes follow
 the diurnal ``hourly_weights`` (scaled so the run's total volume matches
-``request.rows``), weekend multipliers, per-line fractions and abandonment
+``request.rows`` or, when *population* is set, the population-derived
+call rate), weekend multipliers, per-line fractions and abandonment
 rates, and load-sensitive lognormal answer-time service levels.
 """
 
@@ -17,6 +18,10 @@ import pandas as pd
 from scipy.stats import lognorm
 
 from synth911gen3.config import GenerationRequest
+from synth911gen3.constants import (
+    CALLS_PER_1000_POPULATION_YEARLY,
+    NON_EMERGENCY_FLOOR_RATIO,
+)
 from synth911gen3.emergency_numbers import EmergencyNumber, column_prefix
 from synth911gen3.logging_conf import get_logger
 from synth911gen3.realism_config import RealismConfig
@@ -39,7 +44,7 @@ def phone_metrics_columns(request: GenerationRequest, realism: RealismConfig) ->
 
     Emergency-number columns are derived from the resolved registry (one set of
     received/abandoned/answered columns per number); the non-emergency line and
-    the outbound counter are fixed.
+    the outbound counter are fixed.  Three aggregate total columns are appended.
     """
     thresholds = _thresholds(realism)
     columns = ["hour_start", "hour_of_day"]
@@ -56,6 +61,10 @@ def phone_metrics_columns(request: GenerationRequest, realism: RealismConfig) ->
         prefix = column_prefix(number.number)
         columns.extend(f"{prefix}_answered_{int(t)}s_pct" for t in thresholds)
     columns.extend(f"non_emergency_answered_{int(t)}s_pct" for t in thresholds)
+    # Aggregate totals
+    columns.append("total_emergency_calls")
+    columns.append("total_nonemergency_calls")
+    columns.append("total_calls")
     return columns
 
 
@@ -98,6 +107,24 @@ class HourlyCallCountGenerator:
         base_hourly_volume = max(_f("min_hourly_volume"), request.rows / len(hours))
         average_weight = float(np.mean(realism.hourly_weights))
 
+        # Population-based volume scaling: when ``population`` is set on the
+        # request, derive total annual calls from population and scale to the
+        # date range, overriding the incident-row-based calculation.
+        if request.population is not None:
+            total_annual_calls = (
+                request.population / 1_000.0
+            ) * CALLS_PER_1000_POPULATION_YEARLY
+            total_hours = float(len(hours))
+            hours_in_year = 8_760.0
+            pop_volume = (total_annual_calls / hours_in_year) * total_hours
+            # Blend: use population-derived volume as the target total,
+            # distributed across hours via the diurnal weights.  The per-hour
+            # draw is pop_volume / total_hours, then scaled by busy_factor.
+            base_hourly_volume = max(
+                _f("min_hourly_volume"),
+                pop_volume / total_hours,
+            )
+
         hour_of_day = hours.to_series().dt.hour.to_numpy()
         weight_multiplier = realism.hourly_weights[hour_of_day] / average_weight
         weekend = np.where(
@@ -126,6 +153,18 @@ class HourlyCallCountGenerator:
         )
         outbound_calls_placed = rng.poisson(
             np.maximum(0.5, base_hourly_volume * _f("outbound_calls_fraction") * busy_factor)
+        )
+
+        # Non-emergency floor: ensure non-emergency received calls are at
+        # least NON_EMERGENCY_FLOOR_RATIO × total emergency received calls
+        # per hour, reflecting the real-world pattern that non-emergency
+        # volume always exceeds emergency volume.
+        total_emergency_received = np.sum(
+            [received[num.number] for num in numbers], axis=0
+        )
+        floor = np.ceil(total_emergency_received * NON_EMERGENCY_FLOOR_RATIO).astype(int)
+        non_emergency_calls_received = np.maximum(
+            non_emergency_calls_received, floor
         )
 
         # Abandoned counts — same per-number then fixed-line draw order.
@@ -189,5 +228,14 @@ class HourlyCallCountGenerator:
         data["non_emergency_calls_abandoned"] = non_emergency_calls_abandoned
         data.update(emergency_answered)
         data.update(non_emergency_answered)
+
+        # Aggregate totals per hourly row
+        total_emergency = np.sum(
+            [received[num.number] for num in numbers], axis=0
+        )
+        total_nonemergency = non_emergency_calls_received
+        data["total_emergency_calls"] = total_emergency
+        data["total_nonemergency_calls"] = total_nonemergency
+        data["total_calls"] = total_emergency + total_nonemergency + outbound_calls_placed
 
         return pd.DataFrame(data)

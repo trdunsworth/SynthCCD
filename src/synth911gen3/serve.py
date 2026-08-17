@@ -54,6 +54,9 @@ class GenerationRequestModel(BaseModel):
     dispatcher_pool_size: int | None = Field(default=None, ge=1, description="Dispatcher pool size")
     shift_preset: str | None = Field(default=None, description="Shift preset name")
     max_memory_bytes: int | None = Field(default=None, ge=1, description="Per-chunk memory budget")
+    population: int | None = Field(
+        default=None, ge=1, description="Service area population for phone-volume scaling"
+    )
     realism_config_path: str | None = Field(default=None, description="Path to YAML realism config")
 
     @field_validator("output_format", mode="before")
@@ -136,6 +139,8 @@ def _build_request(model: GenerationRequestModel) -> GenerationRequest:
         cli_params["shift_preset"] = model.shift_preset
     if model.max_memory_bytes is not None:
         cli_params["max_memory_bytes"] = model.max_memory_bytes
+    if model.population is not None:
+        cli_params["population"] = model.population
     if model.realism_config_path is not None:
         cli_params["realism_config_path"] = Path(model.realism_config_path)
 

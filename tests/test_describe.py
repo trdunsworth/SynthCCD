@@ -86,7 +86,7 @@ def test_schema_definition_incidents_shape() -> None:
     definition = build_schema_definition(_request(DatasetKind.INCIDENTS))
 
     assert definition["dataset"] == "incidents"
-    assert definition["version"] == "1.0"
+    assert definition["version"] == "1.1"
     assert definition["schema_hash"]
     assert set(definition["datasets"]) == {"incidents"}
     columns = definition["datasets"]["incidents"]
