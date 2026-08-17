@@ -13,9 +13,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - FIRE problem pool: `Chimney Fire` added at priority 3. It previously existed only in
   `SEASONAL_MULTIPLIERS` (winter-weighted: 2.5/0.5/0.1/1.5), so its seasonal profile never
   applied to generated incidents. FIRE problem count is now 22.
+- Phone-metrics mean-duration columns: `{prefix}_mean_duration` per emergency number
+  (`nine_one_one_mean_duration` for the default US/CA 911), `non_emergency_mean_duration`,
+  `outbound_mean_duration`, and `call_mean_duration` (volume-weighted overall mean). Each
+  category mean is the per-hour sample mean of one lognormal phone-duration draw per
+  answered call (received minus abandoned; outbound has no abandonment). New optional
+  `phone_metrics` keys: `nine_one_one_phone_duration_mu`/`sigma` (mean ≈ 210 s),
+  `non_emergency_phone_duration_mu`/`sigma` (mean ≈ 120 s), and
+  `outbound_phone_duration_mu`/`sigma` (mean ≈ 60 s), with per-line
+  `phone_duration_mu`/`phone_duration_sigma` overrides. Schema version bumped to 1.2.
 
 ### Fixed
 - TUI help text now lists all 13 output formats instead of 6.
+- Phone-metrics answer-time percentages are now consistent with the hour's call
+  counts. The `answered_Ns_pct` columns were previously the raw lognormal CDF
+  (independent of volume), so a low-volume hour could report an impossible value
+  (e.g. 76% answered within 10 s on 5 received calls). Each column is now simulated
+  per-call: the hour's answered calls (received minus abandoned) are allocated
+  against the thresholds with a sequential-binomial draw, and the column is the
+  rounded count/received. Percentages step with volume (5 calls → 20-point steps),
+  never exceed 100% × answered/received, and reach exactly 100% on fast,
+  low-abandonment hours.
 
 ---
 

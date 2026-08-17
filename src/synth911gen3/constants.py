@@ -42,7 +42,7 @@ DEFAULT_PSAP_AGENCY = "all"
 # Version of the generated incident / phone-metrics data schema. Bump when
 # columns change in a breaking way. Embedded in Parquet file metadata and in
 # the data-governance manifest so consumers can detect schema drift.
-DATA_SCHEMA_VERSION = "1.1"
+DATA_SCHEMA_VERSION = "1.2"
 
 # When ``max_memory_bytes`` is unset, incident CSV/Parquet generation is
 # chunked once the estimated in-memory DataFrame would exceed this budget.
@@ -318,6 +318,15 @@ PHONE_METRICS: dict[str, float | list[float]] = {
     "answer_time_thresholds": [10.0, 15.0, 20.0, 40.0],
     "answer_time_load_sensitivity": 0.25,
     "answer_time_mu_noise_sd": 0.05,
+    # Lognormal phone-duration parameters (log-scale mu, shape sigma) used for
+    # the per-hour mean-duration columns. Means: 9-1-1 ~210 s, non-emergency
+    # ~120 s, outbound ~60 s (e^(mu + sigma^2/2)).
+    "nine_one_one_phone_duration_mu": 5.10,
+    "nine_one_one_phone_duration_sigma": 0.70,
+    "non_emergency_phone_duration_mu": 4.54,
+    "non_emergency_phone_duration_sigma": 0.70,
+    "outbound_phone_duration_mu": 3.85,
+    "outbound_phone_duration_sigma": 0.70,
 }
 
 TIME_PROFILES = {

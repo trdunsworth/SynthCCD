@@ -420,6 +420,15 @@ phone_metrics:
   # vary hour-to-hour.
   answer_time_load_sensitivity: 0.25
   answer_time_mu_noise_sd: 0.05
+  # Lognormal phone-duration parameters (log-scale mu, shape sigma) for the
+  # per-hour mean-duration columns. Means: 9-1-1 ~210 s, non-emergency ~120 s,
+  # outbound ~60 s.
+  nine_one_one_phone_duration_mu: 5.10
+  nine_one_one_phone_duration_sigma: 0.70
+  non_emergency_phone_duration_mu: 4.54
+  non_emergency_phone_duration_sigma: 0.70
+  outbound_phone_duration_mu: 3.85
+  outbound_phone_duration_sigma: 0.70
 
 # Diurnal call volume pattern (24 values for hours 0-23, will be normalized)
 hourly_weights:

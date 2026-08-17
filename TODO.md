@@ -84,6 +84,26 @@ recommendation docs in `docs/`, and direct code review.
       add per-hour random noise respectively. Verified: 9-1-1 10 s answered percentages
       now span a multi-point range with dozens of unique values across hours. Covered by
       `tests/test_application.py`.
+- [x] **P2 — Keep answer-time percentages consistent with hourly call counts.** Service-
+      level percentages are now simulated per-call instead of taken as the raw lognormal
+      CDF: the hour's *answered* calls (received minus abandoned) are allocated against
+      the thresholds with a sequential-binomial draw and the column is the rounded count /
+      received. Percentages therefore step with the hour's received volume (5 received
+      calls → 20-point steps), can never exceed 100% × answered/received, and reach exactly
+      100% on fast, low-abandonment hours. Previously low-volume hours could report
+      impossible values (e.g. 76% answered within 10 s on 5 calls). Covered by
+      `tests/test_application.py` (`test_application_phone_answer_percentages_consistent_with_volume`).
+- [x] **P2 — Add per-call mean phone-duration columns to phone metrics.** New columns
+      `{prefix}_mean_duration` per emergency number (e.g. `nine_one_one_mean_duration`),
+      `non_emergency_mean_duration`, `outbound_mean_duration`, and `call_mean_duration`
+      (volume-weighted overall mean). Each category mean is the per-hour sample mean of
+      one lognormal phone-duration draw per answered call (received minus abandoned;
+      outbound has no abandonment), so low-volume hours produce noisy means and hours
+      with no answered calls report `0.0`. Backward-compatible optional
+      `phone_metrics` keys `*_phone_duration_mu`/`*_phone_duration_sigma`
+      (9-1-1 ≈ 210 s, non-emergency ≈ 120 s, outbound ≈ 60 s) plus per-line
+      `phone_duration_mu`/`phone_duration_sigma` overrides. Schema version bumped to 1.2.
+      Covered by `tests/test_application.py`.
 - [x] **P1 — PSAP agency filter.** Added `psap_agency` field to `GenerationRequest`
       (CLI `--psap-agency`, TUI select, params file, API) with five options: `all` (default),
       `law`, `fire`, `ems`, `fire_ems`. Filters `agency_weights` before generation so all
@@ -387,6 +407,16 @@ recommendation docs in `docs/`, and direct code review.
   hour. After independent Poisson draws, non-emergency is floored to at least 1.2× total
   emergency, reflecting the universal PSAP pattern.
 - [ ] **P2 — Shift handoff effects.** Model increased response times during shift change periods.
+- [ ] **P2 — Parameterize phone answer times with a mean-seconds lognormal, like
+      `phone_duration_seconds`.** The incident generator draws call durations from a
+      *mean*-seconds lognormal (`_lognormal_seconds`: `mu = ln(mean) − sigma²/2`), but the
+      phone-metrics answer-time keys (`nine_one_one_answer_time_mu` /
+      `nine_one_one_answer_time_sigma`, `non_emergency_answer_time_mu` / `sigma`) are raw
+      lognormal log-scale/shape values, so operators must translate seconds to log-space.
+      Switch them to the same mean-seconds convention (e.g. `nine_one_one_answer_time_mean`).
+      Note: emergency (9-1-1) calls will typically have *lower* values than non-emergency
+      — emergency lines are answered faster — which the current defaults (9-1-1 μ=1.80 vs
+      non-emergency μ=1.70) invert and should be recalibrated when adopting mean-seconds.
 
 ### Integration / Ecosystem
 - [x] **P2 — Parquet metadata embedding.** Embed generation metadata (seed, config hash, schema version) directly in Parquet file metadata for self-documenting files.

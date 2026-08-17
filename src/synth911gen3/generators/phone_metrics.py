@@ -21,6 +21,7 @@ from synth911gen3.config import GenerationRequest
 from synth911gen3.constants import (
     CALLS_PER_1000_POPULATION_YEARLY,
     NON_EMERGENCY_FLOOR_RATIO,
+    PHONE_METRICS as DEFAULT_PHONE_METRICS,
 )
 from synth911gen3.emergency_numbers import EmergencyNumber, column_prefix
 from synth911gen3.logging_conf import get_logger
@@ -35,8 +36,31 @@ def _thresholds(realism: RealismConfig) -> list[float]:
     """Answer-time thresholds (seconds) for the service-level percentage columns."""
     raw = realism.phone_metrics.get("answer_time_thresholds", list(_DEFAULT_THRESHOLDS))
     if isinstance(raw, list):
-        return [float(t) for t in raw]
+        return sorted(float(t) for t in raw)
     return [float(raw)]
+
+
+def _mean_duration(
+    rng: np.random.Generator,
+    counts: np.ndarray,
+    mu: float,
+    sigma: float,
+) -> np.ndarray:
+    """Per-hour sample mean of ``counts`` lognormal phone-duration draws.
+
+    Hours with zero calls yield ``0.0`` — no duration was observed. Hours with
+    calls get the arithmetic mean of one lognormal draw per call, so the result
+    is a consistent, noisy estimate of the population mean ``e^(mu + sigma^2/2)``.
+    """
+    total = int(counts.sum())
+    if total == 0:
+        return np.zeros(len(counts), dtype=float)
+    draws = rng.lognormal(mu, sigma, size=total)
+    draw_cum = np.concatenate(([0.0], np.cumsum(draws)))
+    ends = np.cumsum(counts)
+    starts = np.concatenate(([0], ends[:-1]))
+    sums = draw_cum[ends] - draw_cum[starts]
+    return np.where(counts > 0, sums / np.maximum(counts, 1), 0.0)
 
 
 def phone_metrics_columns(request: GenerationRequest, realism: RealismConfig) -> list[str]:
@@ -61,6 +85,14 @@ def phone_metrics_columns(request: GenerationRequest, realism: RealismConfig) ->
         prefix = column_prefix(number.number)
         columns.extend(f"{prefix}_answered_{int(t)}s_pct" for t in thresholds)
     columns.extend(f"non_emergency_answered_{int(t)}s_pct" for t in thresholds)
+    # Mean phone-duration columns (per emergency number, non-emergency, outbound,
+    # and the volume-weighted overall mean).
+    for number in request.resolved_emergency_numbers():
+        prefix = column_prefix(number.number)
+        columns.append(f"{prefix}_mean_duration")
+    columns.append("non_emergency_mean_duration")
+    columns.append("outbound_mean_duration")
+    columns.append("call_mean_duration")
     # Aggregate totals
     columns.append("total_emergency_calls")
     columns.append("total_nonemergency_calls")
@@ -184,12 +216,46 @@ class HourlyCallCountGenerator:
             non_emergency_calls_received, _f("non_emergency_abandonment_rate")
         )
 
-        # Answer-time percentages — vary by hour based on load (busy_factor)
-        # and add small random variation per hour.
-        thresholds = _flist("answer_time_thresholds")
-
+        # Answer-time percentages — derived from the hour's actual call counts
+        # so the service-level percentages stay consistent with the received /
+        # abandoned volumes (e.g. 5 received calls only step in 20-point
+        # increments, and 100% is achievable whenever every answered call is
+        # fast). Each call answered during the hour gets a lognormal answer-time
+        # draw and is binned against the thresholds via a sequential-binomial
+        # allocation, so the counts are integers, non-decreasing in the
+        # threshold, and bounded by the answered pool.
+        thresholds = sorted(_flist("answer_time_thresholds"))
         load_sensitivity = _f("answer_time_load_sensitivity", 0.25)
         mu_noise_sd = _f("answer_time_mu_noise_sd", 0.05)
+
+        def _answered_pct(
+            received: np.ndarray,
+            abandoned: np.ndarray,
+            mu: float,
+            sigma: float,
+        ) -> dict[str, np.ndarray]:
+            """Per-threshold % of calls answered within T seconds, per hour."""
+            answered = np.maximum(received - abandoned, 0)
+            mu_adj = mu * (1.0 + load_sensitivity * (busy_factor - 1.0))
+            mu_noise = rng.normal(0.0, mu_noise_sd, size=len(hours))
+            scale = np.exp(mu_adj + mu_noise)
+            probs = np.asarray([lognorm.cdf(t, s=sigma, scale=scale) for t in thresholds])
+
+            cumulative = np.zeros(len(hours), dtype=np.int64)
+            remaining = answered.copy()
+            prev_p = np.zeros(len(hours))
+            base = np.maximum(received, 1)
+            pct: dict[str, np.ndarray] = {}
+            for t, p in zip(thresholds, probs, strict=False):
+                cond = np.clip(
+                    (p - prev_p) / np.maximum(1.0 - prev_p, 1e-9), 0.0, 1.0
+                )
+                within = rng.binomial(remaining, cond)
+                cumulative = cumulative + within
+                remaining = remaining - within
+                prev_p = p
+                pct[f"answered_{int(t)}s"] = np.round(cumulative / base * 100.0, 1)
+            return pct
 
         emergency_answered: dict[str, np.ndarray] = {}
         non_emergency_answered: dict[str, np.ndarray] = {}
@@ -199,21 +265,67 @@ class HourlyCallCountGenerator:
             mu = float(over.get("answer_time_mu", _f("nine_one_one_answer_time_mu")))
             sigma = float(over.get("answer_time_sigma", _f("nine_one_one_answer_time_sigma")))
             prefix = column_prefix(num.number)
-            for threshold in thresholds:
-                t = int(threshold)
-                mu_adj = mu * (1.0 + load_sensitivity * (busy_factor - 1.0))
-                mu_noise = rng.normal(0.0, mu_noise_sd, size=len(hours))
-                p = lognorm.cdf(threshold, s=sigma, scale=np.exp(mu_adj + mu_noise))
-                emergency_answered[f"{prefix}_answered_{t}s_pct"] = np.round(p * 100, 1)
+            for key, values in _answered_pct(
+                received[num.number], abandoned[num.number], mu, sigma
+            ).items():
+                emergency_answered[f"{prefix}_{key}_pct"] = values
 
-        for threshold in thresholds:
-            t = int(threshold)
-            mu = _f("non_emergency_answer_time_mu")
-            sigma = _f("non_emergency_answer_time_sigma")
-            mu_adj = mu * (1.0 + load_sensitivity * (busy_factor - 1.0))
-            mu_noise = rng.normal(0.0, mu_noise_sd, size=len(hours))
-            p = lognorm.cdf(threshold, s=sigma, scale=np.exp(mu_adj + mu_noise))
-            non_emergency_answered[f"non_emergency_answered_{t}s_pct"] = np.round(p * 100, 1)
+        ne_mu = _f("non_emergency_answer_time_mu")
+        ne_sigma = _f("non_emergency_answer_time_sigma")
+        for key, values in _answered_pct(
+            non_emergency_calls_received, non_emergency_calls_abandoned, ne_mu, ne_sigma
+        ).items():
+            non_emergency_answered[f"non_emergency_{key}_pct"] = values
+
+        # Mean phone duration per category — sample mean of the lognormal call
+        # durations drawn per answered call (received minus abandoned; outbound
+        # calls have no abandonment), plus a volume-weighted overall mean.
+        def _duration_default(key: str) -> float:
+            v = DEFAULT_PHONE_METRICS[key]
+            return float(v) if isinstance(v, (int, float)) else float(v[0])  # type: ignore[return-value]
+
+        duration_means: dict[str, np.ndarray] = {}
+        duration_counts: dict[str, np.ndarray] = {}
+
+        for num in numbers:
+            over = _line(num)
+            mu = float(
+                over.get("phone_duration_mu", _f("nine_one_one_phone_duration_mu", _duration_default("nine_one_one_phone_duration_mu")))
+            )
+            sigma = float(
+                over.get("phone_duration_sigma", _f("nine_one_one_phone_duration_sigma", _duration_default("nine_one_one_phone_duration_sigma")))
+            )
+            label = column_prefix(num.number)
+            duration_counts[label] = np.maximum(received[num.number] - abandoned[num.number], 0)
+            duration_means[label] = _mean_duration(rng, duration_counts[label], mu, sigma)
+
+        duration_counts["non_emergency"] = np.maximum(
+            non_emergency_calls_received - non_emergency_calls_abandoned, 0
+        )
+        duration_means["non_emergency"] = _mean_duration(
+            rng,
+            duration_counts["non_emergency"],
+            _f("non_emergency_phone_duration_mu", _duration_default("non_emergency_phone_duration_mu")),
+            _f("non_emergency_phone_duration_sigma", _duration_default("non_emergency_phone_duration_sigma")),
+        )
+        duration_counts["outbound"] = outbound_calls_placed
+        duration_means["outbound"] = _mean_duration(
+            rng,
+            duration_counts["outbound"],
+            _f("outbound_phone_duration_mu", _duration_default("outbound_phone_duration_mu")),
+            _f("outbound_phone_duration_sigma", _duration_default("outbound_phone_duration_sigma")),
+        )
+
+        weighted_sum = np.zeros(len(hours))
+        total_duration_calls = np.zeros(len(hours))
+        for label, counts in duration_counts.items():
+            weighted_sum += duration_means[label] * counts
+            total_duration_calls += counts
+        duration_means["call_mean_duration"] = np.where(
+            total_duration_calls > 0,
+            weighted_sum / np.maximum(total_duration_calls, 1),
+            0.0,
+        )
 
         data: dict[str, object] = {
             "hour_start": hours.to_numpy(),
@@ -228,6 +340,13 @@ class HourlyCallCountGenerator:
         data["non_emergency_calls_abandoned"] = non_emergency_calls_abandoned
         data.update(emergency_answered)
         data.update(non_emergency_answered)
+        for num in numbers:
+            data[f"{column_prefix(num.number)}_mean_duration"] = duration_means[
+                column_prefix(num.number)
+            ]
+        data["non_emergency_mean_duration"] = duration_means["non_emergency"]
+        data["outbound_mean_duration"] = duration_means["outbound"]
+        data["call_mean_duration"] = duration_means["call_mean_duration"]
 
         # Aggregate totals per hourly row
         total_emergency = np.sum(

@@ -1,7 +1,10 @@
 """End-to-end tests for Synth911Application generation across datasets and formats."""
+import math
 import sqlite3
 from datetime import date
 from uuid import UUID
+
+import numpy as np
 
 from synth911gen3.addresses import StaticAddressProvider
 from synth911gen3.app import Synth911Application
@@ -67,7 +70,7 @@ def test_application_generates_incidents_and_hourly_counts() -> None:
         "call_disposition",
         "total_elapsed_seconds",
     }.issubset(result.incidents.columns)
-    assert len(result.hourly_call_counts.columns) == 18
+    assert len(result.hourly_call_counts.columns) == 22
 
 
 def test_application_sqlite_export_persists_both_tables(tmp_path) -> None:
@@ -591,6 +594,131 @@ def test_application_phone_answer_time_percentages_vary_by_hour() -> None:
     pct = frame["nine_one_one_answered_10s_pct"]
     assert pct.nunique() > 5, "answer-time percentages should vary across hours"
     assert pct.max() - pct.min() > 2.0, "answer-time spread should exceed 2 percentage points"
+
+
+def test_application_phone_answer_percentages_consistent_with_volume() -> None:
+    """Service-level percentages must step with the hour's integer call counts.
+
+    With a small hourly volume the answered-within-threshold percentage cannot be
+    an arbitrary value: it is a rounded multiple of ``100 / received`` bounded by
+    the number of calls actually answered (received minus abandoned), and 100%
+    must be reachable on fast, low-volume hours.
+    """
+    from synth911gen3.generators.phone_metrics import HourlyCallCountGenerator
+
+    request = GenerationRequest(
+        rows=3_000,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=7,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+    )
+
+    frame = HourlyCallCountGenerator().generate(request)
+    received = frame["nine_one_one_calls_received"].to_numpy()
+    abandoned = frame["nine_one_one_calls_abandoned"].to_numpy()
+
+    for col in (
+        "nine_one_one_answered_10s_pct",
+        "nine_one_one_answered_15s_pct",
+        "nine_one_one_answered_20s_pct",
+        "nine_one_one_answered_40s_pct",
+    ):
+        pct = frame[col].to_numpy()
+        nonzero = received > 0
+        step = 100.0 / received[nonzero]
+        implied = np.round(pct[nonzero] / step)
+        assert np.allclose(pct[nonzero], implied * step, atol=0.06), col
+        assert np.all(implied >= 0), col
+        # Cannot answer more calls than were received and not abandoned.
+        assert np.all(implied <= received[nonzero] - abandoned[nonzero] + 1e-9), col
+        assert np.all(pct[~nonzero] == 0.0), col
+
+    # 100% answer rates are reachable (fast hours with no abandonments).
+    assert (frame["nine_one_one_answered_40s_pct"] == 100.0).any()
+    assert (frame["non_emergency_answered_40s_pct"] == 100.0).any()
+
+
+def test_application_phone_duration_mean_columns() -> None:
+    """Mean-duration columns track the lognormal population means and weight by volume."""
+    from synth911gen3.generators.phone_metrics import HourlyCallCountGenerator
+
+    request = GenerationRequest(
+        rows=20_000,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=11,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+    )
+    frame = HourlyCallCountGenerator().generate(request)
+
+    for col in (
+        "nine_one_one_mean_duration",
+        "non_emergency_mean_duration",
+        "outbound_mean_duration",
+        "call_mean_duration",
+    ):
+        assert col in frame.columns, col
+
+    realism = RealismConfig()
+    pm = realism.phone_metrics
+    counts = {
+        "nine_one_one": (frame["nine_one_one_calls_received"] - frame["nine_one_one_calls_abandoned"]).to_numpy(),
+        "non_emergency": (
+            frame["non_emergency_calls_received"] - frame["non_emergency_calls_abandoned"]
+        ).to_numpy(),
+        "outbound": frame["outbound_calls_placed"].to_numpy(),
+    }
+    # Pooled sample mean across the run converges to e^(mu + sigma^2 / 2).
+    for label, count in counts.items():
+        col = f"{label}_mean_duration"
+        pooled = float((frame[col].to_numpy() * count).sum() / count.sum())
+        target = math.exp(float(pm[f"{label}_phone_duration_mu"]) + float(pm[f"{label}_phone_duration_sigma"]) ** 2 / 2)
+        assert abs(pooled - target) < 0.08 * target, (label, pooled, target)
+
+    # call_mean_duration is the volume-weighted mean of the three category means.
+    weights = {label: count.astype(float) for label, count in counts.items()}
+    total = sum(weights.values())
+    expected = sum(
+        frame[f"{label}_mean_duration"].to_numpy() * w for label, w in weights.items()
+    ) / total
+    np.testing.assert_allclose(
+        frame["call_mean_duration"].to_numpy(), expected, rtol=1e-9, atol=1e-9
+    )
+
+
+def test_application_phone_duration_zero_with_no_answered_calls() -> None:
+    """Category mean durations are 0 when every call is abandoned that hour."""
+    from synth911gen3.generators.phone_metrics import HourlyCallCountGenerator
+
+    realism = RealismConfig()
+    realism.phone_metrics["nine_one_one_abandonment_rate"] = 1.0
+    realism.phone_metrics["non_emergency_abandonment_rate"] = 1.0
+    realism.phone_metrics["night_abandonment_increment"] = 0.0
+    realism.phone_metrics["max_abandonment_rate"] = 1.0
+
+    request = GenerationRequest(
+        rows=5_000,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=9,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 2),
+        realism_config=realism,
+    )
+    frame = HourlyCallCountGenerator().generate(request)
+
+    assert (frame["nine_one_one_mean_duration"] == 0.0).all()
+    assert (frame["non_emergency_mean_duration"] == 0.0).all()
+    # Outbound calls have no abandonment, so their duration mean is positive.
+    assert (frame["outbound_mean_duration"] > 0).any()
+    # With 9-1-1 and non-emergency contributing zero calls, the overall mean
+    # collapses to the outbound mean.
+    np.testing.assert_allclose(
+        frame["call_mean_duration"], frame["outbound_mean_duration"], rtol=1e-9, atol=1e-9
+    )
 
 
 def test_application_problem_phone_duration_correlation() -> None:

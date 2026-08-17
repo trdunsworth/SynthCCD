@@ -615,6 +615,12 @@ binomial on the received counts:
 | `answer_time_thresholds` | [10, 15, 20, 40] | Seconds thresholds for % answered columns |
 | `answer_time_load_sensitivity` | 0.25 | How strongly the answer-time lognormal μ shifts with hourly load (busy hours answer slower) |
 | `answer_time_mu_noise_sd` | 0.05 | Std-dev of per-hour random noise applied to lognormal μ, so answer-time percentages vary hour-to-hour |
+| `nine_one_one_phone_duration_mu` | 5.10 | Lognormal μ for 9-1-1 phone duration (mean ≈ 210 s) |
+| `nine_one_one_phone_duration_sigma` | 0.70 | Lognormal σ for 9-1-1 phone duration |
+| `non_emergency_phone_duration_mu` | 4.54 | Lognormal μ for non-emergency phone duration (mean ≈ 120 s) |
+| `non_emergency_phone_duration_sigma` | 0.70 | Lognormal σ for non-emergency phone duration |
+| `outbound_phone_duration_mu` | 3.85 | Lognormal μ for outbound phone duration (mean ≈ 60 s) |
+| `outbound_phone_duration_sigma` | 0.70 | Lognormal σ for outbound phone duration |
 
 ### Population-Based Volume Scaling
 
@@ -649,28 +655,55 @@ The default `NON_EMERGENCY_FLOOR_RATIO` is 1.2 (non-emergency must be at least
 
 ### Answer Time Percentages
 
-For each hour the generator computes the cumulative probability of a call being
-answered within the configured thresholds using the lognormal CDF. The lognormal
-`mu` is first adjusted by the hour's load (`busy_factor`) via
+For each hour the generator simulates the call-answering process at the level of
+individual calls so the service-level percentages stay consistent with the
+hour's call counts. The calls actually answered that hour (received minus
+abandoned) are allocated against the answer-time thresholds with a
+sequential-binomial draw from the lognormal answer-time distribution, and each
+`answered_Ns_pct` column is the rounded percentage `100 × count_answered_within_Ns
+/ received`. This means the percentages step with the hour's received volume
+(e.g. 5 received calls can only produce 0/20/40/…/100%), can never report more
+answered calls than were received and not abandoned, and reach exactly 100% on
+fast, low-abandonment hours.
+
+The lognormal `mu` is first adjusted by the hour's load (`busy_factor`) via
 `answer_time_load_sensitivity`, then given per-hour random noise scaled by
 `answer_time_mu_noise_sd`. The noise keeps percentages from being identical
 every hour while the load term keeps busy hours slower. Defaults produce
-approximately these answer rates:
+approximately these average answer rates:
 
 | Threshold | Default 9-1-1 % | Default Non-Emergency % |
 |-----------|-----------------|-------------------------|
-| 10 s | 74% | 77% |
-| 15 s | 87% | 90% |
-| 20 s | 93% | 95% |
-| 40 s | 99% | 99% |
+| 10 s | ~70% | ~74% |
+| 15 s | ~85% | ~85% |
+| 20 s | ~91% | ~90% |
+| 40 s | ~96% | ~94% |
 
-These defaults target ≥87% of 9-1-1 calls answered within 15 seconds and ≥77%
+These defaults target ≥85% of 9-1-1 calls answered within 15 seconds and ≥74%
 of non-emergency calls answered within 10 seconds. National standards
 recommend ≥90% of 9-1-1 calls answered within 15 seconds and ≥95% within
 20 seconds; the 9-1-1 default is slightly below the 15-second standard but
 exceeds it at 20 seconds. Adjust `nine_one_one_answer_time_mu`/`sigma` to
 match your center's performance. Non-emergency standards are in development;
 the defaults model a faster answer profile than previous versions.
+
+### Mean Phone Duration
+
+Each `*_mean_duration` column is the per-hour sample mean of the lognormal
+phone durations drawn per answered call — one draw per call from
+`N(<mu>, <sigma>)` for the category — so the values are consistent with the
+hour's call counts: an hour with no answered calls in a category reports `0.0`.
+The 9-1-1 duration uses each emergency number's own line overrides
+(`phone_duration_mu`/`phone_duration_sigma` under `phone_metric_lines`), the
+non-emergency column uses `non_emergency_phone_duration_mu`/`sigma`, and the
+outbound column uses `outbound_phone_duration_mu`/`sigma`. `call_mean_duration`
+is the volume-weighted average of the three category means, weighted by the
+answered call counts (received minus abandoned for 9-1-1 and non-emergency;
+`outbound_calls_placed` for outbound).
+
+Default population means are `e^(mu + sigma^2 / 2)`: ≈210 s for 9-1-1, ≈120 s
+for non-emergency, and ≈60 s for outbound calls. Adjust the `*_mu`/`*_sigma`
+keys to match your center's average handle times.
 
 ### Call Reception Methods
 

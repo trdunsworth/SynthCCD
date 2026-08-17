@@ -135,6 +135,8 @@ class LineMetrics(BaseModel):
     night_abandonment_increment: float | None = Field(default=None, ge=0, le=1)
     answer_time_mu: float | None = None
     answer_time_sigma: float | None = Field(default=None, gt=0)
+    phone_duration_mu: float | None = None
+    phone_duration_sigma: float | None = Field(default=None, gt=0)
 
 
 class PhoneMetrics(BaseModel):
@@ -162,6 +164,12 @@ class PhoneMetrics(BaseModel):
     answer_time_thresholds: list[float] = Field(min_length=1)
     answer_time_load_sensitivity: float = Field(default=0.25, ge=0)
     answer_time_mu_noise_sd: float = Field(default=0.05, ge=0)
+    nine_one_one_phone_duration_mu: float | None = Field(default=None)
+    nine_one_one_phone_duration_sigma: float | None = Field(default=None, gt=0)
+    non_emergency_phone_duration_mu: float | None = Field(default=None)
+    non_emergency_phone_duration_sigma: float | None = Field(default=None, gt=0)
+    outbound_phone_duration_mu: float | None = Field(default=None)
+    outbound_phone_duration_sigma: float | None = Field(default=None, gt=0)
     lines: dict[str, LineMetrics] = Field(default_factory=dict)
 
 

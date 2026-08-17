@@ -328,6 +328,8 @@ class RealismConfig:
             "night_abandonment_increment",
             "answer_time_mu",
             "answer_time_sigma",
+            "phone_duration_mu",
+            "phone_duration_sigma",
         }
         for number, overrides in self.phone_metric_lines.items():
             if not str(number).strip():
@@ -347,7 +349,7 @@ class RealismConfig:
                     raise ValidationError(
                         f"phone_metric_lines for {number}.{key} must be between 0 and 1"
                     )
-                if key == "answer_time_sigma" and float(value) <= 0:
+                if key in ("answer_time_sigma", "phone_duration_sigma") and float(value) <= 0:
                     raise ValidationError(
                         f"phone_metric_lines for {number}.{key} must be greater than 0"
                     )

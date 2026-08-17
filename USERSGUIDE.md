@@ -1541,6 +1541,10 @@ column set is:
 | `non_emergency_answered_15s_pct` | float | % of non-emergency calls answered within 15 seconds |
 | `non_emergency_answered_20s_pct` | float | % of non-emergency calls answered within 20 seconds |
 | `non_emergency_answered_40s_pct` | float | % of non-emergency calls answered within 40 seconds |
+| `nine_one_one_mean_duration` | float | Mean phone duration (seconds) of 9-1-1 calls answered that hour |
+| `non_emergency_mean_duration` | float | Mean phone duration (seconds) of non-emergency calls answered that hour |
+| `outbound_mean_duration` | float | Mean phone duration (seconds) of outbound calls placed that hour |
+| `call_mean_duration` | float | Volume-weighted mean of the three duration means across all calls |
 | `total_emergency_calls` | int | Total emergency calls received across all emergency numbers |
 | `total_nonemergency_calls` | int | Total non-emergency calls received (with floor constraint applied) |
 | `total_calls` | int | Sum of all received + outbound calls |
@@ -1548,9 +1552,22 @@ column set is:
 `911` keeps the legacy `nine_one_one` column prefix for schema stability; every
 other number uses an `emergency_<digits>` prefix. For example, `--country GB`
 produces `emergency_999_calls_received`, `emergency_999_calls_abandoned`,
-`emergency_999_answered_15s_pct`, and the same set for `emergency_112`. The
-non-emergency line and the outbound counter are always present regardless of
-country.
+`emergency_999_answered_15s_pct`, `emergency_999_mean_duration`, and the same
+set for `emergency_112`. The non-emergency line and the outbound counter are
+always present regardless of country.
+
+The `answered_Ns_pct` columns are simulated from the hour's per-call answer
+times (see `REALISMGUIDE.md` → Answer Time Percentages), so they are always
+consistent with the hour's received/abandoned counts: each value is a rounded
+multiple of `100 / calls_received` and can never imply more answered calls than
+were received and not abandoned. On fast, low-volume hours the value reaches
+exactly 100.
+
+The `*_mean_duration` columns are the per-hour sample mean of the lognormal
+phone durations drawn per answered call (received minus abandoned; outbound
+calls have no abandonment), and `call_mean_duration` is the volume-weighted
+average of those means. An hour with no answered calls in a category reports
+`0.0` for that category's mean.
 
 ---
 

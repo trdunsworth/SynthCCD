@@ -21,6 +21,7 @@ from synth911gen3.cli import (
     save_params_file,
 )
 from synth911gen3.config import DatasetKind, IdFormat, OutputFormat
+from synth911gen3.constants import DATA_SCHEMA_VERSION
 from synth911gen3.exceptions import ExportError
 from synth911gen3.realism_config import RealismConfig
 
@@ -700,7 +701,7 @@ def test_cli_schema_exports_incidents_json() -> None:
     assert result.exit_code == 0
     data = json.loads(result.output)
     assert data["dataset"] == "incidents"
-    assert data["version"] == "1.1"
+    assert data["version"] == DATA_SCHEMA_VERSION
     assert data["schema_hash"]
     assert "id_number" in data["datasets"]["incidents"]
     assert "agency" in data["datasets"]["incidents"]

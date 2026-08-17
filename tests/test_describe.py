@@ -2,6 +2,7 @@
 import pandas as pd
 
 from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat
+from synth911gen3.constants import DATA_SCHEMA_VERSION
 from synth911gen3.describe import (
     SAMPLE_ROWS,
     SCHEMA_ROWS,
@@ -86,7 +87,7 @@ def test_schema_definition_incidents_shape() -> None:
     definition = build_schema_definition(_request(DatasetKind.INCIDENTS))
 
     assert definition["dataset"] == "incidents"
-    assert definition["version"] == "1.1"
+    assert definition["version"] == DATA_SCHEMA_VERSION
     assert definition["schema_hash"]
     assert set(definition["datasets"]) == {"incidents"}
     columns = definition["datasets"]["incidents"]
