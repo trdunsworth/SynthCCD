@@ -700,5 +700,8 @@ to `SynthCCD license install`. Valid but expired licenses continue to work durin
   Enterprise features (PostgreSQL, SQL Server) require `commercial` or `enterprise`
   tier. The API server requires at least `commercial` tier.
 
+- [ ] **P2 - Reduce `postal_code` in US to just the 5-digit ZIP code.**
+  Currently, the ZIP code for U.S. addresses can express as either a 5-digit ZIP code or a 9-digit ZIP+4 code. That should be standardized as a 5-digit ZIP code. Other countries should not be impacted. e.g. (L4T 2D6) should be a valid Canadian Postal Code.
+
 ---
 
