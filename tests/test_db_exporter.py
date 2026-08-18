@@ -10,7 +10,8 @@ from synth911gen3.config import (
     GenerationRequest,
     OutputFormat,
 )
-from synth911gen3.db_exporter import DatabaseExporter, export_to_database
+from synth911gen3.db_exporter import DatabaseExporter, _validate_identifier, export_to_database
+from synth911gen3.exceptions import ExportError
 
 
 class TestDatabaseExporter:
@@ -485,3 +486,96 @@ class TestDatabaseConfigValidation:
         )
         request3.validate()
         assert request3.db_port == 3306
+
+
+class TestValidateIdentifier:
+    """Tests for the SQL identifier validation helper."""
+
+    def test_valid_simple_names(self):
+        _validate_identifier("incidents")
+        _validate_identifier("my_table")
+        _validate_identifier("_private")
+        _validate_identifier("Table123")
+
+    def test_rejects_empty_string(self):
+        with pytest.raises(ExportError, match="Invalid identifier"):
+            _validate_identifier("")
+
+    def test_rejects_spaces(self):
+        with pytest.raises(ExportError, match="Invalid table name"):
+            _validate_identifier("my table", "table name")
+
+    def test_rejects_sql_injection_semicolon(self):
+        with pytest.raises(ExportError, match="Invalid table name"):
+            _validate_identifier("incidents; DROP TABLE users--", "table name")
+
+    def test_rejects_sql_injection_quotes(self):
+        with pytest.raises(ExportError, match="Invalid schema name"):
+            _validate_identifier('public"; --', "schema name")
+
+    def test_rejects_sql_injection_union(self):
+        with pytest.raises(ExportError, match="Invalid column name"):
+            _validate_identifier("1 UNION SELECT * FROM passwords", "column name")
+
+    def test_rejects_dots(self):
+        with pytest.raises(ExportError, match="Invalid identifier"):
+            _validate_identifier("schema.table")
+
+    def test_rejects_hyphens(self):
+        with pytest.raises(ExportError, match="Invalid identifier"):
+            _validate_identifier("my-table")
+
+    def test_rejects_leading_digit(self):
+        with pytest.raises(ExportError, match="Invalid identifier"):
+            _validate_identifier("1table")
+
+    def test_rejects_unicode(self):
+        with pytest.raises(ExportError, match="Invalid identifier"):
+            _validate_identifier("täble")
+
+    def test_valid_underscore_only(self):
+        _validate_identifier("_")
+
+    def test_valid_single_char(self):
+        _validate_identifier("a")
+        _validate_identifier("Z")
+
+    def test_rejects_path_traversal(self):
+        with pytest.raises(ExportError, match="Invalid identifier"):
+            _validate_identifier("../../etc/passwd")
+
+    def test_drop_table_rejects_bad_identifier(self, tmp_path):
+        """_drop_table should reject a malicious table name before any SQL is built."""
+        request = GenerationRequest(
+            rows=10,
+            output_format=OutputFormat.SQLITE,
+            output_dir=tmp_path,
+            db_name="test.sqlite3",
+        )
+        exporter = DatabaseExporter(request=request)
+        try:
+            mock_conn = MagicMock()
+            with pytest.raises(ExportError, match="Invalid table name"):
+                exporter._drop_table(mock_conn, 'incidents"; DROP TABLE users--', None)
+        finally:
+            exporter.close()
+
+    def test_create_index_rejects_bad_column(self, tmp_path):
+        """_create_index should reject a malicious column name."""
+        request = GenerationRequest(
+            rows=10,
+            output_format=OutputFormat.SQLITE,
+            output_dir=tmp_path,
+            db_name="test.sqlite3",
+        )
+        exporter = DatabaseExporter(request=request)
+        try:
+            mock_conn = MagicMock()
+            with pytest.raises(ExportError, match="Invalid column name"):
+                exporter._create_index(
+                    mock_conn, "incidents", None,
+                    "1=1; DROP TABLE--",
+                    DatabaseDialect.SQLITE,
+                )
+        finally:
+            exporter.close()

@@ -11,6 +11,7 @@ install hint.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -27,6 +28,24 @@ from .exceptions import ExportError
 from .logging_conf import get_logger
 
 logger = get_logger("db_exporter")
+
+_IDENTIFIER_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+def _validate_identifier(name: str, kind: str = "identifier") -> None:
+    """Reject SQL identifiers that contain anything other than ``[a-zA-Z0-9_]``.
+
+    This prevents SQL injection via f-string interpolation in DDL statements.
+    Call this before any ``text(f'..."{name}"...')`` usage.
+
+    Raises:
+        ExportError: If *name* fails the pattern check.
+    """
+    if not _IDENTIFIER_RE.match(name):
+        raise ExportError(
+            f"Invalid {kind}: {name!r}. "
+            "Only letters, digits, and underscores are allowed."
+        )
 
 
 @dataclass(slots=True)
@@ -300,6 +319,9 @@ class DatabaseExporter:
 
     def _drop_table(self, conn: Connection, table_name: str, schema: str | None) -> None:
         """Dialect-specific ``DROP TABLE IF EXISTS`` (quotes/schema syntax vary)."""
+        _validate_identifier(table_name, "table name")
+        if schema:
+            _validate_identifier(schema, "schema name")
         dialect = self._get_dialect()
         if dialect == DatabaseDialect.DUCKDB or dialect == DatabaseDialect.SQLITE:
             conn.execute(text(f'DROP TABLE IF EXISTS "{table_name}"'))
@@ -362,6 +384,10 @@ class DatabaseExporter:
         dialect: DatabaseDialect,
     ) -> None:
         """Create one index with dialect-appropriate quoting; failures are logged, not fatal."""
+        _validate_identifier(table_name, "table name")
+        _validate_identifier(column, "column name")
+        if schema:
+            _validate_identifier(schema, "schema name")
         schema_prefix = f"{schema}." if schema else ""
         idx_name = f"idx_{table_name}_{column}"
 
