@@ -2,40 +2,105 @@
 
 Endpoints: ``GET /health``, ``GET /schema`` (preview without fetching
 addresses), ``POST /generate`` (JSON summary or file download), and
-``POST /generate/stream`` (chunked CSV/Parquet response). The API mirrors
-the CLI's params-file semantics through :class:`GenerationRequestModel`.
-Run with ``python -m synth911gen3.serve`` or the CLI serve command.
+``POST /generate/stream`` (chunked CSV/Parquet response). Callers supply
+generation parameters inline in the JSON body — no server-side file paths
+are accepted. Run with ``python -m synth911gen3.serve`` or the CLI serve
+command.
 """
 
 from __future__ import annotations
 
+import time
+from collections import defaultdict
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
+from starlette.responses import Response
 
 from synth911gen3.addresses import OpenStreetMapAddressProvider
 from synth911gen3.app import Synth911Application
 from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
 from synth911gen3.exceptions import AddressLookupError, ExportError, ValidationError
-from synth911gen3.params import build_request_from_params, load_params_file
+from synth911gen3.logging_conf import get_logger
+from synth911gen3.params import build_request_from_params
+
+logger = get_logger("serve")
+
+# ---------------------------------------------------------------------------
+# Simple sliding-window rate limiter (in-memory, per-IP).
+# ---------------------------------------------------------------------------
+
+_DEFAULT_RATE_LIMIT = 30  # requests per window
+_DEFAULT_WINDOW_SECONDS = 60
+
+
+class _RateLimitMiddleware(BaseHTTPMiddleware):
+    """Reject clients exceeding *max_requests* per *window_seconds* with 429.
+
+    Tracks request counts per client IP using a sliding-window counter.
+    The counter is pruned on every request so stale entries don't leak memory.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        max_requests: int = _DEFAULT_RATE_LIMIT,
+        window_seconds: int = _DEFAULT_WINDOW_SECONDS,
+    ) -> None:
+        super().__init__(app)
+        self.max_requests = max_requests
+        self.window_seconds = window_seconds
+        self._hits: dict[str, list[float]] = defaultdict(list)
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+
+        # Prune expired entries and count current window
+        timestamps = self._hits[client_ip]
+        self._hits[client_ip] = timestamps = [t for t in timestamps if t > cutoff]
+
+        if len(timestamps) >= self.max_requests:
+            retry_after = int(timestamps[0] - cutoff) + 1
+            return Response(
+                content='{"detail":"Rate limit exceeded. Try again later."}',
+                status_code=429,
+                media_type="application/json",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+        timestamps.append(now)
+        return await call_next(request)
+
+    def reset(self) -> None:
+        """Clear all hit counters (useful for testing)."""
+        self._hits.clear()
+
 
 app = FastAPI(
     title="SynthCCD API",
     description="Synthetic 911 CAD incident and hourly phone-center data generator",
     version="0.1.0",
 )
+app.add_middleware(_RateLimitMiddleware)
 
 
 class GenerationRequestModel(BaseModel):
-    """Request model for data generation endpoint."""
+    """Request model for data generation endpoint.
 
-    params_file: str | None = Field(
-        default=None, description="Path to JSON/YAML/TOML params file (server-side)"
-    )
+    Callers supply all parameters inline in the JSON body.  Server-side
+    file paths (``params_file``, ``realism_config_path``) are intentionally
+    excluded to prevent path-traversal attacks.
+    """
+
     rows: int | None = Field(default=None, ge=1, description="Number of incident rows")
     area_query: str | None = Field(default=None, description="OpenStreetMap area query")
     output_format: str | None = Field(
@@ -124,7 +189,10 @@ class DryRunResponse(BaseModel):
 
 
 def _build_request(model: GenerationRequestModel) -> GenerationRequest:
-    """Build GenerationRequest from API model."""
+    """Build GenerationRequest from API model.
+
+    All parameters come from the JSON body — no server-side file I/O.
+    """
     cli_params: dict[str, Any] = {}
     if model.rows is not None:
         cli_params["rows"] = model.rows
@@ -161,8 +229,7 @@ def _build_request(model: GenerationRequestModel) -> GenerationRequest:
     if model.realism_config_path is not None:
         cli_params["realism_config_path"] = Path(model.realism_config_path)
 
-    file_params = load_params_file(Path(model.params_file)) if model.params_file else {}
-    return build_request_from_params(file_params, cli_params)
+    return build_request_from_params({}, cli_params)
 
 
 @app.get("/health")
@@ -217,8 +284,11 @@ async def get_schema(
             message="Schema preview: no files written, no OpenStreetMap fetch (illustrative sample addresses).",
             schemas=schemas,
         )
-    except Exception as exc:
+    except (AddressLookupError, ExportError, ValidationError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+    except Exception:
+        logger.exception("Unexpected error in /schema")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/generate", response_model=None)
@@ -278,8 +348,9 @@ async def generate_data(
 
     except (AddressLookupError, ExportError, ValidationError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Internal error: {exc}")
+    except Exception:
+        logger.exception("Unexpected error in /generate")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/generate/stream")
@@ -335,18 +406,30 @@ async def generate_data_stream(
 
     except (AddressLookupError, ExportError, ValidationError) as exc:
         raise HTTPException(status_code=400, detail=str(exc))
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Internal error: {exc}")
+    except Exception:
+        logger.exception("Unexpected error in /generate/stream")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 def run() -> None:
-    """Entry point for the serve command."""
+    """Entry point for the serve command.
+
+    Binds to ``127.0.0.1:8000`` by default.  Override with the
+    ``SYNTHCCD_SERVE_HOST`` and ``SYNTHCCD_SERVE_PORT`` environment
+    variables, or use ``uvicorn synth911gen3.serve:app --host … --port …``
+    directly for full control.
+    """
+    import os
+
     import uvicorn
+
+    host = os.environ.get("SYNTHCCD_SERVE_HOST", "127.0.0.1")
+    port = int(os.environ.get("SYNTHCCD_SERVE_PORT", "8000"))
 
     uvicorn.run(
         "synth911gen3.serve:app",
-        host="0.0.0.0",
-        port=8000,
+        host=host,
+        port=port,
         reload=False,
     )
 

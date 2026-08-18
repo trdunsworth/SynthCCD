@@ -474,3 +474,231 @@ recommendation docs in `docs/`, and direct code review.
 
 ---
 
+## Refactor Backlog: Efficiency, Speed, and Security
+
+Generated 2026-08-17 from a full codebase audit. Items ordered by combined impact
+(security risk × affected lines × performance cost). Each item notes the file,
+the specific problem, and the fix direction.
+
+### Security (P0)
+
+- [x] **P0 — Remove `params_file` from the API model.**
+  `serve.py:36-38` accepts an arbitrary server-side file path from HTTP clients.
+  An attacker can read any YAML/JSON/TOML file the process can access. Fix:
+  drop the field entirely — callers should inline the config in the JSON body.
+  **Done:** Removed `params_file` field, `load_params_file` import, and
+  file-loading logic from `_build_request()`. Updated model docstring.
+  CLI and TUI local params-file support unaffected.
+
+- [x] **P0 — Stop interpolating identifiers via f-strings in `db_exporter.py`.**
+  `db_exporter.py:301-314` uses `f'DROP TABLE IF EXISTS "{table_name}"'`.
+  A table name containing `"` breaks out of the quoting. Fix: validate
+  `db_table_incidents`, `db_table_phone`, and `db_schema` against a strict
+  `^[a-zA-Z0-9_]+$` pattern at config load time, before they reach SQL.
+  **Done:** Added `_validate_identifier()` helper with `^[a-zA-Z_][a-zA-Z0-9_]*$`
+  regex, wired into `_drop_table()` and `_create_index()` before any f-string
+  DDL construction. 18 new tests in `test_db_exporter.py` covering valid names,
+  SQL injection vectors (semicolons, quotes, UNION, dots, hyphens, unicode,
+  path traversal), and integration with `_drop_table`/`_create_index`.
+
+- [x] **P0 — Stop leaking exception details from the API.**
+  `serve.py:281-282` returns `f"Internal error: {exc}"`. Fix: log the full
+  exception server-side, return a generic 500 message to the client.
+  **Done:** All three endpoints (`/schema`, `/generate`, `/generate/stream`)
+  now use `except Exception:` with `logger.exception()` (captures traceback
+  to stderr) and return `{"detail": "Internal server error"}`. Known domain
+  exceptions (`AddressLookupError`, `ExportError`, `ValidationError`) still
+  surface their messages at 400 — those are user-facing by design.
+
+- [x] **P1 — Add rate limiting and bind to `127.0.0.1` by default.**
+  **Done:** In-memory sliding-window rate limiter (30 req/60 s per IP)
+  wired as Starlette middleware; returns 429 with `Retry-After` header.
+  `run()` now binds `127.0.0.1:8000` by default.  Override with
+  `SYNTHCCD_SERVE_HOST` / `SYNTHCCD_SERVE_PORT` env vars, or use
+  `uvicorn synth911gen3.serve:app --host … --port …` directly.
+  3 new tests in `test_serve.py`.
+
+- [ ] **P1 — Guard `truststore.inject_into_ssl()` against re-entry.**
+  `tls.py:37` patches the global `ssl` module with no guard. Fix: add a
+  process-level flag so it's only applied once. Document that this must
+  run at startup, not per-request.
+
+- [ ] **P2 — Restrict `output_dir` and `realism_config_path` in the API.**
+  `serve.py:48,64` pass caller-controlled paths directly to filesystem I/O.
+  Fix: validate against an allowed base directory or reject them in the API
+  model (use the `/tmp` default only).
+
+### Hot-Path Speed (P0)
+
+- [ ] **P0 — Vectorize seasonal problem-nature selection.**
+  `incidents.py:503-513` has a per-row Python loop with per-element dict
+  lookups and array copies — O(n × P) Python iterations inside the innermost
+  generation loop. For 1M rows this is the single biggest bottleneck. Fix:
+  pre-build a `(num_problems, 4)` seasonal-multiplier matrix, compute all
+  weights via broadcasting per-season, and use `rng.choice` with a 2D
+  probability array (batch per-season group).
+
+- [ ] **P0 — Vectorize problem-phone-multiplier and zone-travel-multiplier lookups.**
+  `incidents.py:518-524, 542-545` both use Python list comprehensions with
+  dict lookups per element. Fix: build integer index arrays once (name →
+  ordinal mapping), pre-stack multipliers into a 1-D lookup vector, and
+  use `np.take` (C-optimized).
+
+### Efficiency / Memory (P1)
+
+- [ ] **P1 — Eliminate double `_prepare()` in the chunk pipeline.**
+  `incidents.py:333` (`resolve_chunk_rows`) and `incidents.py:383`
+  (`generate_chunks`) both call `_prepare()`. When callers probe then
+  generate, the address-fetch + personnel-build runs twice. Fix: expose a
+  `generate_chunks(request, prepared=None)` overload that accepts
+  pre-computed state, or cache `_prepare()` results on the instance.
+
+- [ ] **P1 — Replace `frame.copy()` in `_records_for_serialization`.**
+  `exporters.py:76` copies the entire DataFrame just to format datetime
+  columns. For millions of rows this doubles export peak memory. Fix: use
+  `frame.assign(**{col: frame[col].dt.strftime(...)})` for only the datetime
+  columns (returns a new frame without copying non-datetime data).
+
+- [ ] **P1 — Vectorize GeoJSON feature building.**
+  `exporters.py:85-107` uses `frame.iterrows()` — notoriously slow (creates
+  a Series per row). Fix: `frame.to_dict(orient="records")` then filter
+  and build features in a single list comprehension, or use vectorised
+  `frame["latitude"].values` / `frame["longitude"].values` for geometry.
+
+- [ ] **P1 — Cache `_to_ascii()` via a pre-built translation table.**
+  `names.py:55-96` iterates character-by-character with ordinal branching.
+  Called for every generated name. Fix: build a `str.maketrans()` table at
+  module load (C-optimized `str.translate`), with `unicodedata.normalize`
+  as the fallback. Roughly 10× faster for typical name strings.
+
+- [ ] **P1 — Cache `_zipf_weights()` by count.**
+  `incidents.py:123-126` recomputes weights on every call. Fix: module-level
+  `dict[int, np.ndarray]` cache. Weights are pure functions of `count`.
+
+- [ ] **P1 — Cache or lazy-init `RealismConfig.__post_init__` defaults.**
+  `realism_config.py:82-118` deep-copies all default dicts on every
+  construction (which happens during `validate()`). Fix: use `None`
+  sentinels and resolve at access time, or cache the frozen defaults
+  as a class attribute.
+
+- [ ] **P1 — Add a context manager to `OpenStreetMapAddressProvider`.**
+  `addresses.py:257-263` creates an `httpx.Client` but never closes it.
+  Fix: implement `__enter__`/`__exit__` and a `close()` method. Document
+  lifecycle expectations.
+
+- [ ] **P1 — Use atomic writes for address cache.**
+  `addresses.py:357-376` writes parquet then metadata non-atomically. Fix:
+  write to a temp file then `os.rename()` (atomic on POSIX).
+
+### Code Quality (P2)
+
+- [ ] **P2 — Consolidate duplicate enums.**
+  `config.py:47-67` and `schema.py:30-45` define `OutputFormat`,
+  `DatasetKind`, `IdFormat`, and `DatabaseDialect` independently. Fix:
+  define them once in `constants.py` (or a dedicated `_enums.py`) and
+  import everywhere.
+
+- [ ] **P2 — Consolidate duplicate validation.**
+  `config.py:171-221` and `schema.py:221-272` both validate output paths,
+  PSAP agency, dates, and database options. Fix: pydantic validators in
+  `schema.py` are the more maintainable layer; have `config.py` delegate
+  to the schema model and remove the redundant checks.
+
+- [ ] **P2 — Move `from copy import copy` and `PSAP_AGENCY_FILTERS` to top-level.**
+  `incidents.py:257,268` import inside `_prepare()`. Python caches modules,
+  but the pattern is inconsistent with the rest of the file. Fix: move
+  to top-of-file imports.
+
+- [ ] **P2 — Lazily init Faker instances in `PersonnelNameGenerator`.**
+  `names.py:296-310` creates ~13 Faker instances at init time (one per
+  locale in the blend). Fix: cache by `(locale, seed)` in a class-level
+  dict, or lazy-init on first `_draw()`.
+
+- [ ] **P2 — Estimate bytes-per-row without a probe run.**
+  `incidents.py:336-367` generates real records just to measure memory, then
+  discards them. Fix: compute a statistical estimate from column dtypes
+  and `n`, or cache the per-row size across calls.
+
+---
+
+## Licensing System
+
+Offline-first license key system using Ed25519 digital signatures. The package
+embeds only a public verification key; the signing key stays with the developer.
+No phone-home, no hardware binding — compatible with air-gapped public-safety
+networks.
+
+### Design
+
+**Key format:** Each license is a base64url-encoded blob: `header.payload.signature`.
+- Header: `{"alg": "Ed25519", "typ": "SynthCCD-License"}`
+- Payload: `{"sub": "Licensee Name", "exp": "2027-12-31", "tier": "commercial",
+  "nonce": "random-hex-16", "features": ["phone_metrics", "db_export"]}`
+- Signature: Ed25519 over `base64url(header).base64url(payload)`
+
+**Tiers:** `developer` (unlimited, expires 9999-12-31), `personal` (non-commercial),
+`commercial` (organization use), `enterprise` (multi-seat, feature-gated).
+
+**Verification:** Offline. Parse the blob, verify the Ed25519 signature against the
+embedded public key, check expiry with a 30-day grace period for clock skew. The
+public key is a hardcoded constant in `license.py` — the private key never touches
+the package or the repository.
+
+**Caching:** Validated licenses are cached in `~/.synth911gen3/license.cache` (JSON
+with the original key, validation timestamp, and machine fingerprint). Re-checked on
+version upgrades. Cache is invalidated if the package version changes.
+
+**Integration points:** License is validated on the first call to `generate`, `tui`,
+or `serve`. Invalid/missing license raises `LicenseError` with a clear message pointing
+to `SynthCCD license install`. Valid but expired licenses continue to work during the
+30-day grace period with a stderr warning.
+
+### Tasks
+
+- [ ] **P1 — Create `license.py` module.**
+  Ed25519 verification using `cryptography` library (already a transitive dep via
+  `pydantic`). Public key constant, `LicensePayload` dataclass, `verify_license(key)`
+  function returning the parsed payload or raising `LicenseError`. 30-day grace period.
+  `load_cached_license()` / `save_license_cache()` for `~/.synth911gen3/license.cache`.
+  Module-level `_DEV_KEY` constant for the developer's own license bypass (so the dev
+  never needs to install a key file). Covered by `tests/test_license.py`.
+
+- [ ] **P1 — Create `scripts/gen_license.py` signing tool.**
+  Offline CLI that reads the Ed25519 private key from a file (or generates a new
+  keypair), accepts `--name`, `--exp`, `--tier`, `--features` flags, and prints
+  the base64url license key to stdout. Private key never leaves the developer's
+  machine. Supports `--gen-keypair` to produce `synth911.key` (private) and
+  `synth911.pub` (public, to embed in `license.py`).
+
+- [ ] **P1 — Add `SynthCCD license` CLI command.**
+  Subcommands: `install <key>` (validates and writes to cache), `info` (shows
+  current license status, expiry, tier), `verify` (re-validates the cached key).
+  Wired through `cli.py` as a Typer sub-app. Covered by `tests/test_cli.py`.
+
+- [ ] **P1 — Add `--license` flag and `SYNTHCCD_LICENSE` env var.**
+  Accept a license key directly on `generate`/`tui`/`serve` without installing
+  to the cache. Env var provides a non-interactive path for CI/Docker. If both
+  are present, the flag takes precedence.
+
+- [ ] **P1 — Gate generation on license.**
+  `Synth911Application.generate()` calls `license.verify_license()` before
+  proceeding. Invalid key → `LicenseError` (exit 2, clear message). Missing key
+  → same. Expired within grace → warning but proceed. Expired past grace → block.
+
+- [ ] **P1 — Add `tests/test_license.py`.**
+  Tests: valid key verification, expired key rejection, expired-within-grace
+  acceptance, tampered payload rejection, malformed base64 rejection, missing key
+  error, cache round-trip, developer key bypass, feature-gating (enterprise-only
+  features blocked for personal tier).
+
+- [ ] **P2 — Add license key to manifest.**
+  `manifest.py` includes license tier and expiry (not the key itself) in the
+  sidecar metadata for audit trails.
+
+- [ ] **P2 — Gate database export and API server on license tier.**
+  `db_exporter.py` and `serve.py` check `features` list on the license payload.
+  Enterprise features (PostgreSQL, SQL Server) require `commercial` or `enterprise`
+  tier. The API server requires at least `commercial` tier.
+
+---
+

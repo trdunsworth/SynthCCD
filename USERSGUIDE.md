@@ -736,7 +736,8 @@ Launch the REST API server for programmatic access:
 uv run SynthCCD serve
 ```
 
-The server runs on `http://0.0.0.0:8000` by default and provides:
+The server runs on `http://127.0.0.1:8000` by default (local connections only)
+and provides:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -744,6 +745,23 @@ The server runs on `http://0.0.0.0:8000` by default and provides:
 | `/schema` | GET | Schema preview (no OSM fetch, no data generation) |
 | `/generate` | POST | Generate data (returns JSON summary or file download) |
 | `/generate/stream` | POST | Stream CSV/Parquet for large datasets |
+
+### Rate Limiting
+
+The server enforces a sliding-window rate limit of **30 requests per 60 seconds**
+per client IP. When exceeded, the endpoint returns `429 Too Many Requests` with a
+`Retry-After` header. To override, edit `_DEFAULT_RATE_LIMIT` and
+`_DEFAULT_WINDOW_SECONDS` in `serve.py`, or use `uvicorn` directly with a
+production reverse proxy that handles throttling.
+
+### Bind Address
+
+By default the server binds to `127.0.0.1:8000` (localhost only). Override with:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SYNTHCCD_SERVE_HOST` | `127.0.0.1` | Bind address (use `0.0.0.0` for all interfaces) |
+| `SYNTHCCD_SERVE_PORT` | `8000` | Listen port |
 
 ### Schema Preview (GET `/schema`)
 
@@ -780,10 +798,10 @@ curl -X POST "http://localhost:8000/generate?download=true"   -H "Content-Type: 
 ```
 
 Request body fields (all optional, matching CLI options):
-- `params_file`, `rows`, `area_query`, `output_format`, `dataset`, `id_format`
+- `rows`, `area_query`, `output_format`, `dataset`, `id_format`
 - `output_dir`, `output_stem`, `start_date`, `end_date`, `seed`
 - `calltaker_pool_size`, `dispatcher_pool_size`, `shift_preset`
-- `max_memory_bytes`, `realism_config_path`
+- `max_memory_bytes`, `population`, `psap_agency`, `realism_config_path`
 
 Query parameters:
 - `download` (bool, default false): If true, return file download for single-file formats
@@ -842,6 +860,8 @@ docker run --rm   -v SynthCCD-cache:/home/synth911/.cache/synth911gen3   -v Synt
 |----------|---------|-------------|
 | `SYNTHCCD_LOG_LEVEL` | `INFO` | Logging level (DEBUG, INFO, WARNING, ERROR) |
 | `SYNTHCCD_SYSTEM_TRUST` | `0` | Set to `1` to use OS trust store for TLS (corporate proxies) |
+| `SYNTHCCD_SERVE_HOST` | `127.0.0.1` | Bind address for the API server |
+| `SYNTHCCD_SERVE_PORT` | `8000` | Listen port for the API server |
 
 ---
 
@@ -2014,6 +2034,8 @@ warning-free build is required before publishing or in CI.
 | Variable | Description |
 |----------|-------------|
 | `SYNTHCCD_LOG_LEVEL` | Logging verbosity: `DEBUG`, `INFO`, `WARNING`, or `ERROR` (used when no `--verbose`/`--quiet` flag is given) |
+| `SYNTHCCD_SERVE_HOST` | Bind address for the API server (default `127.0.0.1`) |
+| `SYNTHCCD_SERVE_PORT` | Listen port for the API server (default `8000`) |
 
 ### Extending with Custom Providers
 
