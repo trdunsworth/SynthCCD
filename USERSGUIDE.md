@@ -739,6 +739,12 @@ uv run SynthCCD serve
 The server runs on `http://127.0.0.1:8000` by default (local connections only)
 and provides:
 
+> **Note:** like the CLI and TUI, the server injects the OS trust store at
+> startup when `SYNTHCCD_SYSTEM_TRUST=1` (see
+> [TLS-inspecting proxies](#tls-errors-on-restricted-networks-corporate-proxy--mitm)), so OSM
+> address lookups work behind corporate proxies. Injection happens once in the
+> server lifespan, before any request.
+
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check |
@@ -967,7 +973,7 @@ All parameters in this section can be supplied at once from a JSON, YAML, or TOM
 
 Addresses are fetched from OpenStreetMap using the `area_query` parameter. The query accepts **any valid location query** that OpenStreetMap's Nominatim API supports, which is geocoded to a bounding box. Real street addresses with `addr:housenumber` + `addr:street` tags are then pulled from that bounding box via the Overpass API (overpy). Where an area lacks mapped house numbers, the generator falls back to real named streets with synthesized house numbers so output is still produced.
 
-Each address is emitted as individual components (`prefix_directional`, `street_number`, `street_name`, `street_type`, `postfix_directional`, `postal_code`) in addition to the combined `street_address`. Directionals are normalized to abbreviations (e.g., `NORTH` → `N`); a component is left empty when it cannot be determined from the source data.
+Each address is emitted as individual components (`prefix_directional`, `street_number`, `street_name`, `street_type`, `postfix_directional`, `postal_code`) in addition to the combined `street_address`. Directionals are normalized to abbreviations (e.g., `NORTH` → `N`); a component is left empty when it cannot be determined from the source data. US `postal_code` values are normalized to the 5-digit ZIP: OpenStreetMap sometimes stores a 9-digit ZIP+4 (e.g. `64110-1234`), which is truncated to `64110`. Non-US postal codes (e.g. Canadian `L4T 2D6`, UK `SW1A 2AA`) are passed through unchanged.
 
 Larger areas provide more address variety but take longer to fetch initially (addresses are cached locally after first query).
 
@@ -1504,7 +1510,7 @@ uv run SynthCCD generate --rows 5000000 --format parquet --max-memory-bytes 1073
 | `street_address` | str | Full street address from OSM (all components) |
 | `city` | str | City name |
 | `state` | str | State/province |
-| `postal_code` | str | ZIP/postal code from OSM when available |
+| `postal_code` | str | ZIP/postal code from OSM when available. US values are normalized to the 5-digit ZIP (ZIP+4 truncates to `64110`); non-US formats pass through unchanged |
 | `latitude` | float | Latitude from OSM address node; `0.0` when no coordinates available (synthesized fallback addresses) |
 | `longitude` | float | Longitude from OSM address node; `0.0` when no coordinates available |
 | `zone` | str | Geographic zone classification: URBAN, SUBURBAN, or RURAL (OSM-based) |
@@ -1804,9 +1810,10 @@ $env:SYNTHCCD_SYSTEM_TRUST = "1"   # PowerShell
 uv run SynthCCD generate
 ```
 
-The runtime flag is a no-op unless set, so production behavior is unchanged. If the OS trust
-store does not trust the proxy's issuer, contact your network administrator instead — do not
-disable TLS verification.
+The runtime flag is a no-op unless set, so production behavior is unchanged. The OS trust store
+is injected at most once per process (guarded internally), so calling it from the CLI and TUI
+entry points together is harmless. If the OS trust store does not trust the proxy's issuer,
+contact your network administrator instead — do not disable TLS verification.
 
 When address lookups fail because of a certificate problem, the generator now reports the
 underlying cause and points to this workaround, e.g.:

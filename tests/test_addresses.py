@@ -202,6 +202,51 @@ def test_parse_elements_uses_street_components_and_postcode() -> None:
     assert second.postal_code == "64111"
 
 
+def test_address_truncates_us_zip_plus4_to_zip() -> None:
+    address = Address("101 Main St", "Kansas City", "Missouri", postal_code="64110-1234")
+    assert address.postal_code == "64110"
+
+
+def test_address_keeps_non_us_postal_codes_unchanged() -> None:
+    canadian = Address("101 Main St", "Toronto", "Ontario", postal_code="L4T 2D6")
+    assert canadian.postal_code == "L4T 2D6"
+    uk = Address("10 Downing St", "London", "England", postal_code="SW1A 2AA")
+    assert uk.postal_code == "SW1A 2AA"
+    plain = Address("101 Main St", "Kansas City", "Missouri", postal_code="64105")
+    assert plain.postal_code == "64105"
+
+
+def test_parse_elements_truncates_zip_plus4() -> None:
+    result = _result_from_xml(
+        _way(
+            1,
+            **{
+                "addr:housenumber": "204",
+                "addr:street": "E 12th St",
+                "addr:state": "MO",
+                "addr:postcode": "64105-6789",
+            },
+        )
+        + _way(
+            2,
+            **{
+                "addr:housenumber": "55",
+                "addr:street": "Oak Ave",
+                "addr:postcode": "L4T 2D6",
+            },
+        )
+    )
+    addresses = OpenStreetMapAddressProvider()._parse_elements(
+        result, "Fallback City", "Fallback State"
+    )
+
+    first = next(a for a in addresses if a.street_address == "204 E 12th St")
+    assert first.postal_code == "64105"
+
+    second = next(a for a in addresses if a.street_address == "55 Oak Ave")
+    assert second.postal_code == "L4T 2D6"
+
+
 def test_load_addresses_uses_real_addresses(tmp_path: Path) -> None:
     search_payload = [
         {
@@ -366,6 +411,30 @@ def test_load_cache_returns_none_when_below_min_addresses(tmp_path: Path) -> Non
     )
     small.to_parquet(path)
     assert provider._load_cache(path) is None
+
+
+def test_load_cache_normalizes_zip_plus4(tmp_path: Path) -> None:
+    provider = OpenStreetMapAddressProvider(cache_dir=tmp_path, min_addresses=5)
+    path = provider._cache_path("Kansas City, MO")
+    frame = pd.DataFrame(
+        {
+            "street_address": [f"{i * 10} Street {i}" for i in range(1, 6)],
+            "city": ["Kansas City"] * 5,
+            "state": ["Missouri"] * 5,
+            "postal_code": ["64110-1234", "64111", "L4T 2D6", "SW1A 2AA", "64105-0000"],
+        }
+    )
+    frame.to_parquet(path)
+
+    addresses = provider._load_cache(path)
+    assert addresses is not None
+    assert [a.postal_code for a in addresses] == [
+        "64110",
+        "64111",
+        "L4T 2D6",
+        "SW1A 2AA",
+        "64105",
+    ]
 
 
 def test_load_addresses_recovers_from_corrupt_cache(tmp_path: Path) -> None:

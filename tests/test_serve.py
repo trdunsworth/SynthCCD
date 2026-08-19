@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import sys
+from types import SimpleNamespace
+
 import pytest
 from fastapi.testclient import TestClient
 
+import synth911gen3.tls as tls_module
 from synth911gen3.serve import _DEFAULT_RATE_LIMIT, _RateLimitMiddleware, app
+from synth911gen3.tls import maybe_inject_system_trust
 
 
 def _reset_rate_limiter() -> None:
@@ -29,6 +34,37 @@ def _clean_rate_limiter() -> None:  # type: ignore[misc]
 def client() -> TestClient:
     """Return a TestClient bound to the app."""
     return TestClient(app, raise_server_exceptions=False)
+
+
+class TestTrustInjection:
+    """Verify the server injects the OS trust store at startup, not per request."""
+
+    def test_lifespan_injects_system_trust(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls: list[bool] = []
+        fake_truststore = SimpleNamespace(inject_into_ssl=lambda: calls.append(True))
+        monkeypatch.setenv("SYNTHCCD_SYSTEM_TRUST", "1")
+        monkeypatch.setitem(sys.modules, "truststore", fake_truststore)
+        tls_module._TRUST_INJECTED = False
+
+        try:
+            with TestClient(app) as client:
+                resp = client.get("/health")
+                assert resp.status_code == 200
+            assert calls == [True]
+        finally:
+            tls_module._TRUST_INJECTED = False
+
+    def test_lifespan_is_noop_without_env_var(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("SYNTHCCD_SYSTEM_TRUST", raising=False)
+        tls_module._TRUST_INJECTED = False
+
+        try:
+            with TestClient(app) as client:
+                resp = client.get("/health")
+                assert resp.status_code == 200
+            assert maybe_inject_system_trust() is None
+        finally:
+            tls_module._TRUST_INJECTED = False
 
 
 class TestRateLimiter:

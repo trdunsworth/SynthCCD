@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import time
 from collections import defaultdict
+from contextlib import asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -28,6 +29,7 @@ from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat, Output
 from synth911gen3.exceptions import AddressLookupError, ExportError, ValidationError
 from synth911gen3.logging_conf import get_logger
 from synth911gen3.params import build_request_from_params
+from synth911gen3.tls import maybe_inject_system_trust
 
 logger = get_logger("serve")
 
@@ -85,10 +87,25 @@ class _RateLimitMiddleware(BaseHTTPMiddleware):
         self._hits.clear()
 
 
+@asynccontextmanager
+async def _lifespan(app: FastAPI):
+    """Inject the OS trust store before the server starts serving requests.
+
+    Runs exactly once at startup (before any request) when
+    ``SYNTHCCD_SYSTEM_TRUST=1`` so OSM address lookups work behind
+    TLS-inspecting corporate proxies. The injection is a no-op unless the
+    environment variable is set and is guarded internally so the global
+    ``ssl`` module is patched at most once per process.
+    """
+    maybe_inject_system_trust()
+    yield
+
+
 app = FastAPI(
     title="SynthCCD API",
     description="Synthetic 911 CAD incident and hourly phone-center data generator",
     version="0.1.0",
+    lifespan=_lifespan,
 )
 app.add_middleware(_RateLimitMiddleware)
 

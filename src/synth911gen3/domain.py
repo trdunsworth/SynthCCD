@@ -8,6 +8,7 @@ into its CAD-style components (number, name, type, directionals).
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -158,6 +159,24 @@ def parse_address_parts(
     return street_number, street_name, street_type, prefix_directional, postfix_directional
 
 
+_ZIP_PLUS4_RE = re.compile(r"^\d{5}-\d{4}$")
+
+
+def normalize_postal_code(postal_code: str) -> str:
+    """Return *postal_code* with any US ZIP+4 suffix truncated to the 5-digit ZIP.
+
+    OpenStreetMap's ``addr:postcode`` tag for US addresses is sometimes a
+    plain 5-digit ZIP and sometimes a 9-digit ZIP+4 (e.g. ``64110-1234``).
+    Analysts group by postal code, so both forms should collapse to the
+    5-digit ZIP. Only the US-specific ``DDDDD-DDDD`` pattern is truncated;
+    every other format (Canadian ``L4T 2D6``, UK ``SW1A 1AA``, German
+    ``10115``, ...) is passed through unchanged.
+    """
+    if _ZIP_PLUS4_RE.match(postal_code):
+        return postal_code[:5]
+    return postal_code
+
+
 @dataclass(frozen=True, slots=True)
 class Address:
     """A street address in CAD-ready component form.
@@ -192,6 +211,10 @@ class Address:
             object.__setattr__(self, "street_type", street_type)
             object.__setattr__(self, "prefix_directional", prefix)
             object.__setattr__(self, "postfix_directional", postfix)
+        if self.postal_code:
+            normalized = normalize_postal_code(self.postal_code)
+            if normalized != self.postal_code:
+                object.__setattr__(self, "postal_code", normalized)
 
     @property
     def location(self) -> str:

@@ -21,6 +21,8 @@ from synth911gen3.config import GenerationRequest
 from synth911gen3.constants import (
     CALLS_PER_1000_POPULATION_YEARLY,
     NON_EMERGENCY_FLOOR_RATIO,
+)
+from synth911gen3.constants import (
     PHONE_METRICS as DEFAULT_PHONE_METRICS,
 )
 from synth911gen3.emergency_numbers import EmergencyNumber, column_prefix

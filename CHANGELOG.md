@@ -24,6 +24,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `phone_duration_mu`/`phone_duration_sigma` overrides. Schema version bumped to 1.2.
 
 ### Fixed
+- `maybe_inject_system_trust()` is now guarded against re-entry: a module-level
+  flag ensures `truststore.inject_into_ssl()` patches the global `ssl` module at
+  most once per process, no matter how many times the entry point is called
+  (CLI, TUI, and API server startup paths, tests). The flag is set only after a
+  successful injection, and the function is still a no-op unless
+  `SYNTHCCD_SYSTEM_TRUST=1`. The FastAPI server now invokes it in its lifespan,
+  so OSM lookups behind TLS-inspecting proxies work under `SynthCCD serve` too.
+- US `postal_code` values are now normalized to the 5-digit ZIP. OpenStreetMap stores some
+  US addresses as a 9-digit ZIP+4 (`64110-1234`); both forms now collapse to the 5-digit ZIP
+  (`64110`) so analysts can group by postal code. Non-US formats (Canadian `L4T 2D6`,
+  UK `SW1A 2AA`, …) are passed through unchanged. Normalization happens in
+  `Address.__post_init__`, so OSM fetches, cached addresses (including pre-existing caches),
+  and direct constructions are all covered.
 - TUI help text now lists all 13 output formats instead of 6.
 - Phone-metrics answer-time percentages are now consistent with the hour's call
   counts. The `answered_Ns_pct` columns were previously the raw lognormal CDF

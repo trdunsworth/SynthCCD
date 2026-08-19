@@ -4,17 +4,28 @@ from types import SimpleNamespace
 
 import pytest
 
+import synth911gen3.tls as tls_module
 from synth911gen3.tls import maybe_inject_system_trust
+
+
+@pytest.fixture(autouse=True)
+def _reset_injection_flag() -> None:
+    """Start every test from the uninjected state and tidy up afterwards."""
+    tls_module._TRUST_INJECTED = False
+    yield
+    tls_module._TRUST_INJECTED = False
 
 
 def test_noop_without_env_var(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SYNTHCCD_SYSTEM_TRUST", raising=False)
     assert maybe_inject_system_trust() is None
+    assert tls_module._TRUST_INJECTED is False
 
 
 def test_noop_when_env_var_not_one(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SYNTHCCD_SYSTEM_TRUST", "0")
     assert maybe_inject_system_trust() is None
+    assert tls_module._TRUST_INJECTED is False
 
 
 def test_injects_system_trust_when_enabled(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -26,6 +37,20 @@ def test_injects_system_trust_when_enabled(monkeypatch: pytest.MonkeyPatch) -> N
     maybe_inject_system_trust()
 
     assert calls == [True]
+    assert tls_module._TRUST_INJECTED is True
+
+
+def test_injects_system_trust_only_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[bool] = []
+    fake_truststore = SimpleNamespace(inject_into_ssl=lambda: calls.append(True))
+    monkeypatch.setenv("SYNTHCCD_SYSTEM_TRUST", "1")
+    monkeypatch.setitem(sys.modules, "truststore", fake_truststore)
+
+    maybe_inject_system_trust()
+    maybe_inject_system_trust()
+    maybe_inject_system_trust()
+
+    assert calls == [True]
 
 
 def test_graceful_when_truststore_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -33,3 +58,4 @@ def test_graceful_when_truststore_unavailable(monkeypatch: pytest.MonkeyPatch) -
     monkeypatch.setitem(sys.modules, "truststore", None)
 
     assert maybe_inject_system_trust() is None
+    assert tls_module._TRUST_INJECTED is False

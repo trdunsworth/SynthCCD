@@ -9,6 +9,9 @@ operating system's trust store when the operator opts in via the
 
 Call this once at process startup (CLI, TUI, server) before any
 networked work; it is a no-op when the environment variable is unset.
+The injection is guarded by a module-level flag, so repeated calls (for
+example in tests or shared entry points) never re-patch the global
+``ssl`` module more than once per process.
 """
 
 from __future__ import annotations
@@ -16,6 +19,11 @@ from __future__ import annotations
 import os
 
 _ACTIVE_ENV_VAR = "SYNTHCCD_SYSTEM_TRUST"
+
+# Process-level re-entry guard: ``truststore.inject_into_ssl()`` patches the
+# global ``ssl`` module and must run at most once per process, so once injected
+# (or skipped) the flag stays set for the lifetime of the process.
+_TRUST_INJECTED = False
 
 
 def maybe_inject_system_trust() -> None:
@@ -25,9 +33,14 @@ def maybe_inject_system_trust() -> None:
     include the proxy's issuer. Enabling this makes the current process verify
     HTTPS connections against the operating system's trust store instead.
 
-    This is a no-op unless the environment variable is set, so production
-    behavior is unchanged.
+    Safe to call any number of times: the global ``ssl`` module is patched at
+    most once per process. Must run before networked work — call it once at
+    startup, not per request. This is a no-op unless the environment variable
+    is set, so production behavior is unchanged.
     """
+    global _TRUST_INJECTED
+    if _TRUST_INJECTED:
+        return
     if os.environ.get(_ACTIVE_ENV_VAR) != "1":
         return
     try:
@@ -35,3 +48,4 @@ def maybe_inject_system_trust() -> None:
     except ImportError:
         return
     truststore.inject_into_ssl()
+    _TRUST_INJECTED = True

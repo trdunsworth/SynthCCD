@@ -518,10 +518,17 @@ the specific problem, and the fix direction.
   `uvicorn synth911gen3.serve:app --host … --port …` directly.
   3 new tests in `test_serve.py`.
 
-- [ ] **P1 — Guard `truststore.inject_into_ssl()` against re-entry.**
+- [x] **P1 — Guard `truststore.inject_into_ssl()` against re-entry.**
   `tls.py:37` patches the global `ssl` module with no guard. Fix: add a
   process-level flag so it's only applied once. Document that this must
   run at startup, not per-request.
+  **Done:** Added module-level `_TRUST_INJECTED` flag in `tls.py`;
+  `maybe_inject_system_trust()` short-circuits once injected and sets the
+  flag only after a successful `truststore.inject_into_ssl()`. Docstrings
+  now state the once-per-process, run-at-startup contract. Covered by
+  `tests/test_tls.py` (including new `test_injects_system_trust_only_once`
+  verifying a triple call performs a single injection, with an autouse
+  fixture resetting the flag between tests).
 
 - [ ] **P2 — Restrict `output_dir` and `realism_config_path` in the API.**
   `serve.py:48,64` pass caller-controlled paths directly to filesystem I/O.
@@ -700,8 +707,15 @@ to `SynthCCD license install`. Valid but expired licenses continue to work durin
   Enterprise features (PostgreSQL, SQL Server) require `commercial` or `enterprise`
   tier. The API server requires at least `commercial` tier.
 
-- [ ] **P2 - Reduce `postal_code` in US to just the 5-digit ZIP code.**
+- [x] **P2 - Reduce `postal_code` in US to just the 5-digit ZIP code.**
   Currently, the ZIP code for U.S. addresses can express as either a 5-digit ZIP code or a 9-digit ZIP+4 code. That should be standardized as a 5-digit ZIP code. Other countries should not be impacted. e.g. (L4T 2D6) should be a valid Canadian Postal Code.
+  **Done:** Added `normalize_postal_code()` in `domain.py` (US-only `DDDDD-DDDD` ZIP+4
+  pattern truncated to the 5-digit ZIP; all other formats pass through unchanged, including
+  Canadian `L4T 2D6`, UK `SW1A 2AA`, and plain 5-digit values). Applied in
+  `Address.__post_init__`, so OSM-fetched addresses, cached addresses (including old caches
+  holding 9-digit values), and direct constructions are all normalized. Covered by new tests
+  in `tests/test_addresses.py` (direct Address, OSM `addr:postcode`, cache load, non-US
+  passthrough).
 
 ---
 
