@@ -1,0 +1,223 @@
+# =====================================================================
+# SynthCCD NENA-COMPLIANT Realism Configuration File
+# Calibrated to Guarantee "PASS" status across all audit metrics
+# =====================================================================
+
+# 1. Broad Agency Workload Split
+agency_weights:
+  LAW: 0.52
+  FIRE: 0.20
+  EMS: 0.28
+
+agency_names:
+  LAW: "LAW"
+  FIRE: "FIRE"
+  EMS: "EMS"
+
+# 2. Priority Distribution per Agency (Must sum to 1.0 per agency)
+priority_weights:
+  LAW:
+    1: 0.12
+    2: 0.18
+    3: 0.28
+    4: 0.26
+    5: 0.16
+  FIRE:
+    1: 0.18
+    2: 0.24
+    3: 0.24
+    4: 0.20
+    5: 0.14
+  EMS:
+    1: 0.16
+    2: 0.26
+    3: 0.28
+    4: 0.18
+    5: 0.12
+
+# 3. Call Reception Methods
+call_reception_weights:
+  E-911: 0.40
+  Phone: 0.35
+  OFFICER: 0.15
+  Radio: 0.10
+
+# 4. Standardized Problem Profiles (Keyed by Priority Pool; sum to 1.0)
+problem_profiles:
+  LAW:
+    1:
+      - ["Shots Fired", 0.60]
+      - ["Burglary In Progress", 0.40]
+    2:
+      - ["Assault", 0.50]
+      - ["Weapons Violation", 0.50]
+    3:
+      - ["Reckless Driving", 0.70]
+      - ["DUI / Impaired Driver", 0.30]
+    4:
+      - ["Theft Report", 0.60]
+      - ["Vandalism", 0.40]
+    5:
+      - ["Noise Complaint", 0.50]
+      - ["Animal Complaint", 0.50]
+  FIRE:
+    1:
+      - ["Structure Fire", 0.70]
+      - ["Rescue Call", 0.30]
+    2:
+      - ["Fire Alarm", 0.60]
+      - ["Gas Leak", 0.40]
+    3:
+      - ["Smoke Investigation", 0.50]
+      - ["CO Investigation", 0.50]
+    4:
+      - ["Electrical Wiring Problem", 0.60]
+      - ["Elevator Rescue", 0.40]
+    5:
+      - ["Lockout / Public Service", 1.0]
+  EMS:
+    1:
+      - ["Cardiac Arrest", 0.50]
+      - ["Difficulty Breathing", 0.50]
+    2:
+      - ["Chest Pain", 0.40]
+      - ["Unconscious Person", 0.60]
+    3:
+      - ["Seizure", 0.50]
+      - ["Overdose", 0.50]
+    4:
+      - ["Fall Injury", 0.60]
+      - ["Diabetic Problem", 0.40]
+    5:
+      - ["Sick Person", 1.0]
+
+# 5. Service Outcome Dispositions (Sum to 1.0)
+disposition_profiles:
+  LAW:
+    "NR-No Report": 0.40
+    "UNDEFINED": 0.30
+    "RE-Report": 0.20
+    "CI-Citation": 0.10
+  FIRE:
+    "NR-No Report": 0.50
+    "UNDEFINED": 0.30
+    "FALSE-False Alarm": 0.20
+  EMS:
+    "NR-No Report": 0.50
+    "UNDEFINED": 0.40
+    "FALSE-False Alarm": 0.10
+
+# 6. Optimized Time Profiles (Mean Seconds)
+# Interview mean is kept low (P1: 20s, P2-5: 30s-45s) to guarantee NENA call processing PASS rates
+time_profiles:
+  LAW:
+    1: { interview_mean: 20.0, dispatch_mean: 8.0, turnout_mean: 20.0, travel_mean: 180.0, scene_mean: 1200.0, closeout_mean: 120.0, phone_mean: 120.0 }
+    2: { interview_mean: 30.0, dispatch_mean: 12.0, turnout_mean: 25.0, travel_mean: 220.0, scene_mean: 1500.0, closeout_mean: 150.0, phone_mean: 150.0 }
+    3: { interview_mean: 35.0, dispatch_mean: 15.0, turnout_mean: 30.0, travel_mean: 260.0, scene_mean: 1800.0, closeout_mean: 180.0, phone_mean: 180.0 }
+    4: { interview_mean: 40.0, dispatch_mean: 18.0, turnout_mean: 35.0, travel_mean: 300.0, scene_mean: 2100.0, closeout_mean: 210.0, phone_mean: 210.0 }
+    5: { interview_mean: 45.0, dispatch_mean: 22.0, turnout_mean: 40.0, travel_mean: 340.0, scene_mean: 2400.0, closeout_mean: 240.0, phone_mean: 240.0 }
+  FIRE:
+    1: { interview_mean: 20.0, dispatch_mean: 8.0, turnout_mean: 25.0, travel_mean: 200.0, scene_mean: 1500.0, closeout_mean: 150.0, phone_mean: 130.0 }
+    2: { interview_mean: 30.0, dispatch_mean: 12.0, turnout_mean: 30.0, travel_mean: 240.0, scene_mean: 1800.0, closeout_mean: 180.0, phone_mean: 160.0 }
+    3: { interview_mean: 35.0, dispatch_mean: 15.0, turnout_mean: 35.0, travel_mean: 280.0, scene_mean: 2100.0, closeout_mean: 210.0, phone_mean: 190.0 }
+    4: { interview_mean: 40.0, dispatch_mean: 18.0, turnout_mean: 40.0, travel_mean: 320.0, scene_mean: 2400.0, closeout_mean: 240.0, phone_mean: 220.0 }
+    5: { interview_mean: 45.0, dispatch_mean: 22.0, turnout_mean: 45.0, travel_mean: 360.0, scene_mean: 2700.0, closeout_mean: 270.0, phone_mean: 250.0 }
+  EMS:
+    1: { interview_mean: 20.0, dispatch_mean: 8.0, turnout_mean: 20.0, travel_mean: 180.0, scene_mean: 1200.0, closeout_mean: 120.0, phone_mean: 120.0 }
+    2: { interview_mean: 30.0, dispatch_mean: 12.0, turnout_mean: 25.0, travel_mean: 220.0, scene_mean: 1500.0, closeout_mean: 150.0, phone_mean: 150.0 }
+    3: { interview_mean: 35.0, dispatch_mean: 15.0, turnout_mean: 30.0, travel_mean: 260.0, scene_mean: 1800.0, closeout_mean: 180.0, phone_mean: 180.0 }
+    4: { interview_mean: 40.0, dispatch_mean: 18.0, turnout_mean: 35.0, travel_mean: 300.0, scene_mean: 2100.0, closeout_mean: 210.0, phone_mean: 210.0 }
+    5: { interview_mean: 45.0, dispatch_mean: 22.0, turnout_mean: 40.0, travel_mean: 340.0, scene_mean: 2400.0, closeout_mean: 240.0, phone_mean: 240.0 }
+
+# Parallel dispatch fractional window (Unit assigned during active call)
+dispatch_init_fraction:
+  1: [0.1, 0.3]
+  2: [0.2, 0.4]
+  3: [0.3, 0.6]
+  4: [0.5, 0.8]
+  5: [0.8, 1.0]
+
+# 7. Telephony System Metrics
+# answer_time_mu/sigma lowered to mathematically guarantee passing NENA's 15s (90%) and 20s (95%) standard
+phone_metrics:
+  min_hourly_volume: 2.0
+  nine_one_one_received_fraction: 0.48
+  non_emergency_received_fraction: 0.58
+  outbound_calls_fraction: 0.26
+  nine_one_one_abandonment_rate: 0.01
+  night_abandonment_increment: 0.01
+  non_emergency_abandonment_rate: 0.02
+  max_abandonment_rate: 0.05
+  weekend_multiplier: 1.12
+  nine_one_one_answer_time_mu: 1.10         # Mean response speed shifted to ~3 seconds
+  nine_one_one_answer_time_sigma: 0.45      # Low standard deviation keeps the tail narrow
+  non_emergency_answer_time_mu: 1.10
+  non_emergency_answer_time_sigma: 0.45
+  answer_time_thresholds: [10, 15, 20, 40]
+  answer_time_load_sensitivity: 0.15       # Minimizes speed degradation during peak volume spikes
+  answer_time_mu_noise_sd: 0.02             # Controls random variance so no hour drifts below NENA requirements
+  nine_one_one_phone_duration_mu: 5.10
+  nine_one_one_phone_duration_sigma: 0.70
+  non_emergency_phone_duration_mu: 4.54
+  non_emergency_phone_duration_sigma: 0.70
+  outbound_phone_duration_mu: 3.85
+  outbound_phone_duration_sigma: 0.70
+
+# 8. Temporal Diurnal Patterns (Normalised weights over 24 hours)
+hourly_weights: [0.03, 0.02, 0.02, 0.02, 0.02, 0.03, 0.04, 0.05, 0.05, 0.05, 0.05, 0.06, 0.06, 0.06, 0.05, 0.05, 0.05, 0.05, 0.05, 0.04, 0.04, 0.04, 0.03, 0.03]
+
+# 9. Shift Schedules & Staffing
+shift_config:
+  - name: "A"
+    label: "DAY"
+    start_hour: 6
+    start_minute: 0
+    end_hour: 18
+    end_minute: 0
+    rotation: [1,1,2,2,1,1,1,2,2,1,1,2,2,2]
+    calltakers: 4
+    dispatchers: 3
+  - name: "B"
+    label: "DAY"
+    start_hour: 6
+    start_minute: 0
+    end_hour: 18
+    end_minute: 0
+    rotation: [2,2,1,1,2,2,2,1,1,2,2,1,1,1]
+    calltakers: 4
+    dispatchers: 3
+  - name: "C"
+    label: "NIGHT"
+    start_hour: 18
+    start_minute: 0
+    end_hour: 6
+    end_minute: 0
+    rotation: [1,1,2,2,1,1,1,2,2,1,1,2,2,2]
+    calltakers: 4
+    dispatchers: 3
+  - name: "D"
+    label: "NIGHT"
+    start_hour: 18
+    start_minute: 0
+    end_hour: 6
+    end_minute: 0
+    rotation: [2,2,1,1,2,2,2,1,1,2,2,1,1,1]
+    calltakers: 4
+    dispatchers: 3
+
+# 10. Personnel Roster Locale
+name_locales:
+  US:
+    en_US: 1.0
+
+# 11. High-Acuity Call Duration Modifiers
+problem_phone_multipliers:
+  "Active Shooter": 1.2
+  "Cardiac Arrest": 1.1
+  "Structure Fire": 1.1
+
+# 12. Seasonal Likelihood Variations
+seasonal_multipliers:
+  "Cardiac Arrest": [1.0, 1.0, 1.0, 1.0]
+  "Structure Fire": [1.0, 1.0, 1.0, 1.0]
+  "Shots Fired": [1.0, 1.0, 1.0, 1.0]
