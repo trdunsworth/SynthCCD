@@ -9,7 +9,15 @@ from synth911gen3.app import Synth911Application
 from synth911gen3.config import DatasetKind, GenerationRequest, OutputFormat
 from synth911gen3.domain import Address
 from synth911gen3.exceptions import ValidationError
-from synth911gen3.generators.incidents import _distribute, _resolve_shift_staffing, _zipf_pick
+from synth911gen3.generators.incidents import (
+    _build_shift_pools,
+    _discipline_counts,
+    _distribute,
+    _resolve_dispatcher_groups,
+    _resolve_shift_staffing,
+    _zipf_pick,
+)
+from synth911gen3.names import PersonnelNameGenerator
 from synth911gen3.realism_config import RealismConfig
 from synth911gen3.shifts import (
     DEFAULT_SHIFT_PRESET,
@@ -33,6 +41,18 @@ _AM = datetime(1970, 1, 6, 2, 0)
 
 def _one() -> StaticAddressProvider:
     return StaticAddressProvider([Address("100 E 12th St", "Kansas City", "Missouri")])
+
+
+def _unstaffed_two_shift_config() -> ShiftConfig:
+    """Two 12h shifts that omit explicit staffing so global pool splits apply."""
+    return ShiftConfig(
+        name="custom-unstaffed",
+        rotation=[1],
+        shifts=[
+            Shift("A", label="DAY", start_hour=6, end_hour=18, rotation=1),
+            Shift("B", label="NIGHT", start_hour=18, end_hour=6, rotation=1),
+        ],
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -245,6 +265,86 @@ def test_zipf_pick_returns_only_pool_names() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Dispatcher discipline consoles
+# ---------------------------------------------------------------------------
+
+_ALL = frozenset({"LAW", "FIRE", "EMS"})
+
+
+def test_discipline_counts_stay_combined_below_threshold() -> None:
+    # Small centre: 3 or fewer dispatchers per shift keep one combined console.
+    for count in (1, 2, 3):
+        assert _discipline_counts(count, "auto", 4, _ALL) == {}
+
+
+def test_discipline_counts_four_positions_split_two_way() -> None:
+    # Alexandria-style: exactly 4 dispatchers per shift -> 2 LAW + 2 FIRE/EMS.
+    assert _discipline_counts(4, "auto", 4, _ALL) == {"law": 2, "fire_ems": 2}
+
+
+def test_discipline_counts_two_way_split() -> None:
+    # LAW vs FIRE/EMS consoles, remainder on LAW first.
+    assert _discipline_counts(5, "auto", 4, _ALL) == {"law": 3, "fire_ems": 2}
+    assert _discipline_counts(6, "auto", 4, _ALL) == {"law": 3, "fire_ems": 3}
+    assert _discipline_counts(7, "auto", 4, _ALL) == {"law": 4, "fire_ems": 3}
+
+
+def test_discipline_counts_three_way_split_at_eight_plus() -> None:
+    assert _discipline_counts(8, "auto", 4, _ALL) == {"law": 3, "fire": 3, "ems": 2}
+    assert _discipline_counts(10, "auto", 4, _ALL) == {"law": 4, "fire": 3, "ems": 3}
+
+
+def test_discipline_counts_single_agency_stays_combined() -> None:
+    for active in (frozenset({"LAW"}), frozenset({"FIRE"}), frozenset({"EMS"})):
+        assert _discipline_counts(12, "auto", 4, active) == {}
+        assert _discipline_counts(12, "three_way", 4, active) == {}
+
+
+def test_discipline_counts_explicit_modes_override_threshold() -> None:
+    # Explicit modes split at any staffing level; auto still gates on threshold.
+    assert _discipline_counts(2, "two_way", 4, _ALL) == {"law": 1, "fire_ems": 1}
+    assert _discipline_counts(4, "three_way", 4, _ALL) == {"law": 2, "fire": 1, "ems": 1}
+    assert _discipline_counts(2, "auto", 4, _ALL) == {}
+
+
+def test_discipline_counts_drop_inactive_groups() -> None:
+    # A fire/EMS-only PSAP has no LAW console even in three-way mode.
+    fire_ems = frozenset({"FIRE", "EMS"})
+    assert _discipline_counts(7, "three_way", 4, fire_ems) == {"fire": 4, "ems": 3}
+    # Two-way mode with no LAW positions collapses to one group -> combined.
+    assert _discipline_counts(7, "two_way", 4, fire_ems) == {}
+
+
+def test_resolve_dispatcher_groups_per_shift() -> None:
+    realism = RealismConfig()
+    staffing = [("A", 4, 6), ("B", 4, 3), ("C", 4, 9), ("D", 4, 12), ("E", 4, 4)]
+    groups = _resolve_dispatcher_groups(staffing, realism, _ALL)
+    assert groups == {
+        "A": {"law": 3, "fire_ems": 3},
+        "C": {"law": 3, "fire": 3, "ems": 3},
+        "D": {"law": 4, "fire": 4, "ems": 4},
+        "E": {"law": 2, "fire_ems": 2},
+    }
+
+
+def test_build_shift_pools_partition_rosters_by_discipline() -> None:
+    name_gen = PersonnelNameGenerator([("en_US", 1.0)], seed=42)
+    staffing = [("A", 2, 5)]
+    groups = {"A": {"law": 3, "fire_ems": 2}}
+    pools = _build_shift_pools(name_gen, staffing, groups)
+    roster = pools["A"]["dispatchers"]
+    assert len(roster) == 5
+    law, fire_ems = pools["A"]["dispatchers_by_group"]["law"], pools["A"][
+        "dispatchers_by_group"
+    ]["fire_ems"]
+    assert law + fire_ems == roster
+    assert set(law).isdisjoint(fire_ems)
+    # Combined shifts carry no sub-pool key.
+    plain = _build_shift_pools(name_gen, staffing)
+    assert "dispatchers_by_group" not in plain["A"]
+
+
+# ---------------------------------------------------------------------------
 # End-to-end incident generation
 # ---------------------------------------------------------------------------
 
@@ -305,3 +405,97 @@ def test_application_calltakers_fit_per_shift_pool_size() -> None:
     for shift_name, group in frame.groupby("shift"):
         assert group["calltaker"].nunique() <= 3, shift_name
         assert group["dispatcher"].nunique() <= 2, shift_name
+
+
+def test_application_dispatchers_split_by_agency_discipline() -> None:
+    # 12 dispatchers over two unstaffed shifts -> 6 per shift -> auto mode
+    # splits each shift into LAW (3) vs FIRE/EMS (3) consoles.
+    realism = RealismConfig()
+    realism.shift_config = _unstaffed_two_shift_config()
+    request = GenerationRequest(
+        rows=1600,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=7,
+        dispatcher_pool_size=12,
+        realism_config=realism,
+    )
+    frame = Synth911Application(address_provider=_one()).generate(request).incidents
+    assert frame is not None
+    for shift_name, group in frame.groupby("shift"):
+        law_names = set(group.loc[group["agency"] == "LAW", "dispatcher"])
+        fire_names = set(group.loc[group["agency"] == "FIRE", "dispatcher"])
+        ems_names = set(group.loc[group["agency"] == "EMS", "dispatcher"])
+        # Each discipline console holds at most half the shift's positions.
+        assert len(law_names) <= 3, shift_name
+        assert len(fire_names | ems_names) <= 3, shift_name
+        # LAW and FIRE/EMS consoles are disjoint rosters.
+        assert law_names.isdisjoint(fire_names | ems_names), shift_name
+        # Calltakers stay one cross-trained pool of 6.
+        assert group["calltaker"].nunique() <= 6, shift_name
+
+
+def test_application_four_dispatcher_shift_splits_two_way() -> None:
+    # Alexandria case: exactly 4 dispatchers per shift -> auto splits 2 + 2.
+    realism = RealismConfig()
+    realism.shift_config = _unstaffed_two_shift_config()
+    request = GenerationRequest(
+        rows=1600,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=10,
+        dispatcher_pool_size=8,
+        realism_config=realism,
+    )
+    frame = Synth911Application(address_provider=_one()).generate(request).incidents
+    assert frame is not None
+    for shift_name, group in frame.groupby("shift"):
+        law_names = set(group.loc[group["agency"] == "LAW", "dispatcher"])
+        fire_ems_names = set(
+            group.loc[group["agency"].isin(["FIRE", "EMS"]), "dispatcher"]
+        )
+        assert len(law_names) <= 2, shift_name
+        assert len(fire_ems_names) <= 2, shift_name
+        assert law_names.isdisjoint(fire_ems_names), shift_name
+
+
+def test_application_dispatcher_disciplines_respect_psap_filter() -> None:
+    # A LAW-only PSAP keeps a single combined console even with 6 dispatchers
+    # per shift; all six roster names may appear on LAW incidents.
+    realism = RealismConfig()
+    realism.shift_config = _unstaffed_two_shift_config()
+    request = GenerationRequest(
+        rows=1600,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=8,
+        dispatcher_pool_size=12,
+        psap_agency="law",
+        realism_config=realism,
+    )
+    frame = Synth911Application(address_provider=_one()).generate(request).incidents
+    assert frame is not None
+    assert set(frame["agency"]) == {"LAW"}
+    for shift_name, group in frame.groupby("shift"):
+        assert group["dispatcher"].nunique() > 3, shift_name
+
+
+def test_application_dispatcher_disciplines_combined_mode_configurable() -> None:
+    # mode: combined forces a single console pool even for large shifts.
+    realism = RealismConfig()
+    realism.shift_config = _unstaffed_two_shift_config()
+    realism.dispatcher_disciplines = {"mode": "combined", "min_dispatchers_for_split": 5}
+    request = GenerationRequest(
+        rows=400,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=9,
+        dispatcher_pool_size=12,
+        realism_config=realism,
+    )
+    frame = Synth911Application(address_provider=_one()).generate(request).incidents
+    assert frame is not None
+    for shift_name, group in frame.groupby("shift"):
+        # Combined pool of 6 dispatchers per shift; Zipf weighting surfaces
+        # more distinct names than any discipline split would allow.
+        assert group["dispatcher"].nunique() > 3, shift_name

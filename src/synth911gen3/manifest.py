@@ -155,6 +155,7 @@ def _hash_realism_config(realism: RealismConfig) -> str:
         "agency_names": realism.agency_names,
         "shift_config": realism.shift_config.to_dict(),
         "seasonal_multipliers": realism.seasonal_multipliers,
+        "dispatcher_disciplines": realism.dispatcher_disciplines,
         "name_locales": realism.name_locales,
     }
     yaml_str = yaml.safe_dump(data, sort_keys=True, default_flow_style=None)

@@ -10,6 +10,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Bundled CLI samples in `config/samples/`: `small_centre.json` (rural combined-console
+  PSAP), `midsize_centre.yaml` (Alexandria-style LAW vs FIRE/EMS consoles via a companion
+  realism YAML), `large_centre.toml` (metro centre with SQLite output, population-based
+  phone volume, and a chunked memory budget), and `realism_disciplines.yaml` (minimal
+  realism override showcasing `shift_config` + `dispatcher_disciplines`). Each params
+  sample is round-tripped through the real loader in `tests/test_samples.py`.
+- TUI dispatcher-console controls. The Personnel section gains a "Dispatcher consoles"
+  select (Auto / Combined / LAW vs FIRE/EMS / LAW / FIRE / EMS) and a "Console split
+  threshold" input, applied over the realism config file's values; an invalid or
+  unreadable config file now fails fast with the field highlighted instead of
+  mid-generation.
+- DMA Theme for the TUI. Two registered Textual themes — `dma-light` (default) and
+  `dma-dark` — built from the DMA Theme palette
+  (https://github.com/trdunsworth/DMA_Theme_2): soft-white/dark-blue-grey backgrounds,
+  blue/teal/turquoise accents, and the documented AA-compliant semantic status stops.
+  Press `t` in the TUI to toggle between them.
+- Agency-disciplined dispatcher consoles for medium/large centres. Real centres staff
+  dispatch positions by discipline (e.g. Alexandria, VA: 4 dispatchers per shift as
+  2 LAW + 2 FIRE/EMS). A new `dispatcher_disciplines` realism-YAML section
+  (`mode`: `auto`/`combined`/`two_way`/`three_way`, `min_dispatchers_for_split`,
+  default threshold 4) splits each shift's dispatcher pool into LAW vs FIRE/EMS
+  consoles (4-7 positions) or LAW / FIRE / EMS consoles (8+), with remainders going
+  to LAW first. Each incident's `dispatcher` is drawn from the console matching the
+  incident's agency; calltakers stay one cross-trained pool; single-agency PSAPs
+  (`psap_agency`) and shifts below the threshold keep a combined console, so
+  default-config output is byte-identical. The realism config hash in the manifest
+  and regression baseline now covers the new section.
 - FIRE problem pool: `Chimney Fire` added at priority 3. It previously existed only in
   `SEASONAL_MULTIPLIERS` (winter-weighted: 2.5/0.5/0.1/1.5), so its seasonal profile never
   applied to generated incidents. FIRE problem count is now 22.

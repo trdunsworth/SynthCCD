@@ -4,11 +4,12 @@
 request: agency/priority weighted problem natures, seasonal weighting,
 lognormal lifecycle timings, geographic zone travel multipliers,
 shift-aware calltaker/dispatcher assignment (Zipf-weighted for workload
-realism), reception and disposition profiles, and reference numbers per
-agency/day. All draws flow through a single seeded NumPy RNG so a given
-seed plus realism config yields byte-identical output; large runs stream
-chunks via :meth:`IncidentGenerator.generate_chunks` under a memory
-budget.
+realism, with dispatcher pools split into LAW / FIRE / EMS discipline
+consoles for medium/large centres), reception and disposition profiles,
+and reference numbers per agency/day. All draws flow through a single
+seeded NumPy RNG so a given seed plus realism config yields
+byte-identical output; large runs stream chunks via
+:meth:`IncidentGenerator.generate_chunks` under a memory budget.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from __future__ import annotations
 import random as _random
 import uuid as _uuid
 from collections.abc import Callable, Iterator
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -108,16 +110,110 @@ def _resolve_shift_staffing(
 
 
 def _build_shift_pools(
-    name_gen: PersonnelNameGenerator, staffing: list[tuple[str, int, int]]
-) -> dict[str, dict[str, list[str]]]:
-    """Create a unique-name roster per shift: ``{shift: {calltakers, dispatchers}}``."""
-    pools: dict[str, dict[str, list[str]]] = {}
+    name_gen: PersonnelNameGenerator,
+    staffing: list[tuple[str, int, int]],
+    dispatcher_groups: dict[str, dict[str, int]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Create a unique-name roster per shift: ``{shift: {calltakers, dispatchers}}``.
+
+    When ``dispatcher_groups`` carries discipline sub-pool sizes for a shift
+    (from :func:`_resolve_dispatcher_groups`), the drawn dispatcher roster is
+    partitioned into ``dispatchers_by_group`` in canonical group order so
+    incidents draw their dispatcher from the console matching their agency.
+    """
+    pools: dict[str, dict[str, Any]] = {}
     for name, calltakers, dispatchers in staffing:
-        pools[name] = {
-            "calltakers": [name_gen.unique_name() for _ in range(calltakers)],
-            "dispatchers": [name_gen.unique_name() for _ in range(dispatchers)],
+        calltaker_roster = [name_gen.unique_name() for _ in range(calltakers)]
+        dispatcher_roster = [name_gen.unique_name() for _ in range(dispatchers)]
+        entry: dict[str, Any] = {
+            "calltakers": calltaker_roster,
+            "dispatchers": dispatcher_roster,
         }
+        groups = (dispatcher_groups or {}).get(name)
+        if groups:
+            offset = 0
+            by_group: dict[str, list[str]] = {}
+            for group, size in groups.items():
+                by_group[group] = dispatcher_roster[offset : offset + size]
+                offset += size
+            entry["dispatchers_by_group"] = by_group
+        pools[name] = entry
     return pools
+
+
+# Dispatcher console disciplines: which agencies each discipline group covers.
+_DISPATCHER_GROUP_AGENCIES: dict[str, frozenset[str]] = {
+    "law": frozenset({"LAW"}),
+    "fire_ems": frozenset({"FIRE", "EMS"}),
+    "fire": frozenset({"FIRE"}),
+    "ems": frozenset({"EMS"}),
+}
+# Canonical group ordering per breakdown mode (drives deterministic roster
+# partitioning: remainder positions land on earlier disciplines, LAW first).
+_DISPATCHER_GROUP_ORDER: dict[str, tuple[str, ...]] = {
+    "two_way": ("law", "fire_ems"),
+    "three_way": ("law", "fire", "ems"),
+}
+# ``auto`` mode escalates from two-way to a full three-way split once a shift
+# staffs this many dispatcher positions.
+_AUTO_THREE_WAY_MIN = 8
+
+
+def _discipline_counts(
+    count: int,
+    mode: str,
+    threshold: int,
+    active_agencies: frozenset[str],
+) -> dict[str, int]:
+    """Dispatcher counts per discipline group for one shift (empty = combined).
+
+    Splits only when more than one agency is active; single-agency PSAPs keep
+    one combined console regardless of position count. ``auto`` honors the
+    configured ``threshold`` and escalates to three-way at
+    ``_AUTO_THREE_WAY_MIN`` positions; explicit ``two_way``/``three_way``
+    modes split at any staffing level. Groups left with zero positions are
+    dropped, and a lone remaining group collapses back to combined.
+    """
+    if count <= 0 or len(active_agencies) <= 1:
+        return {}
+    if mode == "auto":
+        if count < threshold:
+            return {}
+        mode = "three_way" if count >= _AUTO_THREE_WAY_MIN else "two_way"
+    order = [
+        group
+        for group in _DISPATCHER_GROUP_ORDER.get(mode, ())
+        if _DISPATCHER_GROUP_AGENCIES[group] & active_agencies
+    ]
+    if not order:
+        return {}
+    counts = _distribute(count, len(order))
+    groups = {
+        group: size for group, size in zip(order, counts) if size > 0
+    }
+    return groups if len(groups) > 1 else {}
+
+
+def _resolve_dispatcher_groups(
+    staffing: list[tuple[str, int, int]],
+    realism: RealismConfig,
+    active_agencies: frozenset[str],
+) -> dict[str, dict[str, int]]:
+    """Per-shift dispatcher discipline sub-pool sizes (absent = combined).
+
+    Reads ``realism.dispatcher_disciplines``: ``mode`` selects the breakdown
+    and ``min_dispatchers_for_split`` gates ``auto`` splitting. See
+    :func:`_discipline_counts` for the exact semantics.
+    """
+    disciplines = realism.dispatcher_disciplines
+    mode = str(disciplines.get("mode", "auto"))
+    threshold = max(1, int(disciplines.get("min_dispatchers_for_split", 4)))
+    plan: dict[str, dict[str, int]] = {}
+    for name, _calltakers, dispatchers in staffing:
+        groups = _discipline_counts(dispatchers, mode, threshold, active_agencies)
+        if groups:
+            plan[name] = groups
+    return plan
 
 
 def _zipf_weights(count: int) -> np.ndarray:
@@ -245,7 +341,7 @@ class IncidentGenerator:
     def _prepare(
         self, request: GenerationRequest
     ) -> tuple[
-        RealismConfig, ShiftConfig, dict[str, dict[str, list[str]]], list, np.random.Generator
+        RealismConfig, ShiftConfig, dict[str, dict[str, Any]], list, np.random.Generator
     ]:
         """Validate, merge realism config, load addresses, and build personnel rosters."""
         request.validate()
@@ -283,11 +379,11 @@ class IncidentGenerator:
         # Personnel names follow the region the addresses were drawn from; the
         # request's country acts as the fallback when the provider cannot tell.
         resolved_country = getattr(self._address_provider, "resolved_country", None)
-        country = (
-            (resolved_country() if callable(resolved_country) else None)
-            or request.country
-            or DEFAULT_COUNTRY
-        )
+        provider_country: str | None = None
+        if callable(resolved_country):
+            value = resolved_country()
+            provider_country = str(value) if value else None
+        country = provider_country or request.country or DEFAULT_COUNTRY
         name_locales = resolve_name_locales(country, override=realism.name_locales)
         logger.info(
             "Personnel name locales for country %s: %s",
@@ -296,7 +392,15 @@ class IncidentGenerator:
         )
         name_gen = PersonnelNameGenerator(name_locales, seed=request.seed)
         staffing = _resolve_shift_staffing(shift_config, request)
-        shift_pools = _build_shift_pools(name_gen, staffing)
+        active_agencies = frozenset(realism.agency_weights) & allowed_agencies
+        dispatcher_groups = _resolve_dispatcher_groups(staffing, realism, active_agencies)
+        if dispatcher_groups:
+            logger.info(
+                "Dispatcher discipline consoles active for %d shift(s): %s",
+                len(dispatcher_groups),
+                {name: dict(groups) for name, groups in dispatcher_groups.items()},
+            )
+        shift_pools = _build_shift_pools(name_gen, staffing, dispatcher_groups)
         logger.info(
             "Personnel built for %d shifts: %d calltakers, %d dispatchers",
             len(shift_config.shifts),
@@ -338,7 +442,7 @@ class IncidentGenerator:
         request: GenerationRequest,
         realism: RealismConfig,
         shift_config: ShiftConfig,
-        shift_pools: dict[str, dict[str, list[str]]],
+        shift_pools: dict[str, dict[str, Any]],
         addresses: list,
     ) -> int:
         """Chunk size that keeps one chunk under the memory budget (probe-measured)."""
@@ -419,7 +523,7 @@ class IncidentGenerator:
         request: GenerationRequest,
         realism: RealismConfig,
         shift_config: ShiftConfig,
-        shift_pools: dict[str, dict[str, list[str]]],
+        shift_pools: dict[str, dict[str, Any]],
         addresses: list,
         rng: np.random.Generator,
         n: int | None = None,
@@ -591,7 +695,27 @@ class IncidentGenerator:
                 continue
             pool = shift_pools[shift_spec.name]
             calltakers[mask] = _zipf_choice(rng, pool["calltakers"], count)
-            dispatchers[mask] = _zipf_choice(rng, pool["dispatchers"], count)
+            group_pools = pool.get("dispatchers_by_group")
+            if not group_pools:
+                dispatchers[mask] = _zipf_choice(rng, pool["dispatchers"], count)
+                continue
+            # Discipline consoles: draw from the sub-pool matching each
+            # incident's agency (FIRE/EMS share a console in two-way mode).
+            agency_to_group: dict[str, str] = {}
+            for group in group_pools:
+                for covered_agency in _DISPATCHER_GROUP_AGENCIES[group]:
+                    agency_to_group.setdefault(covered_agency, group)
+            fallback_group = next(iter(group_pools))
+            group_lookup = np.asarray(
+                [agency_to_group.get(key, fallback_group) for key in agency_keys],
+                dtype=object,
+            )
+            shift_rows = np.flatnonzero(mask)
+            row_groups = group_lookup[agency_codes[shift_rows]]
+            for group, names in group_pools.items():
+                selected = shift_rows[row_groups == group]
+                if selected.size:
+                    dispatchers[selected] = _zipf_choice(rng, names, int(selected.size))
 
         reception = _categorical_choice(
             rng,

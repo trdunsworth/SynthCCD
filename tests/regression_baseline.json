@@ -242,12 +242,12 @@
   },
   "meta": {
     "end_date": "2026-12-31",
-    "generated_at": "2026-08-17T18:45:22+00:00",
+    "generated_at": "2026-08-26T01:22:07+00:00",
     "incident_rows": 20000,
-    "package_version": "0.0.0-dev",
+    "package_version": "0.9.5",
     "phone_days": 28,
     "phone_rows": 100000,
-    "realism_config_hash": "4066480bda14981d",
+    "realism_config_hash": "9a5673c24e9cecdc",
     "schema_version": "1.2",
     "seed": 4242,
     "start_date": "2026-01-01"

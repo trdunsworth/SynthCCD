@@ -223,6 +223,47 @@ class TestRealismConfig:
                 seasonal_multipliers={"Test": [1.0, 1.0, 1.0]},
             )
 
+    def test_dispatcher_disciplines_valid(self):
+        from synth911gen3.schema import DispatcherDisciplines
+
+        section = DispatcherDisciplines(mode="two_way", min_dispatchers_for_split=4)
+        config = RealismConfig(
+            agency_weights={"LAW": 1.0},
+            dispatcher_disciplines=section,
+        )
+        assert config.dispatcher_disciplines is not None
+        assert config.dispatcher_disciplines.mode == "two_way"
+        assert config.dispatcher_disciplines.min_dispatchers_for_split == 4
+
+    def test_dispatcher_disciplines_defaults(self):
+        from synth911gen3.schema import DispatcherDisciplines
+
+        section = DispatcherDisciplines()
+        assert section.mode == "auto"
+        assert section.min_dispatchers_for_split == 4
+
+    def test_dispatcher_disciplines_invalid_mode_rejected(self):
+        from synth911gen3.schema import DispatcherDisciplines
+
+        mode: str = "four_way"
+        with pytest.raises(Exception):
+            DispatcherDisciplines(mode=mode)  # type: ignore[arg-type]
+
+    def test_dispatcher_disciplines_invalid_threshold_rejected(self):
+        from synth911gen3.schema import DispatcherDisciplines
+
+        with pytest.raises(Exception):
+            DispatcherDisciplines(min_dispatchers_for_split=0)
+
+    def test_dispatcher_disciplines_unknown_keys_rejected(self):
+        with pytest.raises(Exception):
+            RealismConfig.model_validate(
+                {
+                    "agency_weights": {"LAW": 1.0},
+                    "dispatcher_disciplines": {"mode": "auto", "bogus": 1},
+                }
+            )
+
 
 class TestGenerationRequest:
     def test_defaults(self):

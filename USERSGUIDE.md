@@ -702,6 +702,11 @@ parameter sits.
 Fields are grouped into sections — General, Geography, Personnel, and Configuration Files.
 The status panel and help tab explain each field.
 
+> **Theme.** The TUI ships with two colour schemes built from the
+> [DMA Theme](https://github.com/trdunsworth/DMA_Theme_2) palette:
+> `dma-light` (default, soft white background) and `dma-dark`. Press `t`
+> inside the TUI to switch between them.
+
 | Field | Description |
 |-------|-------------|
 | Rows | Number of incident rows (default: 10000) |
@@ -717,6 +722,8 @@ The status panel and help tab explain each field.
 | Calltaker pool size | Unique calltaker names (default: 12) |
 | Dispatcher pool size | Unique dispatcher names (default: 10) |
 | Shift preset | Shift structure preset (default: 2x12h-4shift-14day) |
+| Dispatcher consoles | How per-shift dispatcher positions split by agency: Auto (by staffing, default), Combined, LAW vs FIRE/EMS, LAW / FIRE / EMS. Applied over the realism config file's values |
+| Console split threshold | Smallest per-shift dispatcher count Auto splits by discipline (default: 4; shifts of 4-7 split LAW vs FIRE/EMS, 8+ split LAW / FIRE / EMS) |
 | Max memory (bytes) | Per-chunk memory budget for CSV/Parquet streaming (blank = 2 GiB default) |
 | Country | ISO 3166-1 alpha-2 code selecting the emergency-number registry (default: US) |
 | Emergency numbers | Comma-separated override of the emergency lines to model (blank uses the country registry, e.g. `999,112`) |
@@ -959,6 +966,14 @@ omit staffing fall back to splitting the global `calltaker_pool_size` /
 overnight shifts, rotation patterns, and per-shift staffing — are defined in the
 realism config's `shift_config` section; see the [Realism Guide](REALISMGUIDE.md).
 
+For medium and large centres, dispatcher positions can be split by agency
+discipline (LAW vs FIRE/EMS, or LAW / FIRE / EMS) once a shift staffs four or
+more dispatchers — three or fewer stay on one combined console — so each
+incident is dispatched from the console matching its
+agency. This is controlled by the realism config's `dispatcher_disciplines`
+section (`mode: auto|combined|two_way|three_way`); calltakers always remain a
+single cross-trained pool. See [Dispatcher Console Disciplines](REALISMGUIDE.md#dispatcher-console-disciplines).
+
 ### Supplying Parameters from a File
 
 All parameters in this section can be supplied at once from a JSON, YAML, or TOML file with `--params`. See [Params Files](#params-files-bundled-options).
@@ -1172,6 +1187,30 @@ uv run SynthCCD generate --params run.toml
 ```
 
 Three ready-made examples are included in the repo: `config/example_params.json`, `config/example_params.yaml`, and `config/example_params.toml`.
+
+### Bundled Samples (`config/samples/`)
+
+Scenario-driven samples that demonstrate how to build a params file for different
+centre sizes. Each loads through the same `--params` pipeline and is covered by
+`tests/test_samples.py`, so they always stay in sync with the CLI schema.
+
+| Sample | Scenario | Demonstrates |
+|--------|----------|--------------|
+| `small_centre.json` | Rural combined-console PSAP (Manhattan, KS) | Minimal JSON params; modest pools (5 dispatchers over four shifts stays on one combined console) |
+| `midsize_centre.yaml` | Alexandria, VA-style mid-size centre | Referencing a realism YAML via `config:`; per-shift staffing of 4 calltakers + 4 dispatchers split into LAW vs FIRE/EMS consoles |
+| `large_centre.toml` | Metro centre (Phoenix, AZ) | SQLite output, `population`-based phone volume, 1 GiB chunk budget, 10 dispatchers/shift → LAW / FIRE / EMS consoles |
+| `realism_disciplines.yaml` | Companion realism file | A minimal realism override: `shift_config` + `dispatcher_disciplines` (untouched sections fall back to defaults) |
+
+```bash
+# Preview what a sample does without generating or fetching addresses
+uv run SynthCCD generate --params config/samples/midsize_centre.yaml --dry-run
+
+# Run one for real
+uv run SynthCCD generate --params config/samples/large_centre.toml
+```
+
+> Paths inside samples (such as the realism file reference) are resolved relative to
+> the working directory — run from the repository root as shown.
 
 ### Capturing Parameters with `--save-params`
 
@@ -1528,8 +1567,8 @@ uv run SynthCCD generate --rows 5000000 --format parquet --max-memory-bytes 1073
 | `time_last_unit_cleared` | datetime | Last unit cleared scene |
 | `time_call_closed` | datetime | Incident closed in CAD |
 | `time_phone_disconnect` | datetime | Caller disconnected |
-| `calltaker` | str | Calltaker name |
-| `dispatcher` | str | Dispatcher name |
+| `calltaker` | str | Calltaker name (drawn from the shift's cross-trained calltaker pool) |
+| `dispatcher` | str | Dispatcher name (drawn from the shift's console pool matching the incident's agency when `dispatcher_disciplines` splits consoles) |
 | `method_of_call_reception` | str | E-911, Phone, OFFICER, Radio, C2C, NOT CAPTURED, Text, CAD2CAD |
 | `call_disposition` | str | Code+label pair, e.g., NR-No Report, RE-Report, CI-Citation, UNDEFINED |
 | `pickup_delay_seconds` | int | Ring-to-answer time |

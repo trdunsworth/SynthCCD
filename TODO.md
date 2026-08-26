@@ -249,6 +249,46 @@ recommendation docs in `docs/`, and direct code review.
       (some staff handle more calls than others); per-shift staffing comes from
       `shift_config`, falling back to a split of the global pool totals when a shift omits
       it (recommendation #4, #14).
+- [x] **Agency-disciplined dispatcher consoles for medium/large centres.** Real centres
+      staff dispatch positions by discipline: e.g. Alexandria, VA runs 4 dispatchers per
+      shift as 2 LAW + 2 FIRE/EMS. Once a shift's dispatcher count is greater than four,
+      the dispatcher pool must break down by discipline — LAW / FIRE / EMS (three-way)
+      or LAW vs FIRE/EMS (two-way); smaller centres keep one combined console pool.
+      Each incident row must draw its `dispatcher` from the sub-pool matching the row's
+      agency, and calltakers stay a single cross-trained pool. Single-agency PSAPs
+      (`psap_agency` filter) remain combined regardless of count. Configurable via a new
+      `dispatcher_disciplines` realism-YAML section (`mode`: auto/combined/two_way/
+      three_way; `min_dispatchers_for_split`).
+      **Done:** Added `dispatcher_disciplines` to `RealismConfig`/YAML/pydantic schema.
+      `auto` mode keeps shifts below the threshold (default 4, i.e. three or fewer)
+      combined, splits 4-7 positions into LAW vs FIRE/EMS consoles and 8+ into
+      LAW / FIRE / EMS
+      (`_discipline_counts`/`_resolve_dispatcher_groups` in `incidents.py`); explicit
+      modes split at any staffing level. Rosters are partitioned deterministically
+      (remainder to LAW first) and per-row dispatcher draws are restricted to the
+      console matching the row's agency. Inactive agencies get no consoles; single-
+      agency PSAPs always stay combined. Defaults keep output byte-identical (regression
+      baseline refreshed for the new config-hash input only). Covered by unit +
+      end-to-end + YAML round-trip + pydantic tests; documented in REALISMGUIDE.md,
+      USERSGUIDE.md, CHANGELOG.md.
+- [x] **P2 — Expose dispatcher-console disciplines in the TUI.** The Personnel section
+      gains a "Dispatcher consoles" select (auto/combined/two_way/three_way) and a
+      "Console split threshold" input (default 4). Form values are applied over the
+      realism config file's values; an invalid/unreadable config now fails at form
+      validation with the field highlighted rather than mid-generation.
+- [x] **P2 — Apply the DMA theme to the TUI.** Registered two Textual themes from the
+      DMA Theme palette (https://github.com/trdunsworth/DMA_Theme_2): `dma-light`
+      (default) and `dma-dark`, with AA-compliant semantic status stops per the theme's
+      contrast documentation. `t` toggles between them; verified via exported SVG
+      screenshots showing the correct background/surface/primary tokens.
+- [x] **P2 — Bundle scenario-driven CLI samples.** Added `config/samples/` with three
+      params personas (`small_centre.json`, `midsize_centre.yaml`, `large_centre.toml`)
+      plus a companion realism YAML (`realism_disciplines.yaml`) demonstrating console
+      disciplines. Chosen over `docsrc/` because samples are repo artifacts users run
+      in place, not Sphinx inputs; `docs/` remains read-only. Every sample round-trips
+      through `load_params_file`/`build_request_from_params` in `tests/test_samples.py`
+      and was verified end-to-end via `--dry-run` and a `--save-params` round-trip.
+      Documented in USERSGUIDE.md under Params Files → Bundled Samples.
 
 ---
 

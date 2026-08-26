@@ -394,3 +394,101 @@ def test_application_reports_incident_progress() -> None:
     assert updates
     assert {dataset for dataset, _, _ in updates} == {"incidents"}
     assert updates[-1][1:] == (60, 60)
+
+
+def test_tui_composes_dispatcher_discipline_fields() -> None:
+    async def scenario() -> None:
+        app = Synth911Tui()
+        async with app.run_test():
+            assert app.query_one("#dispatcher_mode", Select).value == "auto"
+            assert app.query_one("#console_split_threshold", Input).value == "4"
+
+    _run(scenario())
+
+
+def test_tui_build_request_disciplines_default_has_no_realism_config() -> None:
+    async def scenario() -> None:
+        app = Synth911Tui()
+        async with app.run_test():
+            request = app._build_request()
+            assert request.realism_config is None
+            assert request.realism_config_path is None
+
+    _run(scenario())
+
+
+def test_tui_build_request_disciplines_custom_values() -> None:
+    async def scenario() -> None:
+        app = Synth911Tui()
+        async with app.run_test():
+            app.query_one("#dispatcher_mode", Select).value = "two_way"
+            app.query_one("#console_split_threshold", Input).value = "6"
+            request = app._build_request()
+            assert request.realism_config is not None
+            assert request.realism_config.dispatcher_disciplines == {
+                "mode": "two_way",
+                "min_dispatchers_for_split": 6,
+            }
+
+    _run(scenario())
+
+
+def test_tui_build_request_disciplines_apply_over_config_file(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        config_path = tmp_path / "realism.yaml"
+        config_path.write_text("agency_names:\n  LAW: POLICE\n  FIRE: FIRE\n  EMS: EMS\n")
+        app = Synth911Tui()
+        async with app.run_test():
+            app.query_one("#config", Input).value = str(config_path)
+            request = app._build_request()
+            # The YAML values load, and the form's discipline fields apply
+            # over the file (defaults here: auto / 4).
+            assert request.realism_config is not None
+            assert request.realism_config.agency_names["LAW"] == "POLICE"
+            assert request.realism_config.dispatcher_disciplines == {
+                "mode": "auto",
+                "min_dispatchers_for_split": 4,
+            }
+
+    _run(scenario())
+
+
+def test_tui_build_request_invalid_config_marks_field(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        config_path = tmp_path / "bad.yaml"
+        config_path.write_text("agency_weights:\n  LAW: 0.5\n")
+        app = Synth911Tui()
+        async with app.run_test():
+            app.query_one("#config", Input).value = str(config_path)
+            with pytest.raises(FieldValidationError) as excinfo:
+                app._build_request()
+            assert "config" in excinfo.value.fields
+
+    _run(scenario())
+
+
+def test_tui_build_request_invalid_threshold_reports() -> None:
+    async def scenario() -> None:
+        app = Synth911Tui()
+        async with app.run_test():
+            app.query_one("#console_split_threshold", Input).value = "0"
+            with pytest.raises(FieldValidationError) as excinfo:
+                app._build_request()
+            assert "console_split_threshold" in excinfo.value.fields
+
+    _run(scenario())
+
+
+def test_tui_registers_dma_themes_and_toggles() -> None:
+    async def scenario() -> None:
+        app = Synth911Tui()
+        async with app.run_test():
+            registered = {theme.name for theme in app.available_themes.values()}
+            assert {"dma-light", "dma-dark"} <= registered
+            assert app.theme == "dma-light"
+            app.action_toggle_theme()
+            assert app.theme == "dma-dark"
+            app.action_toggle_theme()
+            assert app.theme == "dma-light"
+
+    _run(scenario())

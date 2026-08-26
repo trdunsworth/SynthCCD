@@ -77,6 +77,20 @@ PSAP_AGENCY_FILTERS: dict[str, frozenset[str]] = {
     "fire_ems": frozenset({"FIRE", "EMS"}),
 }
 
+# Dispatcher console disciplines. Medium/large centres staff dispatch
+# positions by agency discipline (e.g. Alexandria, VA runs 4 dispatchers
+# per shift as 2 LAW + 2 FIRE/EMS), while small centres run one combined
+# console where every dispatcher covers all agencies. ``mode`` selects the
+# breakdown (auto/combined/two_way/three_way); with ``auto``, shifts
+# staffing at least ``min_dispatchers_for_split`` positions split by
+# discipline — 4-7 position shifts into LAW vs FIRE/EMS consoles and
+# shifts of 8+ into LAW / FIRE / EMS — while smaller shifts, or shifts
+# serving a single active agency, stay combined.
+DISPATCHER_DISCIPLINES: dict[str, object] = {
+    "mode": "auto",
+    "min_dispatchers_for_split": 4,
+}
+
 PRIORITY_WEIGHTS = {
     "LAW": {1: 0.12, 2: 0.18, 3: 0.28, 4: 0.26, 5: 0.16},
     "FIRE": {1: 0.18, 2: 0.24, 3: 0.24, 4: 0.20, 5: 0.14},

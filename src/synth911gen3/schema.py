@@ -13,7 +13,7 @@ from __future__ import annotations
 from datetime import date
 from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -200,6 +200,22 @@ class Shift(BaseModel):
     dispatchers: int | None = Field(default=None, ge=1)
 
 
+class DispatcherDisciplines(BaseModel):
+    """Dispatcher console-discipline breakdown for medium/large centres.
+
+    ``mode`` selects how per-shift dispatcher pools split by agency
+    discipline: ``combined`` keeps one console pool, ``two_way`` splits LAW
+    vs FIRE/EMS, ``three_way`` splits LAW / FIRE / EMS, and ``auto`` picks
+    combined below ``min_dispatchers_for_split`` positions (or with a single
+    active agency), two-way at 4-7, and three-way at 8+.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    mode: Literal["auto", "combined", "two_way", "three_way"] = "auto"
+    min_dispatchers_for_split: int = Field(default=4, ge=1)
+
+
 class RealismConfig(BaseModel):
     """Validated realism YAML overrides embedded in a GenerationRequest."""
 
@@ -217,6 +233,7 @@ class RealismConfig(BaseModel):
     agency_names: dict[str, str] = Field(default_factory=dict)
     shift_config: ShiftConfig | None = None
     seasonal_multipliers: dict[str, list[float]] = Field(default_factory=dict)
+    dispatcher_disciplines: DispatcherDisciplines | None = None
 
     @model_validator(mode="after")
     def validate_weights(self) -> RealismConfig:

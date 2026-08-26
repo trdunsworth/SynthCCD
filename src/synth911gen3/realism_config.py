@@ -29,6 +29,9 @@ from .constants import (
     DISPATCH_INIT_FRACTION as DEFAULT_DISPATCH_INIT_FRACTION,
 )
 from .constants import (
+    DISPATCHER_DISCIPLINES as DEFAULT_DISPATCHER_DISCIPLINES,
+)
+from .constants import (
     DISPOSITION_PROFILES as DEFAULT_DISPOSITION_PROFILES,
 )
 from .constants import (
@@ -78,6 +81,7 @@ class RealismConfig:
     name_locales: dict[str, list[tuple[str, float]]] = field(default_factory=dict)
     zone_travel_multipliers: dict[str, float] = field(default_factory=dict)
     problem_phone_multipliers: dict[str, float] = field(default_factory=dict)
+    dispatcher_disciplines: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Fill any empty section with its constants-module default."""
@@ -114,6 +118,10 @@ class RealismConfig:
             self.zone_travel_multipliers = DEFAULT_ZONE_TRAVEL_MULTIPLIERS.copy()
         if not self.problem_phone_multipliers:
             self.problem_phone_multipliers = DEFAULT_PROBLEM_PHONE_MULTIPLIERS.copy()
+        if not self.dispatcher_disciplines:
+            self.dispatcher_disciplines = {
+                k: v for k, v in DEFAULT_DISPATCHER_DISCIPLINES.items()
+            }
         if not self.shift_config.shifts and not self.shift_config.rotation:
             self.shift_config = get_default_shift_config()
 
@@ -216,6 +224,14 @@ class RealismConfig:
         if "problem_phone_multipliers" in data:
             config.problem_phone_multipliers = {
                 str(k): float(v) for k, v in data["problem_phone_multipliers"].items()
+            }
+
+        if "dispatcher_disciplines" in data:
+            section = data["dispatcher_disciplines"]
+            if not isinstance(section, dict):
+                raise ValidationError("dispatcher_disciplines must be a mapping")
+            config.dispatcher_disciplines = {
+                str(k): v for k, v in section.items()
             }
 
         config._validate()
@@ -363,6 +379,27 @@ class RealismConfig:
 
         self.shift_config.validate()
 
+        allowed_discipline_keys = {"mode", "min_dispatchers_for_split"}
+        unknown_discipline_keys = set(self.dispatcher_disciplines) - allowed_discipline_keys
+        if unknown_discipline_keys:
+            raise ValidationError(
+                "dispatcher_disciplines has unknown key(s): "
+                f"{', '.join(sorted(unknown_discipline_keys))}"
+            )
+        discipline_mode = str(self.dispatcher_disciplines.get("mode", "auto"))
+        if discipline_mode not in {"auto", "combined", "two_way", "three_way"}:
+            raise ValidationError(
+                "dispatcher_disciplines.mode must be one of "
+                f"auto/combined/two_way/three_way, got {discipline_mode!r}"
+            )
+        split_threshold = self.dispatcher_disciplines.get("min_dispatchers_for_split", 4)
+        if isinstance(split_threshold, bool) or not isinstance(split_threshold, (int, float)):
+            raise ValidationError("dispatcher_disciplines.min_dispatchers_for_split must be an integer")
+        if int(split_threshold) < 1:
+            raise ValidationError(
+                "dispatcher_disciplines.min_dispatchers_for_split must be at least 1"
+            )
+
     def to_yaml(self, path: Path) -> None:
         """Serialize the full merged config to YAML (round-trips through from_yaml)."""
         data = {
@@ -389,6 +426,12 @@ class RealismConfig:
             "seasonal_multipliers": self.seasonal_multipliers,
             "zone_travel_multipliers": self.zone_travel_multipliers,
             "problem_phone_multipliers": self.problem_phone_multipliers,
+            "dispatcher_disciplines": {
+                "mode": str(self.dispatcher_disciplines.get("mode", "auto")),
+                "min_dispatchers_for_split": int(
+                    self.dispatcher_disciplines.get("min_dispatchers_for_split", 4)
+                ),
+            },
             "name_locales": self._name_locales_for_yaml(),
         }
         with path.open("w", encoding="utf-8") as f:

@@ -1,0 +1,15 @@
+{
+  "rows": 5000,
+  "area": "Manhattan, KS",
+  "format": "csv",
+  "dataset": "incidents",
+  "id_format": "integer",
+  "seed": 7,
+  "start_date": "2025-01-01",
+  "end_date": "2025-06-30",
+  "calltaker_pool_size": 6,
+  "dispatcher_pool_size": 5,
+  "psap_agency": "all",
+  "output_dir": "output",
+  "output_stem": "manhattan_ks_911"
+}

@@ -222,6 +222,15 @@ shift_config:
       rotation: 2
       calltakers: 3
       dispatchers: 2
+
+# Dispatcher console disciplines: how per-shift dispatcher pools split by
+# agency discipline in medium/large centres. auto keeps shifts of 3 or
+# fewer on one combined console and splits 4-7 positions into LAW vs
+# FIRE/EMS, 8+ into LAW / FIRE / EMS. See "Dispatcher Console Disciplines"
+# below.
+dispatcher_disciplines:
+  mode: auto
+  min_dispatchers_for_split: 4
 ```
 
 ### Customizable Parameters
@@ -239,6 +248,7 @@ shift_config:
 | `phone_metrics` | Volume fractions, abandonment rates, weekend multiplier, and answer-time distributions for hourly call counts | All required keys; max_abandonment_rate in [0, 1] |
 | `hourly_weights` | 24-hour call volume pattern | 24 values, auto-normalized |
 | `shift_config` | Crew rotation pattern and per-shift hours/rotation/staffing | Unique shift names, every rotation group covers all 24 hours |
+| `dispatcher_disciplines` | Agency-discipline breakdown of per-shift dispatcher consoles (LAW / FIRE / EMS) | `mode` in auto/combined/two_way/three_way; `min_dispatchers_for_split` >= 1 |
 | `name_locales` | Faker locale blend for personnel rosters, per country | Valid Faker locales, positive weights, uppercase ISO country keys |
 | `problem_phone_multipliers` | Per-problem-type phone duration multipliers | Positive floats; unlisted problems default to 1.0 |
 
@@ -364,6 +374,66 @@ shift_config:
       rotation: 1
       calltakers: 3
       dispatchers: 2
+```
+
+### Dispatcher Console Disciplines
+
+Real centres staff dispatch positions by agency discipline: a mid-size centre
+such as Alexandria, VA runs four dispatchers per shift as two LAW consoles plus
+two FIRE/EMS consoles, while larger centres split FIRE and EMS onto separate
+channels. Small centres run one combined console where every dispatcher covers
+all agencies. The `dispatcher_disciplines` section models this.
+
+```yaml
+dispatcher_disciplines:
+  mode: auto                  # auto | combined | two_way | three_way
+  min_dispatchers_for_split: 4
+```
+
+| Key | Description |
+|-----|-------------|
+| `mode` | `combined` keeps one console pool per shift; `two_way` splits LAW vs FIRE/EMS (FIRE and EMS share a console); `three_way` splits LAW / FIRE / EMS; `auto` (default) decides per shift from its staffing level |
+| `min_dispatchers_for_split` | Shifts staffing fewer than this many dispatchers stay combined under `auto` (default `4`, i.e. shifts of four or more split and three or fewer stay combined) |
+
+**Auto-mode resolution.** With more than one active agency, a shift of 4-7
+dispatchers splits into LAW vs FIRE/EMS consoles and a shift of 8 or more
+splits into LAW / FIRE / EMS. Positions are distributed as evenly as possible,
+with any remainder going to LAW first. Groups whose agencies are inactive get
+no positions — a fire/EMS-only PSAP (`psap_agency: fire_ems`) never receives a
+LAW console, and single-agency PSAPs always keep one combined console
+regardless of position count. Explicit `two_way`/`three_way` modes ignore the
+threshold and split at any staffing level.
+
+Each incident's `dispatcher` is drawn (Zipf-weighted, per shift) only from the
+console matching the incident's agency, so a LAW incident is never dispatched
+by a FIRE-position dispatcher within the same shift. Calltakers remain a
+single cross-trained pool on every shift. Default staffing (2 dispatchers per
+shift) stays combined, so default-config output is unchanged.
+
+```yaml
+# Example: Alexandria-style centre — 4 dispatchers per shift, 2 LAW + 2 FIRE/EMS
+shift_config:
+  name: "alexandria"
+  cycle_start_weekday: 0
+  rotation: [1]
+  shifts:
+    - name: A
+      label: DAY
+      start_hour: 6
+      end_hour: 18
+      rotation: 1
+      calltakers: 4
+      dispatchers: 4
+    - name: B
+      label: NIGHT
+      start_hour: 18
+      end_hour: 6
+      rotation: 1
+      calltakers: 4
+      dispatchers: 4
+dispatcher_disciplines:
+  mode: three_way   # separate FIRE and EMS consoles; default auto gives this
+                    # 4-position shift two LAW + two FIRE/EMS consoles instead
 ```
 
 ### Personnel Name Locales
@@ -549,6 +619,9 @@ The default shift structure is **2x12h-4shift-14day**: shifts A/B on day
 night and group 2 = B day + D night. Each shift is staffed with 3 calltakers
 and 2 dispatchers. This same structure is used when no `--shift-preset` or
 `shift_config` is supplied. See [Shift Structures](#shift-structures) above.
+At the default staffing every shift stays on one combined dispatcher console;
+see [Dispatcher Console Disciplines](#dispatcher-console-disciplines) for how
+larger per-shift staffing levels split consoles by agency.
 
 ### Priority Weights (by Agency)
 
@@ -1117,6 +1190,7 @@ Before deploying a custom config:
 - [ ] `seasonal_multipliers` entries have exactly 4 values
 - [ ] `name_locales` uses valid Faker locales with positive weights and uppercase ISO country keys
 - [ ] `shift_config` validates (unique names, 24hr coverage)
+- [ ] `dispatcher_disciplines` uses a valid mode (auto/combined/two_way/three_way) and `min_dispatchers_for_split` >= 1
 - [ ] Test generation completes without errors
 - [ ] Output statistics match real data within tolerances
 - [ ] Config committed to version control

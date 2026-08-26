@@ -4,6 +4,11 @@ A forms-based interface with Parameters and Help tabs. Field values are
 parsed into a :class:`~synth911gen3.config.GenerationRequest`; generation
 runs on a background worker with a progress bar and status panel. Launch
 with ``SynthCCD tui``.
+
+The UI ships with two registered themes built from the DMA Theme palette
+(blues, teals, and greens with warm error/warning colors;
+https://github.com/trdunsworth/DMA_Theme_2): ``dma-light`` (default) and
+``dma-dark``. Press ``t`` to switch between them.
 """
 
 from __future__ import annotations
@@ -14,8 +19,10 @@ from pathlib import Path
 from typing import TypeVar
 
 import typer
+import yaml
 from textual.app import App, ComposeResult
 from textual.containers import Grid, Horizontal, Vertical, VerticalScroll
+from textual.theme import Theme
 from textual.widgets import (
     Button,
     Footer,
@@ -38,13 +45,51 @@ from .constants import (
     DEFAULT_MAX_MEMORY_BYTES,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_OUTPUT_STEM,
+    DISPATCHER_DISCIPLINES,
 )
 from .domain import GenerationResult
 from .emergency_numbers import SUPPORTED_COUNTRIES
 from .exceptions import AddressLookupError, ExportError, ValidationError
 from .params import build_request_from_params, load_params_file
+from .realism_config import RealismConfig
 from .shifts import DEFAULT_SHIFT_PRESET, SHIFT_PRESETS
 from .tls import maybe_inject_system_trust
+
+# ---------------------------------------------------------------------------
+# DMA Theme (https://github.com/trdunsworth/DMA_Theme_2)
+# ---------------------------------------------------------------------------
+
+_DMA_LIGHT = Theme(
+    name="dma-light",
+    primary="#00529E",  # blue 700
+    secondary="#007F7F",  # teal 700
+    accent="#008A8A",  # turquoise 700
+    foreground="#1A2A35",  # near-black text
+    background="#F8FAFC",  # soft white
+    surface="#FFFFFF",  # elevated surfaces
+    panel="#F0F4F8",  # alt background
+    boost="#A8C0D8",  # border tone
+    success="#007F2A",  # green 700 (AA text on light)
+    warning="#9E5E00",  # warning 800 (documented AA text stop on light)
+    error="#C40000",  # error 700
+    dark=False,
+)
+
+_DMA_DARK = Theme(
+    name="dma-dark",
+    primary="#1A91E6",  # blue 400
+    secondary="#1ACECE",  # turquoise 400
+    accent="#4DDDDD",  # turquoise 300
+    foreground="#E0E8EF",
+    background="#0A0F14",
+    surface="#182430",
+    panel="#101820",
+    boost="#2D4058",
+    success="#33CC5A",  # green 400
+    warning="#FFAD33",  # warning 400
+    error="#FF4D4D",  # error 400
+    dark=True,
+)
 
 
 class FieldValidationError(ValueError):
@@ -118,6 +163,14 @@ _HELP_TEXT = (
     "  End date           Inclusive end date, YYYY-MM-DD (optional).\n"
     "  Calltaker pool     Unique calltaker name count (default: 12).\n"
     "  Dispatcher pool    Unique dispatcher name count (default: 10).\n"
+    "  Dispatcher consoles How per-shift dispatcher positions split by agency:\n"
+    "                     Auto (default), Combined, LAW vs FIRE/EMS,\n"
+    "                     or LAW / FIRE / EMS. Applied over the realism\n"
+    "                     config file's values.\n"
+    "  Console threshold  Smallest per-shift dispatcher count that Auto splits\n"
+    "                     by discipline (default: 4; 3 or fewer stay combined).\n"
+    "                     Shifts of 4-7 split LAW vs FIRE/EMS; 8+ split\n"
+    "                     LAW / FIRE / EMS.\n"
     "  Shift preset       Shift structure: 2x12h-4shift-14day (default),\n"
     "                     2x12h-2shift, 3x8h-3shift, or 4x10h-4shift.\n"
     "  Max memory         Per-chunk memory budget in bytes for CSV/Parquet\n"
@@ -132,6 +185,7 @@ _HELP_TEXT = (
     "  g                  Generate data\n"
     "  p                  Load params file into the fields\n"
     "  r                  Reset fields to defaults\n"
+    "  t                  Toggle DMA light/dark theme\n"
     "  q                  Quit\n"
 )
 
@@ -247,13 +301,21 @@ class Synth911Tui(App[None]):
         ("g", "generate", "Generate"),
         ("p", "load_params", "Load Params"),
         ("r", "reset", "Reset"),
+        ("t", "toggle_theme", "Theme"),
         ("q", "quit", "Quit"),
     ]
 
     def __init__(self) -> None:
-        """Initialize the app with no active worker."""
+        """Initialize the app with the DMA themes and no active worker."""
         super().__init__()
         self._worker: Worker[None] | None = None
+        self.register_theme(_DMA_LIGHT)
+        self.register_theme(_DMA_DARK)
+        self.theme = "dma-light"
+
+    def action_toggle_theme(self) -> None:
+        """Binding ``t``: switch between the DMA light and dark themes."""
+        self.theme = "dma-dark" if self.theme == "dma-light" else "dma-light"
 
     def compose(self) -> ComposeResult:
         """Lay out the parameter form, help tab, and output area."""
@@ -411,6 +473,28 @@ class Synth911Tui(App[None]):
                                         id="shift_preset",
                                     ),
                                 )
+                                yield _field(
+                                    "Dispatcher consoles",
+                                    "dispatcher_mode",
+                                    Select(
+                                        [
+                                            ("Auto (by staffing)", "auto"),
+                                            ("Combined", "combined"),
+                                            ("LAW vs FIRE/EMS", "two_way"),
+                                            ("LAW / FIRE / EMS", "three_way"),
+                                        ],
+                                        value=str(DISPATCHER_DISCIPLINES["mode"]),
+                                        id="dispatcher_mode",
+                                    ),
+                                )
+                                yield _field(
+                                    "Console split threshold",
+                                    "console_split_threshold",
+                                    Input(
+                                        str(DISPATCHER_DISCIPLINES["min_dispatchers_for_split"]),
+                                        id="console_split_threshold",
+                                    ),
+                                )
                             yield _section_title("Configuration Files")
                             with Grid(classes="fields"):
                                 yield _field(
@@ -500,6 +584,20 @@ class Synth911Tui(App[None]):
         self.query_one("#calltaker_pool_size", Input).value = str(request.calltaker_pool_size)
         self.query_one("#dispatcher_pool_size", Input).value = str(request.dispatcher_pool_size)
         self.query_one("#shift_preset", Select).value = request.shift_preset or DEFAULT_SHIFT_PRESET
+        disciplines = (
+            request.realism_config.dispatcher_disciplines
+            if request.realism_config is not None
+            else dict(DISPATCHER_DISCIPLINES)
+        )
+        self.query_one("#dispatcher_mode", Select).value = str(
+            disciplines.get("mode", DISPATCHER_DISCIPLINES["mode"])
+        )
+        self.query_one("#console_split_threshold", Input).value = str(
+            disciplines.get(
+                "min_dispatchers_for_split",
+                DISPATCHER_DISCIPLINES["min_dispatchers_for_split"],
+            )
+        )
         self.query_one("#max_memory_bytes", Input).value = (
             str(request.max_memory_bytes) if request.max_memory_bytes is not None else ""
         )
@@ -596,6 +694,40 @@ class Synth911Tui(App[None]):
             "end_date",
             lambda: _parse_date_field(self.query_one("#end_date", Input).value, "end_date"),
         )
+        console_threshold = parse(
+            "console_split_threshold",
+            lambda: _parse_int(
+                self.query_one("#console_split_threshold", Input).value,
+                "console_split_threshold",
+                min_value=1,
+            ),
+        )
+
+        dispatcher_mode = str(self.query_one("#dispatcher_mode", Select).value)
+        config_raw = self.query_one("#config", Input).value.strip()
+
+        # Dispatcher-console disciplines live in the realism config. Load the
+        # YAML (when given) and apply the form's mode/threshold over it, so
+        # the TUI fields always describe the effective behavior.
+        realism_config: RealismConfig | None = None
+        raw_threshold = DISPATCHER_DISCIPLINES["min_dispatchers_for_split"]
+        default_threshold = raw_threshold if isinstance(raw_threshold, int) else 4
+        needs_realism_config = bool(config_raw) or (
+            dispatcher_mode != str(DISPATCHER_DISCIPLINES["mode"])
+            or (console_threshold is not None and console_threshold != default_threshold)
+        )
+        if needs_realism_config:
+            try:
+                realism_config = (
+                    RealismConfig.from_yaml(Path(config_raw)) if config_raw else RealismConfig()
+                )
+            except (ValidationError, OSError, yaml.YAMLError) as exc:
+                errors["config"] = f"Realism config: {exc}"
+            else:
+                realism_config.dispatcher_disciplines = {
+                    "mode": dispatcher_mode,
+                    "min_dispatchers_for_split": console_threshold or default_threshold,
+                }
 
         if errors:
             raise FieldValidationError("; ".join(errors.values()), list(errors))
@@ -637,6 +769,7 @@ class Synth911Tui(App[None]):
             dispatcher_pool_size=dispatcher_pool_size,
             shift_preset=shift_preset,
             realism_config_path=realism_config_path,
+            realism_config=realism_config,
             max_memory_bytes=max_memory_bytes,
             population=population,
             psap_agency=psap_agency,

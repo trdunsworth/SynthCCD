@@ -476,3 +476,70 @@ class TestNameLocalesConfig:
         path = tmp_path / "out.yaml"
         config.to_yaml(path)
         assert "name_locales:" in path.read_text()
+
+
+class TestDispatcherDisciplinesConfig:
+    """Tests for the dispatcher_disciplines realism section."""
+
+    def test_default_section_populated(self) -> None:
+        config = RealismConfig()
+        assert config.dispatcher_disciplines == {
+            "mode": "auto",
+            "min_dispatchers_for_split": 4,
+        }
+
+    def test_yaml_override_parses(self, tmp_path: Path) -> None:
+        path = tmp_path / "config.yaml"
+        path.write_text(
+            "dispatcher_disciplines:\n"
+            "  mode: three_way\n"
+            "  min_dispatchers_for_split: 4\n"
+        )
+        loaded = RealismConfig.from_yaml(path)
+        assert loaded.dispatcher_disciplines["mode"] == "three_way"
+        assert loaded.dispatcher_disciplines["min_dispatchers_for_split"] == 4
+
+    def test_yaml_rejects_unknown_mode(self, tmp_path: Path) -> None:
+        path = tmp_path / "bad.yaml"
+        path.write_text("dispatcher_disciplines:\n  mode: four_way\n")
+        with pytest.raises(ValidationError, match="mode must be one of"):
+            RealismConfig.from_yaml(path)
+
+    def test_yaml_rejects_unknown_key(self, tmp_path: Path) -> None:
+        path = tmp_path / "bad.yaml"
+        path.write_text("dispatcher_disciplines:\n  allocation:\n    law: 2\n")
+        with pytest.raises(ValidationError, match="unknown key"):
+            RealismConfig.from_yaml(path)
+
+    def test_yaml_rejects_non_positive_threshold(self, tmp_path: Path) -> None:
+        path = tmp_path / "bad.yaml"
+        path.write_text("dispatcher_disciplines:\n  min_dispatchers_for_split: 0\n")
+        with pytest.raises(ValidationError, match="at least 1"):
+            RealismConfig.from_yaml(path)
+
+    def test_yaml_rejects_non_mapping_section(self, tmp_path: Path) -> None:
+        path = tmp_path / "bad.yaml"
+        path.write_text("dispatcher_disciplines:\n  - auto\n")
+        with pytest.raises(ValidationError, match="must be a mapping"):
+            RealismConfig.from_yaml(path)
+
+    def test_roundtrip_preserves_values(self, tmp_path: Path) -> None:
+        config = RealismConfig()
+        config.dispatcher_disciplines = {
+            "mode": "two_way",
+            "min_dispatchers_for_split": 6,
+        }
+        path = tmp_path / "out.yaml"
+        config.to_yaml(path)
+        loaded = RealismConfig.from_yaml(path)
+        assert loaded.dispatcher_disciplines == {
+            "mode": "two_way",
+            "min_dispatchers_for_split": 6,
+        }
+
+    def test_to_yaml_emits_section(self, tmp_path: Path) -> None:
+        path = tmp_path / "out.yaml"
+        RealismConfig().to_yaml(path)
+        text = path.read_text()
+        assert "dispatcher_disciplines:" in text
+        assert "mode: auto" in text

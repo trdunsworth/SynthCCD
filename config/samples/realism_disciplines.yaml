@@ -1,0 +1,46 @@
+# Realism configuration sample — dispatcher console disciplines.
+#
+# Referenced by config/samples/midsize_centre.yaml via its `config` key.
+# Apply a realism file with:
+#   uv run SynthCCD generate --config config/samples/realism_disciplines.yaml
+#
+# A realism file overrides only the sections it contains; everything else
+# falls back to the built-in defaults (see REALISMGUIDE.md for the full
+# schema and validation rules). This file demonstrates exactly two sections:
+#
+#   shift_config            — an Alexandria-style 2x12h structure with
+#                             4 calltakers and 4 dispatchers per shift
+#   dispatcher_disciplines  — split each shift's dispatchers into LAW vs
+#                             FIRE/EMS consoles. With 4 positions per shift
+#                             and the threshold at 4, each shift staffs
+#                             2 LAW + 2 FIRE/EMS consoles; incidents draw
+#                             their `dispatcher` from the console matching
+#                             their agency. Use mode "three_way" for
+#                             separate LAW / FIRE / EMS consoles, or
+#                             "auto" to let staffing decide (4-7 -> two-way,
+#                             8+ -> three-way, below the threshold -> one
+#                             combined console).
+
+shift_config:
+  name: "alexandria-2x12h"
+  cycle_start_weekday: 0
+  rotation: [1]
+  shifts:
+    - name: A
+      label: DAY
+      start_hour: 6
+      end_hour: 18
+      rotation: 1
+      calltakers: 4
+      dispatchers: 4
+    - name: B
+      label: NIGHT
+      start_hour: 18
+      end_hour: 6
+      rotation: 1
+      calltakers: 4
+      dispatchers: 4
+
+dispatcher_disciplines:
+  mode: two_way
+  min_dispatchers_for_split: 4

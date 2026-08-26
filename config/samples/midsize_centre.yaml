@@ -1,0 +1,30 @@
+# Mid-size centre sample — Alexandria, VA style (SynthCCD params file)
+#
+# Usage:
+#   uv run SynthCCD generate --params config/samples/midsize_centre.yaml
+#
+# A mid-size centre staffs dispatch positions by agency discipline. The
+# companion realism file below defines 4 calltakers + 4 dispatchers per
+# shift and splits each shift's consoles into LAW vs FIRE/EMS, so LAW
+# incidents are dispatched by a LAW-position dispatcher and FIRE/EMS
+# incidents share the second console.
+#
+# Keys may use CLI option names (area, format, config) or canonical
+# GenerationRequest field names; CLI flags override file values.
+# Note: with explicit per-shift staffing in the realism file (dispatchers: 4),
+# the dispatcher_pool_size here only feeds shifts that omit staffing.
+
+rows: 40000
+area: "Alexandria, VA"
+format: parquet
+dataset: incidents
+id_format: integer
+seed: 2025
+start_date: "2025-01-01"
+end_date: "2025-03-31"
+calltaker_pool_size: 16
+dispatcher_pool_size: 16
+psap_agency: all
+config: "config/samples/realism_disciplines.yaml"
+output_dir: "output"
+output_stem: "alexandria_va_911"

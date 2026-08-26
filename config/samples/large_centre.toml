@@ -1,0 +1,40 @@
+# SynthCCD params file — large metro centre sample.
+#
+# Usage (from the repository root):
+#   uv run SynthCCD generate --params config/samples/large_centre.toml
+#
+# Demonstrates a big-centre configuration:
+#   * 250k incidents exported to a SQLite database
+#   * population-based phone volume instead of row-based scaling
+#   * 40 dispatchers across four shifts = 10 per shift, which Auto-mode
+#     console disciplines split into LAW / FIRE / EMS consoles (8+ positions)
+#   * a 1 GiB per-chunk memory budget for streaming CSV/Parquet exports
+#
+# Keys may use CLI option names or canonical GenerationRequest field names;
+# CLI flags override file values. Keep this file flat — nested TOML tables
+# are not part of the params schema.
+
+rows = 250000
+area = "Phoenix, AZ"
+format = "sqlite"
+dataset = "incidents"
+id_format = "guid"
+seed = 42
+start_date = "2025-01-01"
+end_date = "2025-12-31"
+
+# Phone-metrics call volume derives from service-area population
+# (calls per 1,000 residents per year) rather than the incident row count.
+population = 2300000
+
+# Personnel: 32 calltakers / 40 dispatchers over the default 4-shift preset
+# (2x12h, 14-day rotation) -> 8 calltakers and 10 dispatchers per shift.
+calltaker_pool_size = 32
+dispatcher_pool_size = 40
+
+# Stream exports in 1 GiB chunks instead of holding everything in memory.
+max_memory_bytes = 1073741824
+
+psap_agency = "all"
+output_dir = "output"
+output_stem = "phoenix_az_911"
