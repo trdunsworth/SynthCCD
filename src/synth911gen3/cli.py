@@ -478,20 +478,65 @@ def validate_config(
         readable=True,
         help="Path to a YAML realism configuration file to validate.",
     ),
+    calibration_tolerance: float = typer.Option(
+        0.02,
+        "--calibration-tolerance",
+        help="Acceptable gap (in cumulative-probability units) between a published "
+        "answer-time target and the configured lognormal. Default 0.02 (= 2pp).",
+    ),
+    strict: bool = typer.Option(
+        False,
+        "--strict",
+        help="Fail (exit 1) if any answer-time target is outside --calibration-tolerance.",
+    ),
 ) -> None:
-    """Validate one or more realism config files without generating data."""
+    """Validate one or more realism config files without generating data.
+
+    When a config carries an ``answer_time_targets`` section (published
+    percentile-compliance points such as NENA 90%@15s / 95%@20s), the command
+    also reports how closely the configured 9-1-1 / non-emergency answer-time
+    lognormal reproduces those targets. Use ``--strict`` to make a miss fail the run.
+    """
 
     from .realism_config import RealismConfig
 
     failed = False
     for path in config_paths:
         try:
-            RealismConfig.from_yaml(path)
+            config = RealismConfig.from_yaml(path)
         except (ValidationError, yaml.YAMLError, ValueError, TypeError) as exc:
             failed = True
             typer.secho(f"{path}: {exc}", fg=typer.colors.RED, err=True)
             continue
         typer.echo(f"{path}: OK")
+
+        checks = config.check_answer_time_targets(calibration_tolerance)
+        if not checks:
+            continue
+        typer.echo("  answer-time calibration check:")
+        off_count = 0
+        for check in checks:
+            status = "OK" if check.ok else "OFF"
+            if not check.ok:
+                off_count += 1
+            if check.note:
+                typer.echo(
+                    f"    {check.line} @ {check.threshold:>3.0f}s: {check.note} [{status}]"
+                )
+                continue
+            typer.echo(
+                f"    {check.line} @ {check.threshold:>3.0f}s: "
+                f"target {check.target_pct * 100:5.1f}%  "
+                f"implied {check.implied_pct * 100:5.1f}%  "
+                f"gap {check.gap * 100:+5.1f}pp  [{status}]"
+            )
+        if off_count:
+            typer.secho(
+                f"  {off_count} target(s) outside tolerance ±{calibration_tolerance * 100:.1f}pp",
+                fg=typer.colors.YELLOW,
+            )
+            if strict:
+                failed = True
     if failed:
         raise typer.Exit(code=1)
 
@@ -584,6 +629,130 @@ def tui() -> None:
     """Launch the TUI scaffold."""
 
     run_tui()
+
+
+def _load_samples(path: Path) -> list[float]:
+    """Load per-call answer times from CSV, JSON, or JSONL.
+
+    CSV: uses a ``seconds`` column if present, else the first numeric column.
+    JSON: a list of numbers, a list of record dicts (key ``seconds``/``answer_time``
+    or the first field), or a dict with a ``seconds``/``samples`` key.
+    """
+    import json
+
+    text = path.read_text(encoding="utf-8").strip()
+    if path.suffix.lower() in (".json", ".jsonl"):
+        data: object = json.loads(text)
+        if isinstance(data, dict):
+            data = data.get("seconds") or data.get("samples") or next(iter(data.values()))
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            rec = data[0]
+            key = next(
+                (k for k in ("seconds", "answer_time", "answer_time_seconds") if k in rec),
+                next(iter(rec)),
+            )
+            data = [r[key] for r in data]  # type: ignore[misc]
+        if not isinstance(data, list):
+            raise typer.BadParameter(f"Could not parse samples from {path}")
+        return [float(x) for x in data]  # type: ignore[misc]
+    df = pd.read_csv(path)
+    col = "seconds" if "seconds" in df.columns else df.select_dtypes("number").columns[0]
+    return [float(x) for x in df[col].tolist()]
+
+
+@app.command()
+def calibrate_answer_time(
+    percentile: list[str] = typer.Option(
+        [],
+        "--percentile",
+        "-p",
+        help="A (threshold_seconds,probability) pair, e.g. -p 15,0.90 -p 20,0.95.",
+    ),
+    samples_file: Path | None = typer.Option(
+        None,
+        "--samples-file",
+        help="CSV/JSON of per-call answer times (column 'seconds' or first numeric column).",
+    ),
+    line: str = typer.Option(
+        "911",
+        "--line",
+        help="Which line the data describes: '911' or 'non_emergency'.",
+    ),
+    ne_ratio: float = typer.Option(
+        2.5,
+        "--ne-ratio",
+        help="If calibrating only 911, scale the non-emergency mean by this factor (default 2.5).",
+    ),
+    emit_yaml: bool = typer.Option(
+        False,
+        "--emit-yaml",
+        help="Emit a phone_metrics YAML snippet instead of a human table.",
+    ),
+) -> None:
+    """Calibrate answer-time mean/σ from real PSAP data.
+
+    Fit the lognormal that drives SynthCCD's answer-time simulation either from
+    published percentile-compliance points (e.g. NENA 90%@15s, 95%@20s) or from
+    raw per-call answer times. Prints the resulting mean-seconds / sigma and the
+    implied % answered within 10/15/20/40 s so you can sanity-check the fit.
+    """
+    from .calibration import (
+        answer_time_config_block,
+        fit_lognormal_from_percentiles,
+        fit_lognormal_from_samples,
+        lognormal_cdf,
+    )
+
+    line = line.strip().lower()
+    if line not in ("911", "non_emergency"):
+        raise typer.BadParameter("line must be '911' or 'non_emergency'")
+
+    try:
+        if samples_file is not None:
+            mean, sigma = fit_lognormal_from_samples(_load_samples(samples_file))
+        elif percentile:
+            points: list[tuple[float, float]] = []
+            for raw in percentile:
+                parts = raw.split(",")
+                if len(parts) != 2:
+                    raise typer.BadParameter(
+                        f"--percentile expects 'threshold,prob', got {raw!r}"
+                    )
+                try:
+                    t_val, p_val = float(parts[0]), float(parts[1])
+                except ValueError:
+                    raise typer.BadParameter(f"--percentile values must be numeric, got {raw!r}")
+                points.append((t_val, p_val))
+            mean, sigma = fit_lognormal_from_percentiles(points)
+        else:
+            raise typer.BadParameter("Provide --percentile points or --samples-file.")
+    except (ValueError, IndexError) as exc:
+        raise typer.BadParameter(str(exc)) from exc
+
+    if line == "911":
+        nine_one_one = (mean, sigma)
+        non_emergency_pair = (mean * ne_ratio, sigma)
+    else:
+        non_emergency_pair = (mean, sigma)
+        nine_one_one = (mean / ne_ratio, sigma)
+
+    block = answer_time_config_block(nine_one_one, non_emergency_pair)
+
+    if emit_yaml:
+        typer.echo("phone_metrics:")
+        for key, value in block.items():
+            typer.echo(f"  {key}: {value!r}")
+        return
+
+    typer.echo(f"Fitted line: {line}")
+    typer.echo(f"  mean seconds = {mean:.3f}")
+    typer.echo(f"  sigma        = {sigma:.3f}")
+    typer.echo("  implied % answered within:")
+    for thr in (10, 15, 20, 40):
+        typer.echo(f"    {thr:>2} s: {lognormal_cdf(mean, sigma, thr) * 100:5.1f}%")
+    typer.echo("  phone_metrics block:")
+    for key, value in block.items():
+        typer.echo(f"    {key} = {value!r}")
 
 
 def main() -> None:

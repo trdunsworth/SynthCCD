@@ -16,9 +16,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from .logging_conf import get_logger
+
+logger = get_logger("realism_config")
+
 import numpy as np
 import yaml
 
+from .calibration import lognormal_cdf
 from .constants import (
     AGENCY_WEIGHTS as DEFAULT_AGENCY_WEIGHTS,
 )
@@ -63,6 +68,42 @@ from .names import normalize_name_locales, validate_name_locales
 from .shifts import ShiftConfig, get_default_shift_config
 
 
+def _scalar_float(value: object) -> float:
+    """Coerce a realism-config scalar to ``float``.
+
+    Phone-metric values are typed ``float | list[float]`` (lists arrive from
+    YAML sequences); a single-element list collapses to its first item.
+    """
+    if isinstance(value, list):
+        value = value[0]
+    if isinstance(value, (int, float)):
+        return float(value)
+    raise TypeError(f"Expected a numeric scalar, got {type(value).__name__}")
+
+
+def _normalize_target_line(line: str) -> str:
+    """Map a user-facing answer-time target line name to its config key prefix."""
+    key = line.strip().lower()
+    if key in ("911", "nine_one_one", "emergency"):
+        return "nine_one_one"
+    if key in ("ne", "non_emergency", "nonemergency", "non-emergency"):
+        return "non_emergency"
+    return key
+
+
+@dataclass(slots=True)
+class AnswerTimeCheck:
+    """Result of comparing one published answer-time target against the config."""
+
+    line: str
+    threshold: float
+    target_pct: float
+    implied_pct: float
+    gap: float
+    ok: bool
+    note: str = ""
+
+
 @dataclass(slots=True)
 class RealismConfig:
     agency_weights: dict[str, float] = field(default_factory=dict)
@@ -82,6 +123,7 @@ class RealismConfig:
     zone_travel_multipliers: dict[str, float] = field(default_factory=dict)
     problem_phone_multipliers: dict[str, float] = field(default_factory=dict)
     dispatcher_disciplines: dict[str, Any] = field(default_factory=dict)
+    answer_time_targets: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Fill any empty section with its constants-module default."""
@@ -124,6 +166,57 @@ class RealismConfig:
             }
         if not self.shift_config.shifts and not self.shift_config.rotation:
             self.shift_config = get_default_shift_config()
+
+    @staticmethod
+    def _convert_deprecated_answer_time_keys(
+        phone_metrics: dict[str, float | list[float]],
+        phone_metric_lines: dict[str, dict[str, float]],
+    ) -> None:
+        """Translate legacy log-scale ``*_answer_time_mu`` keys to mean seconds.
+
+        Older realism configs expressed answer-time location as a raw lognormal
+        ``mu`` (log-space). The current convention uses ``*_answer_time_mean``
+        (population *mean seconds*), matching the incident phone-duration keys.
+        We convert the legacy value faithfully so existing configs keep their
+        observed distribution: ``mean = exp(mu + sigma^2 / 2)``. The legacy key
+        is dropped and a deprecation warning is logged. New keys take precedence
+        (the conversion is skipped when the new key is already present).
+        """
+        top_level = {
+            "nine_one_one_answer_time_mu": "nine_one_one_answer_time_sigma",
+            "non_emergency_answer_time_mu": "non_emergency_answer_time_sigma",
+        }
+        for old_key, sigma_key in top_level.items():
+            new_key = old_key.replace("_mu", "_mean")
+            if old_key not in phone_metrics:
+                continue
+            if new_key not in phone_metrics:
+                sigma = _scalar_float(phone_metrics.get(sigma_key, 0.8))
+                mu = _scalar_float(phone_metrics[old_key])
+                phone_metrics[new_key] = float(np.exp(mu + sigma**2 / 2))
+                logger.warning(
+                    "Deprecated phone_metrics key %r ignored; converted to %r = %.3f s "
+                    "(mean seconds). Rename it in your config to silence this warning.",
+                    old_key,
+                    new_key,
+                    phone_metrics[new_key],
+                )
+            del phone_metrics[old_key]
+
+        for number, overrides in phone_metric_lines.items():
+            if "answer_time_mu" not in overrides:
+                continue
+            if "answer_time_mean" not in overrides:
+                sigma = _scalar_float(overrides.get("answer_time_sigma", phone_metrics.get("nine_one_one_answer_time_sigma", 0.8)))
+                mu = _scalar_float(overrides["answer_time_mu"])
+                overrides["answer_time_mean"] = float(np.exp(mu + sigma**2 / 2))
+                logger.warning(
+                    "Deprecated phone_metric_lines[%r].answer_time_mu ignored; converted to "
+                    "answer_time_mean = %.3f s (mean seconds). Rename it in your config.",
+                    number,
+                    overrides["answer_time_mean"],
+                )
+            del overrides["answer_time_mu"]
 
     @classmethod
     def from_yaml(cls, path: Path) -> RealismConfig:
@@ -196,6 +289,10 @@ class RealismConfig:
                 else:
                     config.phone_metrics[str(k)] = float(v)
 
+        cls._convert_deprecated_answer_time_keys(
+            config.phone_metrics, config.phone_metric_lines
+        )
+
         if "hourly_weights" in data:
             hw = np.array(data["hourly_weights"], dtype=float)
             if hw.shape != (24,):
@@ -233,6 +330,33 @@ class RealismConfig:
             config.dispatcher_disciplines = {
                 str(k): v for k, v in section.items()
             }
+
+        if "answer_time_targets" in data:
+            raw = data["answer_time_targets"]
+            if not isinstance(raw, dict):
+                raise ValidationError("answer_time_targets must be a mapping of line -> points")
+            parsed: dict[str, list[tuple[float, float]]] = {}
+            for line, points in raw.items():
+                norm_line = _normalize_target_line(str(line))
+                if not isinstance(points, list):
+                    raise ValidationError(
+                        f"answer_time_targets[{line}] must be a list of (threshold, percentile) points"
+                    )
+                pts: list[tuple[float, float]] = []
+                for point in points:
+                    if isinstance(point, dict):
+                        t = float(point.get("threshold", point.get("t")))  # type: ignore[attr-defined]
+                        p = float(point.get("percentile", point.get("p")))  # type: ignore[attr-defined]
+                    elif isinstance(point, (list, tuple)) and len(point) == 2:
+                        t, p = float(point[0]), float(point[1])
+                    else:
+                        raise ValidationError(
+                            f"answer_time_targets[{line}] point must be [threshold, percentile] or "
+                            f"{{threshold, percentile}}, got {point!r}"
+                        )
+                    pts.append((t, p))
+                parsed[norm_line] = pts
+            config.answer_time_targets = parsed
 
         config._validate()
         return config
@@ -322,9 +446,9 @@ class RealismConfig:
             "non_emergency_abandonment_rate",
             "max_abandonment_rate",
             "weekend_multiplier",
-            "nine_one_one_answer_time_mu",
+            "nine_one_one_answer_time_mean",
             "nine_one_one_answer_time_sigma",
-            "non_emergency_answer_time_mu",
+            "non_emergency_answer_time_mean",
             "non_emergency_answer_time_sigma",
             "answer_time_thresholds",
         }
@@ -342,7 +466,7 @@ class RealismConfig:
             "received_fraction",
             "abandonment_rate",
             "night_abandonment_increment",
-            "answer_time_mu",
+            "answer_time_mean",
             "answer_time_sigma",
             "phone_duration_mu",
             "phone_duration_sigma",
@@ -400,6 +524,56 @@ class RealismConfig:
                 "dispatcher_disciplines.min_dispatchers_for_split must be at least 1"
             )
 
+        for line, points in self.answer_time_targets.items():
+            if line not in ("nine_one_one", "non_emergency"):
+                raise ValidationError(
+                    f"answer_time_targets line must be 'nine_one_one' or 'non_emergency', got {line!r}"
+                )
+            for threshold, percentile in points:
+                if threshold <= 0:
+                    raise ValidationError(
+                        f"answer_time_targets[{line}] threshold must be positive, got {threshold}"
+                    )
+                if not 0 < percentile < 1:
+                    raise ValidationError(
+                        f"answer_time_targets[{line}] percentile must be in (0, 1), got {percentile}"
+                    )
+
+    def check_answer_time_targets(self, tolerance: float = 0.02) -> list[AnswerTimeCheck]:
+        """Compare published answer-time targets against the configured lognormal.
+
+        Returns one :class:`AnswerTimeCheck` per ``(line, threshold)`` target. A
+        check passes when ``|implied − target| <= tolerance`` (cumulative-probability
+        units). Targets are an optional validation aid and never affect generated
+        data; ``validate-config`` reports them and can fail under ``--strict``.
+        """
+        checks: list[AnswerTimeCheck] = []
+        if not self.answer_time_targets:
+            return checks
+        for line, points in self.answer_time_targets.items():
+            mean = _scalar_float(self.phone_metrics.get(f"{line}_answer_time_mean", 0.0))
+            sigma = _scalar_float(self.phone_metrics.get(f"{line}_answer_time_sigma", 0.0))
+            for threshold, target in points:
+                if mean <= 0 or sigma <= 0:
+                    checks.append(
+                        AnswerTimeCheck(
+                            line,
+                            threshold,
+                            target,
+                            float("nan"),
+                            float("nan"),
+                            False,
+                            "answer-time mean/sigma not configured",
+                        )
+                    )
+                    continue
+                implied = lognormal_cdf(mean, sigma, threshold)
+                gap = implied - target
+                checks.append(
+                    AnswerTimeCheck(line, threshold, target, implied, gap, abs(gap) <= tolerance, "")
+                )
+        return checks
+
     def to_yaml(self, path: Path) -> None:
         """Serialize the full merged config to YAML (round-trips through from_yaml)."""
         data = {
@@ -433,6 +607,10 @@ class RealismConfig:
                 ),
             },
             "name_locales": self._name_locales_for_yaml(),
+            "answer_time_targets": {
+                line: [[t, p] for t, p in points]
+                for line, points in self.answer_time_targets.items()
+            },
         }
         with path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(data, f, sort_keys=False, default_flow_style=None)

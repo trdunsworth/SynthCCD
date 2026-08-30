@@ -228,9 +228,9 @@ phone_metrics:
   non_emergency_abandonment_rate: 0.04
   max_abandonment_rate: 0.10
   weekend_multiplier: 1.10
-  nine_one_one_answer_time_mu: 1.60
+  nine_one_one_answer_time_mean: 6.3
   nine_one_one_answer_time_sigma: 0.70
-  non_emergency_answer_time_mu: 1.80
+  non_emergency_answer_time_mean: 8.3
   non_emergency_answer_time_sigma: 0.80
   answer_time_thresholds: [10, 15, 20, 40]
   answer_time_load_sensitivity: 0.25
@@ -1062,6 +1062,75 @@ uv run SynthCCD validate-config my_center.yaml
 uv run SynthCCD validate-config broken.yaml
 # broken.yaml: Priority weights defined for unknown agency: UNKNOWN
 ```
+
+If a config carries an `answer_time_targets` section (published percentile
+compliance, e.g. NENA 90% within 15 s / 95% within 20 s), `validate-config`
+also reports how closely the configured 9-1-1 / non-emergency answer-time
+lognormal reproduces those targets, so you can confirm a hand-tuned or
+`calibrate-answer-time`-derived block actually meets the center's standard:
+
+```yaml
+answer_time_targets:
+  nine_one_one:        # line '911' is accepted as an alias
+    - [15, 0.90]       # 90% of calls answered within 15 s
+    - [20, 0.95]       # 95% within 20 s
+  non_emergency:
+    - {threshold: 20, percentile: 0.55}
+```
+
+```bash
+uv run SynthCCD validate-config my_center.yaml
+# my_center.yaml: OK
+#   answer-time calibration check:
+#     nine_one_one @  15s: target  90.0%  implied  92.5%  gap  +2.5pp  [OFF]
+#     nine_one_one @  20s: target  95.0%  implied  96.8%  gap  +1.8pp  [OK]
+#   1 target(s) outside tolerance ±2.0pp
+```
+
+Flags: `--calibration-tolerance` (default `0.02`, i.e. 2 percentage points) sets
+how close the implied % must be to the target; `--strict` makes any miss fail the
+run (exit 1), which is handy in CI to guard against config drift away from a
+published service-level standard. Targets are a validation aid only — they never
+change generated data.
+
+---
+
+## Calibrating Answer Times from Real Data
+
+The 9-1-1 and non-emergency answer-time distributions are lognormal, driven by
+the `nine_one_one_answer_time_mean` / `nine_one_one_answer_time_sigma`
+(and `non_emergency_*`) keys in `phone_metrics`. Public PSAP data rarely ships
+raw per-call histograms; what it publishes is **percentile compliance** — e.g.
+"90% answered within 15 s, 95% within 20 s" (the NENA 020.1-2020 gold standard).
+The `calibrate-answer-time` command fits the matching lognormal so you can anchor
+a center's defaults to its own published performance instead of hand-picking numbers.
+
+```bash
+# Fit from published percentile points (repeatable -p flag):
+uv run SynthCCD calibrate-answer-time -p 15,0.90 -p 20,0.95
+
+# Emit a ready-to-paste phone_metrics block as YAML:
+uv run SynthCCD calibrate-answer-time -p 15,0.90 -p 20,0.95 --emit-yaml
+
+# Fit from raw per-call answer times (CSV/JSON/JSONL; 'seconds' column or first numeric):
+uv run SynthCCD calibrate-answer-time --samples-file calls.csv --line 911
+
+# Calibrate only the non-emergency line; 911 is derived by dividing the mean by --ne-ratio (default 2.5):
+uv run SynthCCD calibrate-answer-time --samples-file ne_calls.csv --line non_emergency
+```
+
+The command prints the fitted `mean seconds` and `sigma`, the implied percentage
+answered within 10/15/20/40 s (so you can sanity-check the fit), and the four
+`phone_metrics` keys. Two fitting strategies are available:
+
+- **Percentile points** — solve the lognormal CDF `p = Φ((ln t − μ)/σ)` linearly
+  (`ln t = μ + σ·Φ⁻¹(p)`); two points solve exactly, more than two use least squares.
+- **Raw samples** — maximum-likelihood fit on the log-transformed data (the gold
+  standard when microdata such as NYC 911 End-to-End records is available).
+
+The same math is exposed in the Python API via
+`synth911gen3.calibration` (`fit_lognormal_from_percentiles`,
+`fit_lognormal_from_samples`, `lognormal_cdf`, `answer_time_config_block`).
 
 ---
 

@@ -133,7 +133,7 @@ class LineMetrics(BaseModel):
     received_fraction: float | None = Field(default=None, ge=0, le=1)
     abandonment_rate: float | None = Field(default=None, ge=0, le=1)
     night_abandonment_increment: float | None = Field(default=None, ge=0, le=1)
-    answer_time_mu: float | None = None
+    answer_time_mean: float | None = None
     answer_time_sigma: float | None = Field(default=None, gt=0)
     phone_duration_mu: float | None = None
     phone_duration_sigma: float | None = Field(default=None, gt=0)
@@ -157,9 +157,9 @@ class PhoneMetrics(BaseModel):
     non_emergency_abandonment_rate: float = Field(ge=0, le=1)
     max_abandonment_rate: float = Field(ge=0, le=1)
     weekend_multiplier: float = Field(ge=0)
-    nine_one_one_answer_time_mu: float
+    nine_one_one_answer_time_mean: float
     nine_one_one_answer_time_sigma: float = Field(gt=0)
-    non_emergency_answer_time_mu: float
+    non_emergency_answer_time_mean: float
     non_emergency_answer_time_sigma: float = Field(gt=0)
     answer_time_thresholds: list[float] = Field(min_length=1)
     answer_time_load_sensitivity: float = Field(default=0.25, ge=0)

@@ -749,3 +749,82 @@ def test_cli_schema_invalid_config_exits_1(tmp_path: Path) -> None:
     result = runner.invoke(app, ["schema", "--config", str(bad)])
     assert result.exit_code == 1
     assert "Priority weights defined for unknown agency" in _strip_ansi(result.output)
+
+
+def test_cli_calibrate_from_percentiles_table() -> None:
+    result = runner.invoke(
+        app,
+        ["calibrate-answer-time", "-p", "15,0.90", "-p", "20,0.95"],
+    )
+    assert result.exit_code == 0, result.output
+    out = _strip_ansi(result.output)
+    assert "mean seconds" in out
+    assert "nine_one_one_answer_time_mean" in out
+    # 90% @15s should be reported back from the fit.
+    assert "15 s:" in out
+
+
+def test_cli_calibrate_from_percentiles_emit_yaml() -> None:
+    result = runner.invoke(
+        app,
+        ["calibrate-answer-time", "-p", "15,0.90", "-p", "20,0.95", "--emit-yaml"],
+    )
+    assert result.exit_code == 0, result.output
+    out = _strip_ansi(result.output)
+    assert out.startswith("phone_metrics:")
+    assert "nine_one_one_answer_time_mean" in out
+    assert "non_emergency_answer_time_mean" in out
+
+
+def test_cli_calibrate_from_samples_file(tmp_path: Path) -> None:
+    samples = tmp_path / "samples.json"
+    samples.write_text("[8.0, 4.0, 12.0, 6.0, 9.0, 3.0, 15.0, 7.0]", encoding="utf-8")
+    result = runner.invoke(app, ["calibrate-answer-time", "--samples-file", str(samples)])
+    assert result.exit_code == 0, result.output
+    assert "mean seconds" in _strip_ansi(result.output)
+
+
+def test_cli_calibrate_requires_input() -> None:
+    result = runner.invoke(app, ["calibrate-answer-time"])
+    assert result.exit_code != 0
+    assert "Provide --percentile" in _strip_ansi(result.output)
+
+
+def test_cli_calibrate_rejects_bad_line() -> None:
+    result = runner.invoke(
+        app,
+        ["calibrate-answer-time", "-p", "15,0.90", "-p", "20,0.95", "--line", "police"],
+    )
+    assert result.exit_code != 0
+    assert "line must be" in _strip_ansi(result.output)
+
+
+def test_cli_validate_config_reports_calibration_check(tmp_path: Path) -> None:
+    cfg = RealismConfig()
+    cfg.answer_time_targets = {"nine_one_one": [(15.0, 0.90), (20.0, 0.95)]}
+    path = tmp_path / "c.yaml"
+    cfg.to_yaml(path)
+    result = runner.invoke(app, ["validate-config", str(path)])
+    assert result.exit_code == 0, result.output
+    out = _strip_ansi(result.output)
+    assert "answer-time calibration check" in out
+    assert "nine_one_one @  15s" in out
+
+
+def test_cli_validate_config_strict_fails_on_miss(tmp_path: Path) -> None:
+    cfg = RealismConfig()
+    cfg.phone_metrics["nine_one_one_answer_time_mean"] = 35.0
+    cfg.answer_time_targets = {"nine_one_one": [(15.0, 0.90)]}
+    path = tmp_path / "c.yaml"
+    cfg.to_yaml(path)
+    result = runner.invoke(app, ["validate-config", str(path), "--strict"])
+    assert result.exit_code == 1, result.output
+    assert "outside tolerance" in _strip_ansi(result.output)
+
+
+def test_cli_validate_config_no_targets_no_check(tmp_path: Path) -> None:
+    path = tmp_path / "c.yaml"
+    RealismConfig().to_yaml(path)
+    result = runner.invoke(app, ["validate-config", str(path)])
+    assert result.exit_code == 0, result.output
+    assert "answer-time calibration check" not in _strip_ansi(result.output)

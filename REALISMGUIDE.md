@@ -161,10 +161,10 @@ phone_metrics:
   non_emergency_abandonment_rate: 0.05
   max_abandonment_rate: 0.12
   weekend_multiplier: 1.12
-  nine_one_one_answer_time_mu: 1.80
-  nine_one_one_answer_time_sigma: 0.80
-  non_emergency_answer_time_mu: 1.70
-  non_emergency_answer_time_sigma: 0.80
+  nine_one_one_answer_time_mean: 7.0
+  nine_one_one_answer_time_sigma: 0.70
+  non_emergency_answer_time_mean: 18.0
+  non_emergency_answer_time_sigma: 0.90
   answer_time_thresholds: [10, 15, 20, 40]
   answer_time_load_sensitivity: 0.25
   answer_time_mu_noise_sd: 0.05
@@ -681,10 +681,10 @@ binomial on the received counts:
 | `non_emergency_abandonment_rate` | 0.05 | Non-emergency abandonment rate |
 | `max_abandonment_rate` | 0.12 | Cap applied to abandonment draws |
 | `weekend_multiplier` | 1.12 | Volume multiplier on Fri/Sat |
-| `nine_one_one_answer_time_mu` | 1.80 | Lognormal μ for 9-1-1 answer time (seconds) |
-| `nine_one_one_answer_time_sigma` | 0.80 | Lognormal σ for 9-1-1 answer time |
-| `non_emergency_answer_time_mu` | 1.70 | Lognormal μ for non-emergency answer time (seconds) |
-| `non_emergency_answer_time_sigma` | 0.80 | Lognormal σ for non-emergency answer time |
+| `nine_one_one_answer_time_mean` | 7.0 | Population **mean** answer time in seconds for 9-1-1 (converted to lognormal μ = ln(mean) − σ²/2). Calibrated to NENA 020.1-2020 (90% ≤ 15 s, 95% ≤ 20 s). |
+| `nine_one_one_answer_time_sigma` | 0.70 | Lognormal σ (shape) for 9-1-1 answer time |
+| `non_emergency_answer_time_mean` | 18.0 | Population **mean** answer time in seconds for non-emergency lines (slower than 9-1-1; not staffed to the emergency standard) |
+| `non_emergency_answer_time_sigma` | 0.90 | Lognormal σ (shape) for non-emergency answer time |
 | `answer_time_thresholds` | [10, 15, 20, 40] | Seconds thresholds for % answered columns |
 | `answer_time_load_sensitivity` | 0.25 | How strongly the answer-time lognormal μ shifts with hourly load (busy hours answer slower) |
 | `answer_time_mu_noise_sd` | 0.05 | Std-dev of per-hour random noise applied to lognormal μ, so answer-time percentages vary hour-to-hour |
@@ -739,26 +739,41 @@ sequential-binomial draw from the lognormal answer-time distribution, and each
 answered calls than were received and not abandoned, and reach exactly 100% on
 fast, low-abandonment hours.
 
-The lognormal `mu` is first adjusted by the hour's load (`busy_factor`) via
-`answer_time_load_sensitivity`, then given per-hour random noise scaled by
-`answer_time_mu_noise_sd`. The noise keeps percentages from being identical
-every hour while the load term keeps busy hours slower. Defaults produce
-approximately these average answer rates:
+The answer-time `mean` (seconds) is first converted to lognormal log-scale
+location `mu = ln(mean) − σ²/2`, then `mu` is adjusted by the hour's load
+(`busy_factor`) via `answer_time_load_sensitivity`, then given per-hour random
+noise scaled by `answer_time_mu_noise_sd`. The noise keeps percentages from
+being identical every hour while the load term keeps busy hours slower.
+Defaults produce approximately these average answer rates:
 
 | Threshold | Default 9-1-1 % | Default Non-Emergency % |
 |-----------|-----------------|-------------------------|
-| 10 s | ~70% | ~74% |
-| 15 s | ~85% | ~85% |
-| 20 s | ~91% | ~90% |
-| 40 s | ~96% | ~94% |
+| 10 s | ~75% | ~39% |
+| 15 s | ~87% | ~56% |
+| 20 s | ~92% | ~67% |
+| 40 s | ~97% | ~85% |
 
-These defaults target ≥85% of 9-1-1 calls answered within 15 seconds and ≥74%
-of non-emergency calls answered within 10 seconds. National standards
-recommend ≥90% of 9-1-1 calls answered within 15 seconds and ≥95% within
-20 seconds; the 9-1-1 default is slightly below the 15-second standard but
-exceeds it at 20 seconds. Adjust `nine_one_one_answer_time_mu`/`sigma` to
-match your center's performance. Non-emergency standards are in development;
-the defaults model a faster answer profile than previous versions.
+The 9-1-1 pair is the exact NENA 020.1-2020 lognormal fit at the no-load level
+(μ = ln(mean) − σ²/2 gives 90% within 15 s and 95% within 20 s). The table above
+shows the *realized* hourly average, which the load-sensitivity and per-hour μ
+noise terms pull down to ≈87% within 15 s and ≈92% within 20 s on a typical mix
+of busy and quiet hours. Non-emergency lines are modeled as answered markedly
+more slowly because they are not staffed to the emergency standard. National
+guidance recommends ≥90% of 9-1-1 calls answered within 15 s and ≥95% within
+20 s; nudge `nine_one_one_answer_time_mean`/`sigma` down to meet a stricter
+target, or raise it to model a slower center. The `mean` is in **seconds** (the
+population mean answer time), matching the phone-duration keys.
+
+ To derive `mean`/`sigma` from a center's own published percentile compliance
+ (e.g. "90% within 15 s, 95% within 20 s") or from raw per-call answer times,
+ use `SynthCCD calibrate-answer-time` (see the User Guide's *Calibrating Answer
+ Times from Real Data* section). It fits the same lognormal and emits the exact
+ `nine_one_one_answer_time_mean` / `nine_one_one_answer_time_sigma` /
+ `non_emergency_answer_time_mean` / `non_emergency_answer_time_sigma` keys.
+ Record those points under an `answer_time_targets` section and run
+ `SynthCCD validate-config --strict` to keep the config honest against the
+ published standard (it reports the implied % answered within each threshold and
+ fails when any point misses by more than `--calibration-tolerance`, default 2pp).
 
 ### Mean Phone Duration
 

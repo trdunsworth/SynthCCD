@@ -233,12 +233,20 @@ class HourlyCallCountGenerator:
         def _answered_pct(
             received: np.ndarray,
             abandoned: np.ndarray,
-            mu: float,
+            mean: float,
             sigma: float,
         ) -> dict[str, np.ndarray]:
-            """Per-threshold % of calls answered within T seconds, per hour."""
+            """Per-threshold % of calls answered within T seconds, per hour.
+
+            ``mean`` is the population *mean answer time in seconds*; it is
+            converted to lognormal log-scale location via
+            ``mu = ln(mean) - sigma^2 / 2`` so the drawn distribution has the
+            requested mean (matching the incident generator's
+            :func:`_lognormal_seconds` convention).
+            """
             answered = np.maximum(received - abandoned, 0)
-            mu_adj = mu * (1.0 + load_sensitivity * (busy_factor - 1.0))
+            mu_log = np.log(max(mean, 1e-6)) - (sigma**2) / 2
+            mu_adj = mu_log * (1.0 + load_sensitivity * (busy_factor - 1.0))
             mu_noise = rng.normal(0.0, mu_noise_sd, size=len(hours))
             scale = np.exp(mu_adj + mu_noise)
             probs = np.asarray([lognorm.cdf(t, s=sigma, scale=scale) for t in thresholds])
@@ -264,18 +272,18 @@ class HourlyCallCountGenerator:
 
         for num in numbers:
             over = _line(num)
-            mu = float(over.get("answer_time_mu", _f("nine_one_one_answer_time_mu")))
+            mean = float(over.get("answer_time_mean", _f("nine_one_one_answer_time_mean")))
             sigma = float(over.get("answer_time_sigma", _f("nine_one_one_answer_time_sigma")))
             prefix = column_prefix(num.number)
             for key, values in _answered_pct(
-                received[num.number], abandoned[num.number], mu, sigma
+                received[num.number], abandoned[num.number], mean, sigma
             ).items():
                 emergency_answered[f"{prefix}_{key}_pct"] = values
 
-        ne_mu = _f("non_emergency_answer_time_mu")
+        ne_mean = _f("non_emergency_answer_time_mean")
         ne_sigma = _f("non_emergency_answer_time_sigma")
         for key, values in _answered_pct(
-            non_emergency_calls_received, non_emergency_calls_abandoned, ne_mu, ne_sigma
+            non_emergency_calls_received, non_emergency_calls_abandoned, ne_mean, ne_sigma
         ).items():
             non_emergency_answered[f"non_emergency_{key}_pct"] = values
 

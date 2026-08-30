@@ -74,9 +74,9 @@ class TestPhoneMetrics:
             non_emergency_abandonment_rate=0.05,
             max_abandonment_rate=0.12,
             weekend_multiplier=1.12,
-            nine_one_one_answer_time_mu=1.80,
+            nine_one_one_answer_time_mean=7.0,
             nine_one_one_answer_time_sigma=0.80,
-            non_emergency_answer_time_mu=1.70,
+            non_emergency_answer_time_mean=18.0,
             non_emergency_answer_time_sigma=0.80,
             answer_time_thresholds=[10.0, 15.0, 20.0, 40.0],
         )
@@ -94,9 +94,9 @@ class TestPhoneMetrics:
                 non_emergency_abandonment_rate=0.05,
                 max_abandonment_rate=0.12,
                 weekend_multiplier=1.12,
-                nine_one_one_answer_time_mu=1.80,
+                nine_one_one_answer_time_mean=7.0,
                 nine_one_one_answer_time_sigma=0.80,
-                non_emergency_answer_time_mu=1.70,
+                non_emergency_answer_time_mean=18.0,
                 non_emergency_answer_time_sigma=0.80,
                 answer_time_thresholds=[10.0],
             )

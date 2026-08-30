@@ -138,7 +138,9 @@ dispatch_init_fraction:
   5: [0.8, 1.0]
 
 # 7. Telephony System Metrics
-# answer_time_mu/sigma lowered to mathematically guarantee passing NENA's 15s (90%) and 20s (95%) standard
+# answer_time_mean (mean seconds) lowered to mathematically guarantee passing
+# NENA's 15s (90%) and 20s (95%) standard. mean = exp(mu + sigma^2/2) of the
+# original log-scale tuning, so the observed distribution is unchanged.
 phone_metrics:
   min_hourly_volume: 2.0
   nine_one_one_received_fraction: 0.48
@@ -149,13 +151,13 @@ phone_metrics:
   non_emergency_abandonment_rate: 0.02
   max_abandonment_rate: 0.05
   weekend_multiplier: 1.12
-  nine_one_one_answer_time_mu: 1.10         # Mean response speed shifted to ~3 seconds
-  nine_one_one_answer_time_sigma: 0.45      # Low standard deviation keeps the tail narrow
-  non_emergency_answer_time_mu: 1.10
+  nine_one_one_answer_time_mean: 3.32        # Mean response speed shifted to ~3 seconds
+  nine_one_one_answer_time_sigma: 0.45       # Low standard deviation keeps the tail narrow
+  non_emergency_answer_time_mean: 3.32
   non_emergency_answer_time_sigma: 0.45
   answer_time_thresholds: [10, 15, 20, 40]
-  answer_time_load_sensitivity: 0.15       # Minimizes speed degradation during peak volume spikes
-  answer_time_mu_noise_sd: 0.02             # Controls random variance so no hour drifts below NENA requirements
+  answer_time_load_sensitivity: 0.15         # Minimizes speed degradation during peak volume spikes
+  answer_time_mu_noise_sd: 0.02              # Controls random variance so no hour drifts below NENA requirements
   nine_one_one_phone_duration_mu: 5.10
   nine_one_one_phone_duration_sigma: 0.70
   non_emergency_phone_duration_mu: 4.54

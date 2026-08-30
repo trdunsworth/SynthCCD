@@ -447,16 +447,35 @@ recommendation docs in `docs/`, and direct code review.
   hour. After independent Poisson draws, non-emergency is floored to at least 1.2× total
   emergency, reflecting the universal PSAP pattern.
 - [ ] **P2 — Shift handoff effects.** Model increased response times during shift change periods.
-- [ ] **P2 — Parameterize phone answer times with a mean-seconds lognormal, like
-      `phone_duration_seconds`.** The incident generator draws call durations from a
-      *mean*-seconds lognormal (`_lognormal_seconds`: `mu = ln(mean) − sigma²/2`), but the
-      phone-metrics answer-time keys (`nine_one_one_answer_time_mu` /
-      `nine_one_one_answer_time_sigma`, `non_emergency_answer_time_mu` / `sigma`) are raw
-      lognormal log-scale/shape values, so operators must translate seconds to log-space.
-      Switch them to the same mean-seconds convention (e.g. `nine_one_one_answer_time_mean`).
-      Note: emergency (9-1-1) calls will typically have *lower* values than non-emergency
-      — emergency lines are answered faster — which the current defaults (9-1-1 μ=1.80 vs
-      non-emergency μ=1.70) invert and should be recalibrated when adopting mean-seconds.
+- [x] **P2 — Parameterize phone answer times with a mean-seconds lognormal, like
+       `phone_duration_seconds`.** The incident generator draws call durations from a
+       *mean*-seconds lognormal (`_lognormal_seconds`: `mu = ln(mean) − sigma²/2`), but the
+       phone-metrics answer-time keys (`nine_one_one_answer_time_mu` /
+       `nine_one_one_answer_time_sigma`, `non_emergency_answer_time_mu` / `sigma`) are raw
+       lognormal log-scale/shape values, so operators must translate seconds to log-space.
+       Switch them to the same mean-seconds convention (e.g. `nine_one_one_answer_time_mean`).
+       Note: emergency (9-1-1) calls will typically have *lower* values than non-emergency
+       — emergency lines are answered faster — which the current defaults (9-1-1 μ=1.80 vs
+       non-emergency μ=1.70) invert and should be recalibrated when adopting mean-seconds.
+   **Done:** Renamed the answer-time keys to `nine_one_one_answer_time_mean` /
+   `non_emergency_answer_time_mean` (plus per-line `answer_time_mean`), all in **mean
+   seconds**, and the generator converts each to log-scale via `mu = ln(mean) − σ²/2` — the
+   same convention as the incident phone-duration columns. Defaults recalibrated so 9-1-1 is
+   *faster* than non-emergency (9-1-1 mean 7 s, σ 0.70 → ~89% within 15 s, ~94% within 20 s;
+   non-emergency mean 18 s, σ 0.90 → ~56% within 15 s), roughly tracking the NENA 020.1-2020
+   standard. A backward-compat shim in `RealismConfig.from_yaml` converts legacy
+   `*_answer_time_mu` (log-scale) keys to mean-seconds faithfully (`mean = exp(mu + σ²/2)`)
+   with a deprecation warning. Covered by `tests/test_realism_config.py`
+   (`TestAnswerTimeMeanSeconds`) and `tests/test_application.py` (mean-drives-speed,
+   9-1-1-faster-than-non-emergency); regression baseline refreshed. Documented in
+   `REALISMGUIDE.md` / `USERSGUIDE.md` / `CHANGELOG.md`.
+   **Data substantiation:** NENA 020.1-2020 specifies 90% of 9-1-1 calls answered ≤15 s and
+   95% ≤20 s; city scorecards (SF.gov, Broward County: 97.3% ≤15 s / 94.1% ≤20 s) confirm
+   well-run PSAPs clear those bars. data.gov hosts per-incident datasets (NYC *911 End-to-End
+   Data*, DC *911 Performance Dashboard*) but few publish the raw "ring-time" distribution, so
+   the recommendation is to anchor defaults to the NENA standard and optionally fit empirical
+   distributions from those open datasets per center (see `future_work/nena_pass_realism.yaml`).
+
 
 ### Integration / Ecosystem
 - [x] **P2 — Parquet metadata embedding.** Embed generation metadata (seed, config hash, schema version) directly in Parquet file metadata for self-documenting files.

@@ -543,3 +543,145 @@ class TestDispatcherDisciplinesConfig:
         text = path.read_text()
         assert "dispatcher_disciplines:" in text
         assert "mode: auto" in text
+
+
+class TestAnswerTimeMeanSeconds:
+    """Answer-time keys use mean seconds; legacy log-scale ``*_mu`` converts."""
+
+    def test_legacy_top_level_mu_converted_to_mean(self) -> None:
+        pm: dict[str, float | list[float]] = {
+            "nine_one_one_answer_time_mu": 1.80,
+            "nine_one_one_answer_time_sigma": 0.80,
+            "non_emergency_answer_time_mu": 1.70,
+            "non_emergency_answer_time_sigma": 0.80,
+        }
+        lines: dict[str, dict[str, float]] = {}
+        RealismConfig._convert_deprecated_answer_time_keys(pm, lines)
+        # mean = exp(mu + sigma^2 / 2) with sigma == 0.80 for both.
+        expected_911 = float(np.exp(1.80 + 0.80**2 / 2))
+        expected_ne = float(np.exp(1.70 + 0.80**2 / 2))
+        assert pm["nine_one_one_answer_time_mean"] == pytest.approx(expected_911)
+        assert pm["non_emergency_answer_time_mean"] == pytest.approx(expected_ne)
+        assert "nine_one_one_answer_time_mu" not in pm
+        assert "non_emergency_answer_time_mu" not in pm
+
+    def test_legacy_per_line_mu_converted(self) -> None:
+        pm: dict[str, float | list[float]] = {
+            "nine_one_one_answer_time_sigma": 0.70,
+        }
+        lines: dict[str, dict[str, float]] = {
+            "911": {"answer_time_mu": 1.10, "answer_time_sigma": 0.45},
+        }
+        RealismConfig._convert_deprecated_answer_time_keys(pm, lines)
+        expected = float(np.exp(1.10 + 0.45**2 / 2))
+        assert lines["911"]["answer_time_mean"] == pytest.approx(expected)
+        assert "answer_time_mu" not in lines["911"]
+
+    def test_new_key_takes_precedence_over_legacy(self) -> None:
+        pm: dict[str, float | list[float]] = {
+            "nine_one_one_answer_time_mu": 1.80,
+            "nine_one_one_answer_time_sigma": 0.80,
+            "nine_one_one_answer_time_mean": 7.0,
+        }
+        RealismConfig._convert_deprecated_answer_time_keys(pm, {})
+        assert pm["nine_one_one_answer_time_mean"] == 7.0
+        assert "nine_one_one_answer_time_mu" not in pm
+
+    def test_from_yaml_loads_legacy_mu_keys(self, tmp_path: Path) -> None:
+        path = tmp_path / "legacy.yaml"
+        path.write_text(
+            "phone_metrics:\n"
+            "  min_hourly_volume: 2.0\n"
+            "  nine_one_one_received_fraction: 0.48\n"
+            "  non_emergency_received_fraction: 0.58\n"
+            "  outbound_calls_fraction: 0.26\n"
+            "  nine_one_one_abandonment_rate: 0.02\n"
+            "  night_abandonment_increment: 0.03\n"
+            "  non_emergency_abandonment_rate: 0.05\n"
+            "  max_abandonment_rate: 0.12\n"
+            "  weekend_multiplier: 1.12\n"
+            "  nine_one_one_answer_time_mu: 1.80\n"
+            "  nine_one_one_answer_time_sigma: 0.80\n"
+            "  non_emergency_answer_time_mu: 1.70\n"
+            "  non_emergency_answer_time_sigma: 0.80\n"
+            "  answer_time_thresholds: [10.0, 15.0, 20.0, 40.0]\n"
+        )
+        config = RealismConfig.from_yaml(path)
+        assert config.phone_metrics["nine_one_one_answer_time_mean"] == pytest.approx(
+            float(np.exp(1.80 + 0.80**2 / 2))
+        )
+        assert "nine_one_one_answer_time_mu" not in config.phone_metrics
+
+
+class TestAnswerTimeTargets:
+    """Parsing, validation, and calibration reporting for answer_time_targets."""
+
+    def _write(self, tmp_path: Path, text: str) -> Path:
+        path = tmp_path / "targets.yaml"
+        path.write_text(text, encoding="utf-8")
+        return path
+
+    def test_parse_list_form_and_dict_form(self, tmp_path: Path) -> None:
+        text = (
+            "answer_time_targets:\n"
+            "  nine_one_one:\n"
+            "    - [15, 0.90]\n"
+            "    - [20, 0.95]\n"
+            "  non_emergency:\n"
+            "    - {threshold: 20, percentile: 0.55}\n"
+        )
+        cfg = RealismConfig.from_yaml(self._write(tmp_path, text))
+        assert cfg.answer_time_targets["nine_one_one"] == [(15.0, 0.90), (20.0, 0.95)]
+        assert cfg.answer_time_targets["non_emergency"] == [(20.0, 0.55)]
+
+    def test_alias_911_normalized(self, tmp_path: Path) -> None:
+        text = "answer_time_targets:\n  911:\n    - [15, 0.90]\n"
+        cfg = RealismConfig.from_yaml(self._write(tmp_path, text))
+        assert "nine_one_one" in cfg.answer_time_targets
+        assert "911" not in cfg.answer_time_targets
+
+    def test_invalid_line_rejected(self, tmp_path: Path) -> None:
+        text = "answer_time_targets:\n  police:\n    - [15, 0.90]\n"
+        with pytest.raises(ValidationError):
+            RealismConfig.from_yaml(self._write(tmp_path, text))
+
+    def test_invalid_threshold_rejected(self, tmp_path: Path) -> None:
+        text = "answer_time_targets:\n  nine_one_one:\n    - [0, 0.90]\n"
+        with pytest.raises(ValidationError):
+            RealismConfig.from_yaml(self._write(tmp_path, text))
+
+    def test_invalid_percentile_rejected(self, tmp_path: Path) -> None:
+        text = "answer_time_targets:\n  nine_one_one:\n    - [15, 1.0]\n"
+        with pytest.raises(ValidationError):
+            RealismConfig.from_yaml(self._write(tmp_path, text))
+
+    def test_check_matches_configured_distribution(self) -> None:
+        cfg = RealismConfig()
+        cfg.phone_metrics["nine_one_one_answer_time_mean"] = 7.439
+        cfg.phone_metrics["nine_one_one_answer_time_sigma"] = 0.792
+        cfg.answer_time_targets = {"nine_one_one": [(15.0, 0.90), (20.0, 0.95)]}
+        checks = cfg.check_answer_time_targets(0.02)
+        assert len(checks) == 2
+        assert all(c.ok for c in checks)
+        assert checks[0].implied_pct == pytest.approx(0.90, abs=0.02)
+
+    def test_check_reports_deviation_and_fails_tolerance(self) -> None:
+        cfg = RealismConfig()
+        cfg.phone_metrics["nine_one_one_answer_time_mean"] = 30.0
+        cfg.phone_metrics["nine_one_one_answer_time_sigma"] = 0.79
+        cfg.answer_time_targets = {"nine_one_one": [(15.0, 0.90)]}
+        checks = cfg.check_answer_time_targets(0.02)
+        assert not checks[0].ok
+        assert checks[0].gap < 0
+
+    def test_check_empty_when_no_targets(self) -> None:
+        assert RealismConfig().check_answer_time_targets() == []
+
+    def test_to_yaml_roundtrip_preserves_targets(self, tmp_path: Path) -> None:
+        cfg = RealismConfig()
+        cfg.answer_time_targets = {"non_emergency": [(20.0, 0.55)]}
+        path = tmp_path / "c.yaml"
+        cfg.to_yaml(path)
+        assert RealismConfig.from_yaml(path).answer_time_targets == {
+            "non_emergency": [(20.0, 0.55)]
+        }

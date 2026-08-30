@@ -325,10 +325,17 @@ PHONE_METRICS: dict[str, float | list[float]] = {
     "non_emergency_abandonment_rate": 0.05,
     "max_abandonment_rate": 0.12,
     "weekend_multiplier": 1.12,
-    "nine_one_one_answer_time_mu": 1.80,
-    "nine_one_one_answer_time_sigma": 0.80,
-    "non_emergency_answer_time_mu": 1.70,
-    "non_emergency_answer_time_sigma": 0.80,
+    # Answer-time lognormal parameters. The *_answer_time_mean values are
+    # *mean seconds* (the population mean call-answer time), exactly like the
+    # phone-duration means used by the incident generator. The generator
+    # converts each mean to log-space via mu = ln(mean) - sigma^2/2. The 9-1-1
+    # pair is the exact NENA 020.1-2020 fit (mu = ln(mean) - sigma^2/2 gives
+    # 90% <= 15s and 95% <= 20s); non-emergency lines are answered more slowly
+    # because they are not staffed to the same standard.
+    "nine_one_one_answer_time_mean": 7.44,
+    "nine_one_one_answer_time_sigma": 0.79,
+    "non_emergency_answer_time_mean": 18.0,
+    "non_emergency_answer_time_sigma": 0.90,
     "answer_time_thresholds": [10.0, 15.0, 20.0, 40.0],
     "answer_time_load_sensitivity": 0.25,
     "answer_time_mu_noise_sd": 0.05,

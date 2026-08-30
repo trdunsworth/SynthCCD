@@ -49,6 +49,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `non_emergency_phone_duration_mu`/`sigma` (mean ≈ 120 s), and
   `outbound_phone_duration_mu`/`sigma` (mean ≈ 60 s), with per-line
   `phone_duration_mu`/`phone_duration_sigma` overrides. Schema version bumped to 1.2.
+- Answer-time calibration command and API. `SynthCCD calibrate-answer-time` fits the
+  9-1-1 / non-emergency answer-time lognormal from published percentile-compliance
+  points (`-p threshold,prob`, repeatable) or raw per-call samples
+  (`--samples-file`, CSV/JSON/JSONL). It prints `mean seconds`/`sigma`, the implied
+  % answered within 10/15/20/40 s, and a paste-ready `phone_metrics` YAML block
+  (`--emit-yaml`). The math lives in `synth911gen3.calibration`
+  (`fit_lognormal_from_percentiles`, `fit_lognormal_from_samples`, `lognormal_cdf`,
+  `answer_time_config_block`), so a center's defaults can be anchored to its own
+  NENA-style compliance report instead of hand-picked numbers.
+- `validate-config` now checks a config's answer times against published targets.
+  A new optional `answer_time_targets` realism-YAML section lists per-line
+  percentile-compliance points (e.g. `nine_one_one: [[15, 0.90], [20, 0.95]]`, with
+  `911`/`non_emergency` aliases accepted, and dict form `{threshold, percentile}`).
+  `validate-config` reports each target's implied % answered within the threshold
+  and the gap vs the configured lognormal; `--calibration-tolerance` (default 0.02)
+  sets the pass band and `--strict` fails (exit 1) when any point misses, so CI can
+   guard against config drift away from a published service-level standard. Targets
+   are a validation aid only and never affect generated data.
+
+### Changed
+- 9-1-1 answer-time default now exactly meets NENA 020.1-2020. `nine_one_one_answer_time_mean`
+  moved `7.0 -> 7.44` and `nine_one_one_answer_time_sigma` `0.70 -> 0.79`, the joint
+  lognormal fit for 90% within 15 s / 95% within 20 s (μ = ln(mean) − σ²/2). At the
+  no-load level the standard is now met exactly; the realized hourly average (after
+  load-sensitivity and per-hour μ noise) lands around 87% within 15 s and 92% within
+  20 s. `config/example_realism.yaml` mirrors the new values, and the committed
+  regression baseline was refreshed (`phone.911_answered_10s_mean` 77.34 -> 74.68,
+  `phone.911_answered_40s_mean` 97.13 -> 96.76). Non-emergency defaults are unchanged.
 
 ### Fixed
 - `maybe_inject_system_trust()` is now guarded against re-entry: a module-level
@@ -118,6 +146,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their configured targets. `hypothesis` added to the dev dependency group.
 
 ### Changed
+- **Phone answer-time config keys switched to mean-seconds convention (breaking for
+  custom realism YAMLs).** The old log-scale keys `nine_one_one_answer_time_mu` /
+  `non_emergency_answer_time_mu` (and the per-line `answer_time_mu`) are renamed to
+  `nine_one_one_answer_time_mean` / `non_emergency_answer_time_mean` /
+  `answer_time_mean`. Values are now the *population mean answer time in seconds*
+  (the generator converts to log-scale via `mu = ln(mean) − σ²/2`, matching the
+  incident phone-duration columns), so operators no longer translate seconds into
+  log-space by hand. Defaults are recalibrated so 9-1-1 is answered faster than
+  non-emergency (9-1-1 mean 7 s, σ 0.70 → ~89% within 15 s / ~94% within 20 s;
+  non-emergency mean 18 s, σ 0.90), tracking the NENA 020.1-2020 standard. Legacy
+  `*_answer_time_mu` keys are still accepted and auto-converted (with a deprecation
+  warning) via `RealismConfig.from_yaml`. Regression baseline refreshed for the new
+  defaults.
 - TLS proxy workaround: `UV_NATIVE_TLS=true` (deprecated by uv) replaced with
   `UV_SYSTEM_CERTS=true` in AGENTS.md, CONTRIBUTING.md, and USERSGUIDE.md. Behavior
   is unchanged — uv still verifies against the OS trust store.

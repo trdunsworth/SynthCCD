@@ -410,14 +410,16 @@ phone_metrics:
   non_emergency_abandonment_rate: 0.05
   max_abandonment_rate: 0.12
   weekend_multiplier: 1.12
-  nine_one_one_answer_time_mu: 1.80
-  nine_one_one_answer_time_sigma: 0.80
-  non_emergency_answer_time_mu: 1.70
-  non_emergency_answer_time_sigma: 0.80
+  nine_one_one_answer_time_mean: 7.44
+  nine_one_one_answer_time_sigma: 0.79
+  non_emergency_answer_time_mean: 18.0
+  non_emergency_answer_time_sigma: 0.90
   answer_time_thresholds: [10.0, 15.0, 20.0, 40.0]
-  # How strongly the answer-time lognormal mu shifts with hourly load, and the
-  # per-hour random noise (std-dev on the log scale) that makes percentages
-  # vary hour-to-hour.
+  # Answer-time lognormal parameters. The *_answer_time_mean values are mean
+  # seconds (population mean call-answer time), not log-scale mu: 9-1-1 is
+  # answered faster than non-emergency because emergency lines are staffed to
+  # the NENA 020.1-2020 standard (90% <= 15s, 95% <= 20s). The generator
+  # converts each mean to log-space via mu = ln(mean) - sigma^2/2.
   answer_time_load_sensitivity: 0.25
   answer_time_mu_noise_sd: 0.05
   # Lognormal phone-duration parameters (log-scale mu, shape sigma) for the

@@ -640,6 +640,52 @@ def test_application_phone_answer_percentages_consistent_with_volume() -> None:
     assert (frame["non_emergency_answered_40s_pct"] == 100.0).any()
 
 
+def _phone_frame_with_answer_mean(mean_seconds: float, seed: int = 5):
+    from synth911gen3.generators.phone_metrics import HourlyCallCountGenerator
+    from synth911gen3.realism_config import RealismConfig
+
+    config = RealismConfig()
+    config.phone_metrics["nine_one_one_answer_time_mean"] = mean_seconds
+    request = GenerationRequest(
+        rows=200_000,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=seed,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        realism_config=config,
+    )
+    return HourlyCallCountGenerator().generate(request)
+
+
+def test_application_answer_time_mean_drives_speed() -> None:
+    """Larger answer-time mean (seconds) => fewer calls answered within 15s."""
+    fast = _phone_frame_with_answer_mean(5.0)
+    slow = _phone_frame_with_answer_mean(30.0)
+    fast_pct = fast["nine_one_one_answered_15s_pct"].mean()
+    slow_pct = slow["nine_one_one_answered_15s_pct"].mean()
+    # A 6x larger mean answer time must visibly slow the service level.
+    assert fast_pct > slow_pct + 20.0
+
+
+def test_application_default_911_faster_than_nonemergency() -> None:
+    """Defaults: 9-1-1 (faster) is answered within 15s more often than non-emergency."""
+    from synth911gen3.generators.phone_metrics import HourlyCallCountGenerator
+
+    request = GenerationRequest(
+        rows=200_000,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=5,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+    )
+    frame = HourlyCallCountGenerator().generate(request)
+    nine_one_one = frame["nine_one_one_answered_15s_pct"].mean()
+    non_emergency = frame["non_emergency_answered_15s_pct"].mean()
+    assert nine_one_one > non_emergency + 10.0
+
+
 def test_application_phone_duration_mean_columns() -> None:
     """Mean-duration columns track the lognormal population means and weight by volume."""
     from synth911gen3.generators.phone_metrics import HourlyCallCountGenerator
