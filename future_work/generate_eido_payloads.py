@@ -1,8 +1,9 @@
-import os
+import datetime
 import json
-import pandas as pd
-from datetime import datetime
+import os
 import uuid
+
+import pandas as pd
 
 # URN Prefix constants for NENA i3 compatibility
 INCIDENT_URN_PREFIX = "urn:emergency:uid:incident:indymo:"
@@ -48,12 +49,12 @@ def format_rfc3339(timestamp_str):
         return None
     try:
         # SynthCCD uses standard M/D/YYYY H:M format
-        dt = datetime.strptime(str(timestamp_str), "%m/%d/%Y %H:%M")
-        return dt.isoformat() + "Z"
+        dt = datetime.strptime(str(timestamp_str), "%m/%d/%Y %H:%M").replace(tzinfo=datetime.UTC)
+        return dt.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
     except ValueError:
         try:
-            dt = datetime.strptime(str(timestamp_str), "%Y-%m-%d %H:%M:%S")
-            return dt.isoformat() + "Z"
+            dt = datetime.strptime(str(timestamp_str), "%Y-%m-%d %H:%M:%S").replace(tzinfo=datetime.UTC)
+            return dt.strftime("%Y-%m-%dT%H:%M:%S") + "Z"
         except ValueError:
             return str(timestamp_str)
 

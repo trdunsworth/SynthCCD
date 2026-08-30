@@ -1,18 +1,20 @@
-import os
 import argparse
-import pandas as pd
-import numpy as np
+
 import matplotlib
+import numpy as np
+import pandas as pd
+
 matplotlib.use('Agg')  # Headless rendering for database/server environment
 import matplotlib.pyplot as plt
 from sqlalchemy import create_engine, text
+
 
 def pull_and_plot_compliance(db_url, output_image_path="nena_monthly_compliance_trends.png"):
     """
     Connects to a PostgreSQL database, executes NENA-compliant monthly audits,
     and generates visual compliance trend charts.
     """
-    print(f"Connecting to database...")
+    print("Connecting to database...")
     engine = create_engine(db_url)
     
     # -----------------------------------------------------------------
@@ -63,7 +65,7 @@ def pull_and_plot_compliance(db_url, output_image_path="nena_monthly_compliance_
             df_trans = pd.read_sql_query(text(transactional_query), conn)
             df_vol = pd.read_sql_query(text(volumetric_query), conn)
     except Exception as e:
-        print(f"\n[DATABASE CONNECTION ERROR]")
+        print("\n[DATABASE CONNECTION ERROR]")
         print("Could not query database. Please check your credentials and table schema.")
         print(f"Details: {e}")
         print("\n--> Fallback: Generating mock historical data for visualization demo...")

@@ -1,6 +1,6 @@
-import pandas as pd
-import numpy as np
 import warnings
+
+import pandas as pd
 
 # Suppress runtime warnings for cleaner terminal output
 warnings.simplefilter(action='ignore', category=FutureWarning)
@@ -126,7 +126,7 @@ def run_audit():
     print("================================================================================")
     print("               NENA 9-1-1 PERFORMANCE AUDIT SUMMARY REPORT")
     print("================================================================================")
-    print(f"Data Sources: IndyMo_hourly_call_counts.csv | IndyMo_incidents.csv")
+    print("Data Sources: IndyMo_hourly_call_counts.csv | IndyMo_incidents.csv")
     print("================================================================================")
     print("\n--- SECTION 1: TELEPHONY SYSTEM COMPLIANCE AUDIT ---")
     print(f"Total 9-1-1 Emergency Calls Received:  {total_911_rec:,}")
@@ -140,7 +140,7 @@ def run_audit():
     
     meets_15s = "PASS" if w_911_15s >= 90 else "FAIL"
     meets_20s = "PASS" if w_911_20s >= 95 else "FAIL"
-    print(f"\n9-1-1 ANSWERING COMPLIANCE STATUS:")
+    print("\n9-1-1 ANSWERING COMPLIANCE STATUS:")
     print(f"  - NENA 15-second Standard (90%): {meets_15s} (Actual: {w_911_15s:.2f}%)")
     print(f"  - NENA 20-second Standard (95%): {meets_20s} (Actual: {w_911_20s:.2f}%)")
     

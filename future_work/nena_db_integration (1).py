@@ -1,12 +1,19 @@
-import sys
 import os
+
 import pandas as pd
-from datetime import datetime
 from sqlalchemy import (
-    create_engine, Column, Integer, String, Boolean, Numeric, DateTime, Index, CheckConstraint
+    Boolean,
+    CheckConstraint,
+    Column,
+    DateTime,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    create_engine,
 )
-from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 # Initialize declarative base
 Base = declarative_base()
@@ -162,11 +169,11 @@ class HourlyPhoneMetric(Base):
 # =====================================================================
 def print_postgresql_ddl():
     """Prints PostgreSQL-specific DDL syntax based on the SQLAlchemy models."""
-    from sqlalchemy.schema import CreateTable
     from sqlalchemy.dialects import postgresql
+    from sqlalchemy.schema import CreateTable
     
     # Empty mock engine to compile PostgreSQL syntax
-    engine = create_engine('postgresql://')
+    create_engine('postgresql://')
     
     print("-- =====================================================================")
     print("-- POSTGRESQL NENA PERFORMANCE AUDIT COMPLIANT DDL SCHEMA")

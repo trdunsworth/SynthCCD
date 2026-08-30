@@ -1,9 +1,12 @@
 import matplotlib
+
 matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import pandas as pd
-import numpy as np
 import os
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+
 
 def create_charts():
     # Load the data
@@ -71,8 +74,8 @@ def create_charts():
     indices = np.arange(len(agencies))
     
     # Draw Turnout and Travel stacked
-    bars_turnout = ax2.bar(indices, turnout_means, bar_width, label='Turnout Time (Station to Roll)', color='#0275d8', edgecolor='#025aa5')
-    bars_travel = ax2.bar(indices, travel_means, bar_width, bottom=turnout_means, label='Travel Time (Transit to Scene)', color='#5bc0de', edgecolor='#31b0d5')
+    ax2.bar(indices, turnout_means, bar_width, label='Turnout Time (Station to Roll)', color='#0275d8', edgecolor='#025aa5')
+    ax2.bar(indices, travel_means, bar_width, bottom=turnout_means, label='Travel Time (Transit to Scene)', color='#5bc0de', edgecolor='#31b0d5')
     
     ax2.set_xticks(indices)
     ax2.set_xticklabels(agencies, fontsize=10, fontweight='bold')
