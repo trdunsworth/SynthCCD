@@ -28,6 +28,16 @@ from synth911gen3.app import Synth911Application
 from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
 from synth911gen3.exceptions import AddressLookupError, ExportError, ValidationError
 from synth911gen3.logging_conf import get_logger
+from synth911gen3.metrics import (
+    ACTIVE_REQUESTS,
+    GENERATION_COUNT,
+    GENERATION_DURATION,
+    GENERATION_ERRORS,
+    REQUEST_COUNT,
+    REQUEST_DURATION,
+    expose_metrics,
+    init_server_info,
+)
 from synth911gen3.params import build_request_from_params
 from synth911gen3.tls import maybe_inject_system_trust
 
@@ -87,6 +97,40 @@ class _RateLimitMiddleware(BaseHTTPMiddleware):
         self._hits.clear()
 
 
+# ---------------------------------------------------------------------------
+# Prometheus metrics middleware
+# ---------------------------------------------------------------------------
+
+
+class _MetricsMiddleware(BaseHTTPMiddleware):
+    """Track request count, duration, and active-request gauge per endpoint."""
+
+    async def dispatch(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
+        # Skip metrics for the /metrics endpoint itself to avoid recursion
+        if request.url.path == "/metrics":
+            return await call_next(request)
+
+        method = request.method
+        path = request.url.path
+        ACTIVE_REQUESTS.inc()
+        start = time.monotonic()
+        try:
+            response = await call_next(request)
+            elapsed = time.monotonic() - start
+            REQUEST_COUNT.labels(method=method, endpoint=path, status_code=response.status_code).inc()
+            REQUEST_DURATION.labels(method=method, endpoint=path).observe(elapsed)
+            return response
+        except Exception:
+            elapsed = time.monotonic() - start
+            REQUEST_COUNT.labels(method=method, endpoint=path, status_code=500).inc()
+            REQUEST_DURATION.labels(method=method, endpoint=path).observe(elapsed)
+            raise
+        finally:
+            ACTIVE_REQUESTS.dec()
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI):
     """Inject the OS trust store before the server starts serving requests.
@@ -96,8 +140,16 @@ async def _lifespan(app: FastAPI):
     TLS-inspecting corporate proxies. The injection is a no-op unless the
     environment variable is set and is guarded internally so the global
     ``ssl`` module is patched at most once per process.
+
+    Also initialises the ``synthccd_info`` Prometheus metric with package
+    and Python version metadata.
     """
+    import sys
+
+    from synth911gen3 import __version__ as pkg_version
+
     maybe_inject_system_trust()
+    init_server_info(version=pkg_version, python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
     yield
 
 
@@ -108,6 +160,7 @@ app = FastAPI(
     lifespan=_lifespan,
 )
 app.add_middleware(_RateLimitMiddleware)
+app.add_middleware(_MetricsMiddleware)
 
 
 class GenerationRequestModel(BaseModel):
@@ -255,6 +308,21 @@ async def health_check() -> dict[str, str]:
     return {"status": "healthy", "service": "SynthCCD"}
 
 
+@app.get("/metrics")
+async def metrics() -> Response:
+    """Prometheus metrics endpoint.
+
+    Returns the full text exposition format for scraping by a Prometheus
+    server or compatible collector.  Covers request counts, generation
+    performance, active-request gauge, and address-cache statistics.
+    """
+    payload = expose_metrics()
+    return Response(
+        content=payload,
+        media_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
 @app.get("/schema")
 async def get_schema(
     rows: int = Query(100, ge=1, description="Number of rows for schema probe"),
@@ -319,6 +387,10 @@ async def generate_data(
     Generate synthetic 911 data. Returns either a JSON summary of generated files
     or the file itself (for single-file formats like json/yaml).
     """
+    dataset_label = request_model.dataset or "incidents"
+    format_label = request_model.output_format or "csv"
+    GENERATION_COUNT.labels(dataset=dataset_label, output_format=format_label).inc()
+    gen_start = time.monotonic()
     try:
         request = _build_request(request_model)
 
@@ -364,10 +436,19 @@ async def generate_data(
             }
 
     except (AddressLookupError, ExportError, ValidationError) as exc:
+        elapsed = time.monotonic() - gen_start
+        GENERATION_DURATION.labels(dataset=dataset_label, output_format=format_label).observe(elapsed)
+        GENERATION_ERRORS.labels(dataset=dataset_label, error_type=type(exc).__name__).inc()
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
+        elapsed = time.monotonic() - gen_start
+        GENERATION_DURATION.labels(dataset=dataset_label, output_format=format_label).observe(elapsed)
+        GENERATION_ERRORS.labels(dataset=dataset_label, error_type="internal").inc()
         logger.exception("Unexpected error in /generate")
         raise HTTPException(status_code=500, detail="Internal server error")
+    else:
+        elapsed = time.monotonic() - gen_start
+        GENERATION_DURATION.labels(dataset=dataset_label, output_format=format_label).observe(elapsed)
 
 
 @app.post("/generate/stream")
@@ -379,6 +460,10 @@ async def generate_data_stream(
     Stream generated data as CSV or Parquet. For large datasets, this avoids
     loading the entire file into memory.
     """
+    dataset_label = dataset
+    format_label = request_model.output_format or "csv"
+    GENERATION_COUNT.labels(dataset=dataset_label, output_format=format_label).inc()
+    gen_start = time.monotonic()
     try:
         request = _build_request(request_model)
 
@@ -415,6 +500,8 @@ async def generate_data_stream(
                 with open(path, "rb") as f:
                     yield from f
 
+            elapsed = time.monotonic() - gen_start
+            GENERATION_DURATION.labels(dataset=dataset_label, output_format=format_label).observe(elapsed)
             return StreamingResponse(
                 iter_file(),
                 media_type=media_type,
@@ -422,8 +509,14 @@ async def generate_data_stream(
             )
 
     except (AddressLookupError, ExportError, ValidationError) as exc:
+        elapsed = time.monotonic() - gen_start
+        GENERATION_DURATION.labels(dataset=dataset_label, output_format=format_label).observe(elapsed)
+        GENERATION_ERRORS.labels(dataset=dataset_label, error_type=type(exc).__name__).inc()
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception:
+        elapsed = time.monotonic() - gen_start
+        GENERATION_DURATION.labels(dataset=dataset_label, output_format=format_label).observe(elapsed)
+        GENERATION_ERRORS.labels(dataset=dataset_label, error_type="internal").inc()
         logger.exception("Unexpected error in /generate/stream")
         raise HTTPException(status_code=500, detail="Internal server error")
 

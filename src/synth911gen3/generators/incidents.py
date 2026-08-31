@@ -17,6 +17,7 @@ from __future__ import annotations
 import random as _random
 import uuid as _uuid
 from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -64,6 +65,23 @@ _ADDRESS_FIELDS = (
 )
 
 logger = get_logger("incidents")
+
+
+@dataclass(slots=True)
+class PreparedState:
+    """Cached results of :meth:`IncidentGenerator._prepare`.
+
+    Holds the resolved realism config, shift config, personnel pools,
+    loaded addresses, and RNG so callers can pass pre-computed state
+    into :meth:`generate_chunks` without re-running address fetches
+    and personnel builds.
+    """
+
+    realism: RealismConfig
+    shift_config: ShiftConfig
+    shift_pools: dict[str, dict[str, Any]]
+    addresses: list
+    rng: np.random.Generator
 
 
 def _weighted_choice_from_pairs(
@@ -433,9 +451,37 @@ class IncidentGenerator:
         independent probe run (separate RNG) so the estimate does not consume
         the seeded generation stream. Returns ``request.rows`` when the whole
         dataset fits in one chunk.
+
+        .. note::
+
+           For callers that also intend to call :meth:`generate_chunks`, use
+           :meth:`resolve_chunk_rows_with_state` instead to avoid running
+           the expensive ``_prepare()`` twice.
         """
         realism, shift_config, shift_pools, addresses, _rng = self._prepare(request)
         return self._resolve_chunk_rows(request, realism, shift_config, shift_pools, addresses)
+
+    def resolve_chunk_rows_with_state(
+        self, request: GenerationRequest
+    ) -> tuple[int, PreparedState]:
+        """Like :meth:`resolve_chunk_rows` but also returns the :class:`PreparedState`.
+
+        Callers that probe the chunk size *and* then generate can pass the
+        returned state into :meth:`generate_chunks`, eliminating the
+        duplicate address-fetch + personnel-build.
+        """
+        realism, shift_config, shift_pools, addresses, rng = self._prepare(request)
+        state = PreparedState(
+            realism=realism,
+            shift_config=shift_config,
+            shift_pools=shift_pools,
+            addresses=addresses,
+            rng=rng,
+        )
+        chunk_rows = self._resolve_chunk_rows(
+            request, realism, shift_config, shift_pools, addresses
+        )
+        return chunk_rows, state
 
     def _resolve_chunk_rows(
         self,
@@ -475,6 +521,7 @@ class IncidentGenerator:
         request: GenerationRequest,
         chunk_rows: int | None = None,
         on_progress: Callable[[int, int], None] | None = None,
+        prepared: PreparedState | None = None,
     ) -> Iterator[pd.DataFrame]:
         """Yield one ``pd.DataFrame`` per chunk, keeping peak memory bounded.
 
@@ -483,8 +530,18 @@ class IncidentGenerator:
         RNG across chunks so the stream is deterministic for a given seed and
         chunk plan; ``internal_reference_number`` counters continue across
         chunks and ``id_number`` values stay globally sequential.
+
+        When *prepared* is supplied (from :meth:`resolve_chunk_rows_with_state`),
+        the expensive address-fetch and personnel-build steps are skipped.
         """
-        realism, shift_config, shift_pools, addresses, rng = self._prepare(request)
+        if prepared is not None:
+            realism = prepared.realism
+            shift_config = prepared.shift_config
+            shift_pools = prepared.shift_pools
+            addresses = prepared.addresses
+            rng = prepared.rng
+        else:
+            realism, shift_config, shift_pools, addresses, rng = self._prepare(request)
         if chunk_rows is None:
             chunk_rows = self._resolve_chunk_rows(
                 request, realism, shift_config, shift_pools, addresses

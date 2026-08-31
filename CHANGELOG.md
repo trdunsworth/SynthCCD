@@ -10,6 +10,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Load testing benchmarks.** `tests/test_benchmarks.py` with `pytest-benchmark`
+  measures incident-generation throughput at four scale tiers (10K, 100K, 1M, 10M
+  rows) and tracks peak memory via `tracemalloc`. Run with `--benchmark-only` for
+  throughput tables; without for memory assertions. CI job (`benchmarks`) runs
+  10K/100K tiers and uploads JSON results as artifacts for regression tracking.
+  10M tier excluded from default runs (slow); select with `-k 10m`.
+- **Prometheus metrics endpoint.** `GET /metrics` serves the full text exposition
+  format for scraping by Prometheus or compatible collectors. New `synth911gen3.metrics`
+  module with counters (`synthccd_requests_total`, `synthccd_generations_total`,
+  `synthccd_generation_rows_total`, `synthccd_generation_errors_total`), histograms
+  (`synthccd_request_duration_seconds`, `synthccd_generation_duration_seconds`),
+  gauges (`synthccd_active_requests`), and info (`synthccd_info`). `_MetricsMiddleware`
+  in `serve.py` tracks per-endpoint request count, duration, and active-request gauge.
+  Generation endpoints record count/duration/errors by dataset and output format.
+  `app.py` increments row counters per dataset. Covered by 16 tests in
+  `tests/test_metrics.py`. Documented in `USERSGUIDE.md`.
 - Bundled CLI samples in `config/samples/`: `small_centre.json` (rural combined-console
   PSAP), `midsize_centre.yaml` (Alexandria-style LAW vs FIRE/EMS consoles via a companion
   realism YAML), `large_centre.toml` (metro centre with SQLite output, population-based

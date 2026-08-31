@@ -261,3 +261,84 @@ def test_generation_request_rejects_non_positive_budget(budget: int) -> None:
 
 def test_generation_request_accepts_positive_budget() -> None:
     GenerationRequest(max_memory_bytes=1_048_576).validate()
+
+
+class TestPreparedState:
+    """Tests for resolve_chunk_rows_with_state and the prepared parameter."""
+
+    def test_resolve_chunk_rows_with_state_returns_tuple(self) -> None:
+        """resolve_chunk_rows_with_state returns (chunk_rows, PreparedState)."""
+        provider = _provider()
+        request = _request(rows=100_000, max_memory_bytes=64 * 1024)
+        gen = IncidentGenerator(provider)
+
+        chunk_rows, state = gen.resolve_chunk_rows_with_state(request)
+
+        assert 0 < chunk_rows < 100_000
+        from synth911gen3.generators.incidents import PreparedState
+
+        assert isinstance(state, PreparedState)
+        assert state.realism is not None
+        assert state.shift_config is not None
+        assert state.shift_pools is not None
+        assert len(state.addresses) == 5
+        assert state.rng is not None
+
+    def test_resolve_chunk_rows_with_state_matches_resolve_chunk_rows(self) -> None:
+        """Chunk rows from with_state matches the standalone method."""
+        provider = _provider()
+        request = _request(rows=100_000, max_memory_bytes=64 * 1024)
+        gen = IncidentGenerator(provider)
+
+        chunk_rows_standalone = gen.resolve_chunk_rows(request)
+        chunk_rows_with_state, _ = gen.resolve_chunk_rows_with_state(request)
+
+        assert chunk_rows_standalone == chunk_rows_with_state
+
+    def test_generate_chunks_with_prepared_state(self) -> None:
+        """generate_chunks with prepared state produces identical output."""
+        provider = _provider()
+        request = _request(rows=40, seed=17)
+        gen = IncidentGenerator(provider)
+
+        # First generate without prepared state
+        chunk_rows = gen.resolve_chunk_rows(request)
+        result_without = pd.concat(
+            list(gen.generate_chunks(request, chunk_rows=chunk_rows))
+        )
+
+        # Then generate with prepared state
+        gen2 = IncidentGenerator(provider)
+        chunk_rows_with_state, state = gen2.resolve_chunk_rows_with_state(request)
+        assert chunk_rows == chunk_rows_with_state
+        result_with = pd.concat(
+            list(gen2.generate_chunks(request, chunk_rows=chunk_rows, prepared=state))
+        )
+
+        assert result_without.equals(result_with)
+
+    def test_generate_chunks_with_prepared_state_deterministic(self) -> None:
+        """generate_chunks with prepared state is deterministic for same seed."""
+        provider = _provider()
+        request = _request(rows=40, seed=42)
+        gen = IncidentGenerator(provider)
+
+        _, state = gen.resolve_chunk_rows_with_state(request)
+        result1 = pd.concat(list(gen.generate_chunks(request, chunk_rows=20, prepared=state)))
+
+        gen2 = IncidentGenerator(provider)
+        _, state2 = gen2.resolve_chunk_rows_with_state(request)
+        result2 = pd.concat(list(gen2.generate_chunks(request, chunk_rows=20, prepared=state2)))
+
+        assert result1.equals(result2)
+
+    def test_generate_chunks_without_prepared_state_still_works(self) -> None:
+        """generate_chunks without prepared state (backward compat) still works."""
+        provider = _provider()
+        request = _request(rows=40, seed=99)
+        gen = IncidentGenerator(provider)
+
+        result = pd.concat(list(gen.generate_chunks(request, chunk_rows=20)))
+
+        assert len(result) == 40
+        assert result["id_number"].tolist() == list(range(1, 41))

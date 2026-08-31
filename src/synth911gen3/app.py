@@ -21,6 +21,7 @@ from .exporters import export_chunked_generator, export_generated_data, export_m
 from .generators import HourlyCallCountGenerator, IncidentGenerator
 from .logging_conf import get_logger
 from .manifest import Manifest
+from .metrics import GENERATION_ROWS
 
 logger = get_logger("app")
 
@@ -104,6 +105,7 @@ class Synth911Application:
                 logger.info(
                     "Incidents built: %d rows x %d columns", len(incidents), len(incidents.columns)
                 )
+                GENERATION_ROWS.labels(dataset="incidents").inc(len(incidents))
 
         if request.dataset in (DatasetKind.PHONE, DatasetKind.ALL):
             logger.info("Building hourly phone-metrics dataset")
@@ -114,6 +116,7 @@ class Synth911Application:
                 len(hourly_call_counts),
                 len(hourly_call_counts.columns),
             )
+            GENERATION_ROWS.labels(dataset="phone").inc(len(hourly_call_counts))
 
         logger.debug("Exporting datasets (%s)", request.output_format.value)
         artifacts: dict[str, object] = dict(streamed_artifacts)

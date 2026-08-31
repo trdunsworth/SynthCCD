@@ -487,7 +487,7 @@ recommendation docs in `docs/`, and direct code review.
   export so Parquet footers carry the same provenance as the sidecar.
 - [ ] **P2 — Cloud storage direct write.** Stream output directly to S3/GCS/Azure Blob without local staging.
 - [ ] **P2 — Delta Lake / Iceberg table format.** Support writing to modern table formats for ACID transactions and time travel.
-- [ ] **P2 — Prometheus metrics endpoint.** Expose generation metrics (rows/sec, memory usage, queue depths) for monitoring.
+- [x] **P2 — Prometheus metrics endpoint.** Expose generation metrics (rows/sec, memory usage, queue depths) for monitoring. Added `synth911gen3.metrics` module with counters (`synthccd_requests_total`, `synthccd_generations_total`, `synthccd_generation_rows_total`, `synthccd_generation_errors_total`), histograms (`synthccd_request_duration_seconds`, `synthccd_generation_duration_seconds`), gauges (`synthccd_active_requests`), and info (`synthccd_info`). Instrumented `serve.py` with `_MetricsMiddleware` (request count/duration/active-gauge) and a `GET /metrics` endpoint serving Prometheus text format. Generation endpoints track `GENERATION_COUNT`, `GENERATION_DURATION`, and `GENERATION_ERRORS` by dataset/format. `app.py` increments `GENERATION_ROWS` per dataset. `__version__` added to package `__init__.py`. Covered by 16 tests in `tests/test_metrics.py`.
 
 ### Testing / Quality
 - [x] **P2 — Property-based testing.** Added hypothesis-based tests for statistical properties
@@ -511,7 +511,7 @@ recommendation docs in `docs/`, and direct code review.
   missing keys, custom tolerances, JSON round-trips). `scripts/update_regression_baseline.py`
   refreshes the baseline after intentional realism changes and prints a value diff for
   review.
-- [ ] **P2 — Load testing benchmarks.** CI benchmarks for generation throughput at various scales (10K, 100K, 1M, 10M rows).
+- [x] **P2 — Load testing benchmarks.** CI benchmarks for generation throughput at various scales (10K, 100K, 1M, 10M rows). Added `tests/test_benchmarks.py` with `pytest-benchmark` (dev dependency) measuring incident-generation throughput at four scale tiers (10K, 100K, 1M, 10M rows) and peak-memory tracking via `tracemalloc`. Run with `--benchmark-only` for throughput tables or without for memory assertions. CI job (`benchmarks`) runs 10K/100K tiers and uploads JSON results as artifacts. 10M tier excluded from default runs (slow); select with `-k 10m`.
 
 ### Documentation
 - [ ] **P2 — Publish Sphinx docs to the LLC website.** The Sphinx site builds cleanly via
@@ -612,12 +612,18 @@ the specific problem, and the fix direction.
 
 ### Efficiency / Memory (P1)
 
-- [ ] **P1 — Eliminate double `_prepare()` in the chunk pipeline.**
+- [x] **P1 — Eliminate double `_prepare()` in the chunk pipeline.**
   `incidents.py:333` (`resolve_chunk_rows`) and `incidents.py:383`
   (`generate_chunks`) both call `_prepare()`. When callers probe then
   generate, the address-fetch + personnel-build runs twice. Fix: expose a
   `generate_chunks(request, prepared=None)` overload that accepts
   pre-computed state, or cache `_prepare()` results on the instance.
+  **Done:** Added `PreparedState` dataclass holding `(realism, shift_config,
+  shift_pools, addresses, rng)`. New `resolve_chunk_rows_with_state()` returns
+  `(chunk_rows, PreparedState)`. `generate_chunks()` accepts optional
+  `prepared: PreparedState | None` — when supplied, skips `_prepare()`.
+  Backward-compatible: existing callers unchanged. Covered by 5 new tests in
+  `tests/test_chunking.py` (`TestPreparedState`).
 
 - [ ] **P1 — Replace `frame.copy()` in `_records_for_serialization`.**
   `exporters.py:76` copies the entire DataFrame just to format datetime

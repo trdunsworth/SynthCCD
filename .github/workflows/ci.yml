@@ -110,3 +110,40 @@ jobs:
             --output-stem roundtrip_test \
             --format csv \
             --no-db-indexes
+
+  benchmarks:
+    name: load benchmarks (10K/100K)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --locked
+
+      - name: Run 10K and 100K throughput benchmarks
+        run: |
+          uv run pytest tests/test_benchmarks.py \
+            --benchmark-only \
+            -k "10k or 100k" \
+            --benchmark-json=/tmp/benchmark.json \
+            -v
+
+      - name: Upload benchmark results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results
+          path: /tmp/benchmark.json
+          retention-days: 30

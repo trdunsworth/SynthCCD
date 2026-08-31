@@ -755,6 +755,7 @@ and provides:
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/health` | GET | Health check |
+| `/metrics` | GET | Prometheus metrics (text exposition format) |
 | `/schema` | GET | Schema preview (no OSM fetch, no data generation) |
 | `/generate` | POST | Generate data (returns JSON summary or file download) |
 | `/generate/stream` | POST | Stream CSV/Parquet for large datasets |
@@ -766,6 +767,38 @@ per client IP. When exceeded, the endpoint returns `429 Too Many Requests` with 
 `Retry-After` header. To override, edit `_DEFAULT_RATE_LIMIT` and
 `_DEFAULT_WINDOW_SECONDS` in `serve.py`, or use `uvicorn` directly with a
 production reverse proxy that handles throttling.
+
+### Prometheus Metrics (GET `/metrics`)
+
+The server exposes Prometheus metrics in text exposition format at `/metrics`:
+
+```bash
+# Scrape metrics
+curl http://localhost:8000/metrics
+
+# Example Prometheus scrape config
+scrape_configs:
+  - job_name: "synthccd"
+    static_configs:
+      - targets: ["localhost:8000"]
+    metrics_path: "/metrics"
+```
+
+Available metrics:
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `synthccd_requests_total` | Counter | method, endpoint, status_code | Total HTTP requests served |
+| `synthccd_request_duration_seconds` | Histogram | method, endpoint | HTTP request latency |
+| `synthccd_active_requests` | Gauge | — | Requests currently being processed |
+| `synthccd_generations_total` | Counter | dataset, output_format | Total generation runs started |
+| `synthccd_generation_rows_total` | Counter | dataset | Total rows generated |
+| `synthccd_generation_duration_seconds` | Histogram | dataset, output_format | Generation time (request to result) |
+| `synthccd_generation_errors_total` | Counter | dataset, error_type | Generation errors by type |
+| `synthccd_info` | Info | version, python_version | Server build metadata |
+
+The `/metrics` endpoint itself is excluded from request tracking to avoid
+recursive metric inflation.
 
 ### Bind Address
 
