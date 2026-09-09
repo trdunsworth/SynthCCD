@@ -50,10 +50,32 @@ DEFAULT_MAX_MEMORY_BYTES = 2 * 1024**3
 # Probe rows used to estimate per-row memory for the budget guard.
 MEMORY_PROBE_ROWS = 10_000
 
-# Typical US PSAP calls per 1,000 population per year (NFPA/NAEM data).
-# Used when ``population`` is set on the generation request to derive
-# phone-metrics volume independently from the incident row count.
-CALLS_PER_1000_POPULATION_YEARLY: float = 2_500.0
+# 911-only calls per 1,000 residents per year, tiered by service-area
+# population. Larger/urban centers run hotter per capita than rural ones;
+# the tiers are anchored to published open-data benchmarks (Reading-B
+# convention: "received" = answered + abandoned):
+#   <100K .... ~400  (Vermont E911 2025: 233K calls / 648K pop ~= 360;
+#                     Iowa FY24: ~1.19M / 3.2M ~= 372)
+#   100K-500K . ~650 (Norfolk VA Jan 2026: ~13.8K/mo -> ~722 annualized)
+#   500K-1M .. 1000 (below measured KC/DC; Kansas City MO Reading B:
+#                     ~22.3K/wk -> ~1,148; DC OUC dashboard: ~2.5K/day -> ~1,300)
+#   1M+ ..... 1100 (NYC 911 End-to-End / Calls for Service band ~1,100-1,300)
+# Each entry is ``(exclusive_upper_bound, rate)``; populations at or above
+# the last bound use the last rate. Overridable per center via the
+# ``population_rates`` realism-config section.
+EMERGENCY_CALLS_PER_1000_BY_POPULATION: tuple[tuple[float, float], ...] = (
+    (100_000, 400.0),
+    (500_000, 650.0),
+    (1_000_000, 1_000.0),
+    (float("inf"), 1_100.0),
+)
+
+# Incident rows per 1,000 residents per year, used when ``population`` is set
+# and ``rows`` is omitted. Anchored to Kansas City MO Reading B: ~24,000
+# incidents/week at 521,250 residents -> ~2,394 (rounded to 2,200 to stay
+# conservative against the ~1.0 incident-per-received-call assumption).
+# Overridable per center via ``population_rates``.
+INCIDENTS_PER_1000_POPULATION_YEARLY: float = 2_200.0
 
 # Minimum ratio of non-emergency to emergency received calls.
 # After independent Poisson draws, non-emergency is floored to at least
@@ -317,13 +339,24 @@ DISPOSITION_PROFILES = {
 
 PHONE_METRICS: dict[str, float | list[float]] = {
     "min_hourly_volume": 2.0,
-    "nine_one_one_received_fraction": 0.48,
-    "non_emergency_received_fraction": 0.58,
+    # Volume fractions are independent per-line Poisson means (not shares).
+    # Calibrated to Kansas City MO Reading B: ~51.5% of received calls are
+    # 911 (0.55 / (0.55 + 0.52) ~= 51.4%), cross-checked against Norfolk VA
+    # (~47% of answered) and the MARC regional blend (~36%, suburban-weighted).
+    "nine_one_one_received_fraction": 0.55,
+    "non_emergency_received_fraction": 0.52,
     "outbound_calls_fraction": 0.26,
-    "nine_one_one_abandonment_rate": 0.02,
+    # Abandonment as a share of received calls. Default ~7% sits inside the
+    # published band: Vermont 2025 6.5%, DC dashboard 6-18% day-to-day,
+    # Norfolk VA Jan 2026 16.8%, KC Reading B ~9%.
+    "nine_one_one_abandonment_rate": 0.07,
     "night_abandonment_increment": 0.03,
     "non_emergency_abandonment_rate": 0.05,
-    "max_abandonment_rate": 0.12,
+    "max_abandonment_rate": 0.20,
+    # Floor of non-emergency received as a multiple of emergency received.
+    # National default 1.2 (non-emergency exceeds emergency); urban centers
+    # with a 911 share above ~45% (e.g. Kansas City 51.5%) override to ~0.9.
+    "non_emergency_floor_ratio": 1.2,
     "weekend_multiplier": 1.12,
     # Answer-time lognormal parameters. The *_answer_time_mean values are
     # *mean seconds* (the population mean call-answer time), exactly like the

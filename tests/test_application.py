@@ -241,6 +241,41 @@ def test_application_hour_dow_week_no_derive_from_call_start_time() -> None:
         assert row["week_no"] == ts.isocalendar().week
 
 
+def test_application_week_no_rolls_over_on_monday() -> None:
+    """ISO week numbers change at Monday 00:00, not Sunday.
+
+    Jan 3-5 2026 spans Saturday -> Sunday -> Monday. Saturday and Sunday
+    rows must share ISO week 1 while Monday rows move to week 2, locking in
+    the ``isocalendar`` derivation against a Sunday-start regression.
+    """
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=2000,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=8,
+        start_date=date(2026, 1, 3),
+        end_date=date(2026, 1, 5),
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.incidents is not None
+    frame = result.incidents
+    weeks_by_dow = {
+        dow: set(frame.loc[frame["dow"] == dow, "week_no"].tolist())
+        for dow in ("SAT", "SUN", "MON")
+    }
+    assert weeks_by_dow["SAT"] == {1}
+    assert weeks_by_dow["SUN"] == {1}
+    assert weeks_by_dow["MON"] == {2}
+
+
 def test_application_integer_id_format_is_sequential() -> None:
     provider = StaticAddressProvider(
         [
@@ -910,3 +945,159 @@ def test_psap_agency_law_reception_methods_valid() -> None:
     from synth911gen3.constants import CALL_RECEPTION_WEIGHTS
 
     assert methods.issubset(set(CALL_RECEPTION_WEIGHTS.keys()))
+
+
+# ---------------------------------------------------------------------------
+# include_event_counts
+# ---------------------------------------------------------------------------
+
+
+def test_event_counts_column_added_when_enabled() -> None:
+    """enable_event_counts adds events_created column to hourly call counts."""
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=100,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.hourly_call_counts is not None
+    assert "events_created" in result.hourly_call_counts.columns
+    assert len(result.hourly_call_counts) == 7 * 24
+
+
+def test_event_counts_not_added_when_disabled() -> None:
+    """Without include_event_counts, hourly call counts has no events_created column."""
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=100,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=False,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.hourly_call_counts is not None
+    assert "events_created" not in result.hourly_call_counts.columns
+
+
+def test_event_counts_total_matches_incident_count() -> None:
+    """The sum of events_created should equal the total number of incidents."""
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+            Address("55 W 39th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=500,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.PANDAS,
+        seed=77,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.incidents is not None
+    assert result.hourly_call_counts is not None
+    total_events = result.hourly_call_counts["events_created"].sum()
+    assert total_events == len(result.incidents)
+
+
+def test_event_counts_non_negative() -> None:
+    """events_created values should be non-negative integers."""
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=200,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.PANDAS,
+        seed=55,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.hourly_call_counts is not None
+    ec = result.hourly_call_counts["events_created"]
+    assert (ec >= 0).all()
+    assert ec.dtype in ("int64", "int32", "intp")
+
+
+def test_event_counts_phone_only_no_column() -> None:
+    """When dataset=phone, include_event_counts has no effect (no incidents to count)."""
+    request = GenerationRequest(
+        rows=1000,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=10,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    result = Synth911Application().generate(request)
+
+    assert result.hourly_call_counts is not None
+    assert "events_created" not in result.hourly_call_counts.columns
+
+
+def test_event_counts_csv_export(tmp_path) -> None:
+    """CSV export with include_event_counts produces a file with events_created."""
+    import pandas as pd
+
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=50,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.CSV,
+        output_dir=tmp_path,
+        output_stem="test_events",
+        seed=33,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    Synth911Application(address_provider=provider).generate(request)
+
+    phone_path = tmp_path / "test_events_hourly_call_counts.csv"
+    assert phone_path.exists()
+    df = pd.read_csv(phone_path)
+    assert "events_created" in df.columns
+    assert df["events_created"].sum() > 0

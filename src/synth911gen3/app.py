@@ -11,7 +11,8 @@ manifest.
 from __future__ import annotations
 
 from collections.abc import Callable
-from itertools import chain
+
+import pandas as pd
 
 from .addresses import AddressProvider, OpenStreetMapAddressProvider
 from .config import DatasetKind, GenerationRequest, OutputFormat
@@ -51,10 +52,24 @@ class Synth911Application:
             streamed artifacts instead of frames.
         """
         request.validate()
+        # Resolve the rows/population precedence once up front so every
+        # downstream consumer (chunking, generators, manifest, logging) sees
+        # a concrete count. Explicit rows always win; population derivation
+        # only fills the gap (see GenerationRequest.resolved_rows).
+        if request.rows is None:
+            request.rows = request.resolved_rows()
+            if request.population is not None:
+                logger.info(
+                    "Derived incident rows from population %d: %d rows",
+                    request.population,
+                    request.rows,
+                )
+        assert request.rows is not None  # narrowed: resolved above
 
         datasets = {}
         incidents = None
         hourly_call_counts = None
+        hourly_event_counts: dict[pd.Timestamp, int] | None = None
         streamed_artifacts: dict[str, object] = {}
 
         if request.dataset in (DatasetKind.INCIDENTS, DatasetKind.ALL):
@@ -79,8 +94,23 @@ class Synth911Application:
                         chunk_metadata = Manifest.from_request(
                             request, {"incidents": first_chunk}
                         ).to_kv_metadata()
+                    # Accumulate event counts per hour when requested, then
+                    # chain all chunks (including the first) for export.
+                    hourly_event_counts: dict[pd.Timestamp, int] | None = None
+                    all_chunks: list[pd.DataFrame] = [first_chunk]
+                    if request.include_event_counts:
+                        hourly_event_counts = {}
+                        all_chunks = [first_chunk, *chunk_frames]
+                        for chunk in all_chunks:
+                            hours = chunk["call_start_time"].dt.floor("h")
+                            for hour, count in hours.value_counts().items():
+                                hourly_event_counts[hour] = (
+                                    hourly_event_counts.get(hour, 0) + int(count)
+                                )
+                    else:
+                        all_chunks.extend(chunk_frames)
                     path = export_chunked_generator(
-                        chain([first_chunk], chunk_frames),
+                        iter(all_chunks),
                         output_format=request.output_format,
                         output_dir=request.output_dir,
                         output_stem=request.output_stem,
@@ -106,10 +136,25 @@ class Synth911Application:
                     "Incidents built: %d rows x %d columns", len(incidents), len(incidents.columns)
                 )
                 GENERATION_ROWS.labels(dataset="incidents").inc(len(incidents))
+                if request.include_event_counts:
+                    hourly_event_counts = {}
+                    hours = incidents["call_start_time"].dt.floor("h")
+                    for hour, count in hours.value_counts().items():
+                        hourly_event_counts[hour] = int(count)
 
         if request.dataset in (DatasetKind.PHONE, DatasetKind.ALL):
             logger.info("Building hourly phone-metrics dataset")
             hourly_call_counts = HourlyCallCountGenerator().generate(request)
+            if hourly_event_counts is not None:
+                event_series = pd.Series(hourly_event_counts, dtype="int64")
+                hour_key = hourly_call_counts["hour_start"].dt.floor("h")
+                hourly_call_counts["events_created"] = (
+                    hour_key.map(event_series).fillna(0).astype(int)
+                )
+                logger.info(
+                    "Added events_created column (total events: %d)",
+                    hourly_call_counts["events_created"].sum(),
+                )
             datasets["hourly_call_counts"] = hourly_call_counts
             logger.info(
                 "Hourly phone metrics built: %d rows x %d columns",

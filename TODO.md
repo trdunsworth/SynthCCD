@@ -384,12 +384,38 @@ recommendation docs in `docs/`, and direct code review.
 - [ ] **P2 — Cadence/queueing simulation.** Constrained simulation with unit availability queues (simpy) for dispatch realism. Prototype at P2/P3.
 - [ ] **P2 — Weather and seasonal correlation enhancements.** Current seasonal multipliers are static; integrate real weather data (temperature, precipitation) to drive problem type correlations dynamically.
 - [ ] **P2 — Timezone-aware timestamps.** Support non-UTC timestamps and hourly-metric localization for deployments outside single timezone.
+- [ ] **P2 — Automatic population lookup when `--population` is omitted.** When the
+  requester doesn't know the service-area population, resolve it from the area before
+  generation so population-derived rows/volume still engage: (1) OSM Nominatim
+  `extratags.population` from the already-performed area geocode (no extra request);
+  (2) US Census Geocoder + ACS 5-year API for US areas; (3) persist the resolved value
+  in the address-cache `.meta.json` sidecar alongside `resolved_country`. Explicit
+  `--population` always wins; the resolved value (and its source) is logged and recorded
+  in the manifest. Reject implausible values (≤ 0) and warn when sources disagree by
+  more than ~25%. Covered by tests with mocked HTTP (no network in the suite).
 - [x] **P2 — Population-based phone-metrics volume.** Added `--population` flag to derive
   phone-metrics call volume from service-area population (calls per 1,000 residents per year)
   instead of the incident row count. Also added non-emergency floor constraint ensuring
   non-emergency calls always exceed emergency calls (ratio ≥ 1.2×). Added `total_emergency_calls`,
   `total_nonemergency_calls`, and `total_calls` aggregate columns to the phone-metrics output.
   Schema version bumped to 1.1.
+  Extended (Sep 2026, Reading-B calibration): flat per-capita constant replaced by
+  tiered `population_rates.emergency_tiers` (400/650/1000/1100 by population bracket,
+  anchored to VT/IA/Norfolk/KC/DC/NYC open data); 911 volume re-anchored to the tiered
+  rate with other lines following via fractions; `incidents_per_1000_yearly` (2200)
+  derives incident rows when `--rows` is omitted; `rows` is now optional (`None` =
+  unspecified) with explicit-rows > population > 10,000 precedence; 911 share
+  recalibrated to 0.55/0.52 (~51.4%, KC 51.5%), 911 abandonment 0.02 → 0.07
+  (published band 6.5–16.8%), cap 0.12 → 0.20, and the floor is now a per-center
+  `non_emergency_floor_ratio` override (default 1.2, KC 0.9). Shipped
+  `config/calibrations/` (KC/NYC/DC/Norfolk/King County/Vermont) with an index
+  README. Covered by `tests/test_population_scaling.py` (21 tests); regression
+  baseline refreshed.
+- [x] **P1 — Hourly event counts in phone metrics.** Added `--include-event-counts`
+  (params key `include_event_counts`, TUI select): with `dataset=all`, the hourly
+  phone-metrics frame gains an `events_created` column binning incidents per hour
+  for correlation analysis and forecasting controls. Covered by 6 tests in
+  `tests/test_application.py`; documented in `USERSGUIDE.md`.
 - [x] **P2 — SQLite database target.** Add SQLite as a lightweight database export option alongside PostgreSQL/SQL Server/MariaDB/DuckDB.
   Added `SQLITE` to `OutputFormat`/`DatabaseDialect` (config + pydantic schema), a file-based
   `_create_sqlite_engine()` in `db_exporter.py` (stdlib `sqlite3` driver, `db_name` defaults to

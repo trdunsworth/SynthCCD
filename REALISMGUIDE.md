@@ -153,21 +153,33 @@ dispatch_init_fraction:
 # volume, abandonment rates, weekend multiplier, and answer-time distributions)
 phone_metrics:
   min_hourly_volume: 2.0
-  nine_one_one_received_fraction: 0.48
-  non_emergency_received_fraction: 0.58
+  nine_one_one_received_fraction: 0.55
+  non_emergency_received_fraction: 0.52
   outbound_calls_fraction: 0.26
-  nine_one_one_abandonment_rate: 0.02
+  nine_one_one_abandonment_rate: 0.07
   night_abandonment_increment: 0.03
   non_emergency_abandonment_rate: 0.05
-  max_abandonment_rate: 0.12
+  max_abandonment_rate: 0.20
+  non_emergency_floor_ratio: 1.2
   weekend_multiplier: 1.12
-  nine_one_one_answer_time_mean: 7.0
-  nine_one_one_answer_time_sigma: 0.70
+  nine_one_one_answer_time_mean: 7.44
+  nine_one_one_answer_time_sigma: 0.79
   non_emergency_answer_time_mean: 18.0
   non_emergency_answer_time_sigma: 0.90
   answer_time_thresholds: [10, 15, 20, 40]
   answer_time_load_sensitivity: 0.25
   answer_time_mu_noise_sd: 0.05
+
+# Population-based volume calibration (tiered 911-only rates + incident rate).
+# emergency_tiers entries are [exclusive_upper_bound, calls_per_1000_per_year];
+# a null bound means infinity. Partial sections merge over these defaults.
+population_rates:
+  emergency_tiers:
+    - [100000, 400.0]
+    - [500000, 650.0]
+    - [1000000, 1000.0]
+    - [null, 1100.0]
+  incidents_per_1000_yearly: 2200.0
 
 # Diurnal call volume pattern (24 values for hours 0-23, will be normalized)
 hourly_weights:
@@ -666,23 +678,26 @@ A weekend multiplier (+12% Fri/Sat) is configurable via `phone_metrics.weekend_m
 
 ### Hourly Phone Metrics
 
-Hourly call counts are driven by a base volume (`rows / hours`, floored at
-`min_hourly_volume`) split by fractions per call type, with abandonment drawn
-binomial on the received counts:
+Hourly call counts are driven by a base volume (incident rows / hours, or the
+population-anchored 911 volume — see Population-Based Volume Scaling below),
+floored at `min_hourly_volume` and split by fractions per call type, with
+abandonment drawn binomial on the received counts. The volume fractions are
+independent per-line Poisson means, not shares of a fixed total:
 
 | Key | Default | Meaning |
 |-----|---------|---------|
 | `min_hourly_volume` | 2.0 | Floor on base calls-per-hour |
-| `nine_one_one_received_fraction` | 0.48 | Share of base volume received as 9-1-1 |
-| `non_emergency_received_fraction` | 0.58 | Share received as non-emergency |
-| `outbound_calls_fraction` | 0.26 | Share placed as outbound |
-| `nine_one_one_abandonment_rate` | 0.02 | Baseline 9-1-1 abandonment rate |
+| `nine_one_one_received_fraction` | 0.55 | Per-line mean for 9-1-1 received (≈51.4% of received with the 0.52 non-emergency fraction; Kansas City Reading B: 51.5%) |
+| `non_emergency_received_fraction` | 0.52 | Per-line mean for non-emergency received |
+| `outbound_calls_fraction` | 0.26 | Per-line mean for outbound placed |
+| `nine_one_one_abandonment_rate` | 0.07 | Baseline 9-1-1 abandonment rate (published band: VT 6.5%, DC 6–18%, Norfolk 16.8%, KC ~9%) |
 | `night_abandonment_increment` | 0.03 | Added to 9-1-1 rate during 00:00-05:59 |
 | `non_emergency_abandonment_rate` | 0.05 | Non-emergency abandonment rate |
-| `max_abandonment_rate` | 0.12 | Cap applied to abandonment draws |
+| `max_abandonment_rate` | 0.20 | Cap applied to abandonment draws |
+| `non_emergency_floor_ratio` | 1.2 | Floor of non-emergency received as a multiple of emergency received (overridable per center; KC uses 0.9) |
 | `weekend_multiplier` | 1.12 | Volume multiplier on Fri/Sat |
-| `nine_one_one_answer_time_mean` | 7.0 | Population **mean** answer time in seconds for 9-1-1 (converted to lognormal μ = ln(mean) − σ²/2). Calibrated to NENA 020.1-2020 (90% ≤ 15 s, 95% ≤ 20 s). |
-| `nine_one_one_answer_time_sigma` | 0.70 | Lognormal σ (shape) for 9-1-1 answer time |
+| `nine_one_one_answer_time_mean` | 7.44 | Population **mean** answer time in seconds for 9-1-1 (converted to lognormal μ = ln(mean) − σ²/2). Calibrated to NENA 020.1-2020 (90% ≤ 15 s, 95% ≤ 20 s). |
+| `nine_one_one_answer_time_sigma` | 0.79 | Lognormal σ (shape) for 9-1-1 answer time |
 | `non_emergency_answer_time_mean` | 18.0 | Population **mean** answer time in seconds for non-emergency lines (slower than 9-1-1; not staffed to the emergency standard) |
 | `non_emergency_answer_time_sigma` | 0.90 | Lognormal σ (shape) for non-emergency answer time |
 | `answer_time_thresholds` | [10, 15, 20, 40] | Seconds thresholds for % answered columns |
@@ -697,34 +712,58 @@ binomial on the received counts:
 
 ### Population-Based Volume Scaling
 
-When the `--population` flag (or `population` params-file key) is set, phone-metrics
-volume is derived from the service area population instead of the incident row count.
-The formula is:
+When the `--population` flag (or `population` params-file key) is set, both the
+incident row count (when `--rows` is omitted) and the phone-metrics volume derive
+from the service area population instead of the incident row count. An explicit
+`--rows` always wins for incidents; population still drives phone volume in that
+case (see the precedence table in USERSGUIDE.md).
+
+911 volume is anchored to a tiered 911-only rate because per-capita call rates
+rise with center size in the published data. The `population_rates` realism
+section configures it:
+
+```yaml
+population_rates:
+  emergency_tiers:          # [exclusive_upper_bound, 911 calls per 1,000/yr]
+    - [100000, 400.0]       # rural (VT E911 2025 ≈ 360; Iowa FY24 ≈ 372)
+    - [500000, 650.0]       # midsize (Norfolk VA ≈ 722)
+    - [1000000, 1000.0]     # large (below measured KC/DC)
+    - [null, 1100.0]        # major (NYC/DC band ≈ 1,100–1,300; null = infinity)
+  incidents_per_1000_yearly: 2200.0   # incident rows per 1,000/yr (KC Reading B ≈ 2,394)
+```
+
+The formulas are:
 
 ```
-total_annual_calls = (population / 1000) × CALLS_PER_1000_POPULATION_YEARLY
-base_hourly_volume = total_annual_calls / hours_in_year × hours_in_date_range
+emergency_annual = (population / 1000) × tier_rate(population)
+base_hourly_volume = (emergency_annual / 8760) / total_emergency_fraction
+incident_rows = round(population / 1000 × incidents_per_1000_yearly × days_in_range / 365)
 ```
 
-The default `CALLS_PER_1000_POPULATION_YEARLY` is 2,500 (NFPA/NAEM data for US
-PSAPs). This constant is defined in `constants.py` and can be overridden by editing
-the source.
-
-When `population` is not set (the default), the legacy behaviour is preserved:
+`total_emergency_fraction` is the sum of the per-number received fractions, so
+the *expected* 911 draw equals the population-implied 911 volume; non-emergency
+and outbound lines follow from the same base via their fractions. When
+`population` is not set, the legacy behaviour is preserved:
 `base_hourly_volume = rows / total_hours`.
 
-### Non-Eergency Floor
+Per-center calibration files in `config/calibrations/` (see its README) pin
+measured rates for Kansas City, New York, DC, Norfolk, King County, and rural
+Vermont — copy the closest one instead of tuning tiers by hand.
 
-To guarantee that non-emergency calls always exceed emergency calls — the
-real-world norm for every PSAP — a floor constraint is applied after the
-independent Poisson draws:
+### Non-Emergency Floor
+
+To keep the emergency/non-emergency mix realistic, a floor constraint is applied
+after the independent Poisson draws:
 
 ```
-non_emergency_received ≥ ceil(total_emergency_received × NON_EMERGENCY_FLOOR_RATIO)
+non_emergency_received ≥ ceil(total_emergency_received × non_emergency_floor_ratio)
 ```
 
-The default `NON_EMERGENCY_FLOOR_RATIO` is 1.2 (non-emergency must be at least
-20% higher than emergency). This constant is defined in `constants.py`.
+The default `non_emergency_floor_ratio` is 1.2 (national pattern: non-emergency
+exceeds emergency). Urban centers with a 911 share above ~45% cannot satisfy a
+1.2 floor (it caps 911 share at ~45.5%), so they override it — Kansas City
+(51.5% 911 share) uses 0.9. The key is optional in `phone_metrics` and falls
+back to the `NON_EMERGENCY_FLOOR_RATIO` constant (1.2) when absent.
 
 ### Answer Time Percentages
 

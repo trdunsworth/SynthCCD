@@ -268,7 +268,7 @@ class TestRealismConfig:
 class TestGenerationRequest:
     def test_defaults(self):
         req = GenerationRequest()
-        assert req.rows == 10000
+        assert req.rows is None
         assert req.area_query == "Kansas City, MO"
         assert req.output_format == OutputFormat.CSV
         assert req.seed == 911

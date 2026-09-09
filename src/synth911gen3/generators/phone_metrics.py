@@ -18,10 +18,7 @@ import pandas as pd
 from scipy.stats import lognorm
 
 from synth911gen3.config import GenerationRequest
-from synth911gen3.constants import (
-    CALLS_PER_1000_POPULATION_YEARLY,
-    NON_EMERGENCY_FLOOR_RATIO,
-)
+from synth911gen3.constants import NON_EMERGENCY_FLOOR_RATIO
 from synth911gen3.constants import (
     PHONE_METRICS as DEFAULT_PHONE_METRICS,
 )
@@ -138,25 +135,35 @@ class HourlyCallCountGenerator:
             v = pm[key]
             return [float(x) for x in v] if isinstance(v, list) else [float(v)]  # type: ignore[return-value]
 
-        base_hourly_volume = max(_f("min_hourly_volume"), request.rows / len(hours))
+        rows = request.rows if request.rows is not None else request.resolved_rows()
+        base_hourly_volume = max(_f("min_hourly_volume"), rows / len(hours))
         average_weight = float(np.mean(realism.hourly_weights))
 
         # Population-based volume scaling: when ``population`` is set on the
-        # request, derive total annual calls from population and scale to the
-        # date range, overriding the incident-row-based calculation.
+        # request, anchor the base volume to the tiered 911-only rate
+        # (``population_rates.emergency_tiers``) instead of the incident row
+        # count. The base is set so the *expected* 911 draw equals the
+        # population-implied 911 volume; non-emergency and outbound lines
+        # follow from the same base via their configured fractions.
         if request.population is not None:
-            total_annual_calls = (
-                request.population / 1_000.0
-            ) * CALLS_PER_1000_POPULATION_YEARLY
-            total_hours = float(len(hours))
+            emergency_rate = realism.emergency_rate_for_population(request.population)
+            emergency_annual = request.population / 1_000.0 * emergency_rate
             hours_in_year = 8_760.0
-            pop_volume = (total_annual_calls / hours_in_year) * total_hours
-            # Blend: use population-derived volume as the target total,
+            emergency_fraction_total = sum(
+                float(
+                    line_overrides.get(num.number, {}).get(
+                        "received_fraction", _f("nine_one_one_received_fraction")
+                    )
+                )
+                for num in numbers
+            ) or 1.0
+            # Blend: use the population-derived 911 volume as the anchor,
             # distributed across hours via the diurnal weights.  The per-hour
-            # draw is pop_volume / total_hours, then scaled by busy_factor.
+            # draw is the anchor hourly rate divided by the emergency
+            # fraction, then scaled by busy_factor.
             base_hourly_volume = max(
                 _f("min_hourly_volume"),
-                pop_volume / total_hours,
+                (emergency_annual / hours_in_year) / emergency_fraction_total,
             )
 
         hour_of_day = hours.to_series().dt.hour.to_numpy()
@@ -190,13 +197,16 @@ class HourlyCallCountGenerator:
         )
 
         # Non-emergency floor: ensure non-emergency received calls are at
-        # least NON_EMERGENCY_FLOOR_RATIO × total emergency received calls
-        # per hour, reflecting the real-world pattern that non-emergency
-        # volume always exceeds emergency volume.
+        # least ``non_emergency_floor_ratio`` × total emergency received calls
+        # per hour. The national default (1.2) reflects the real-world pattern
+        # that non-emergency volume usually exceeds emergency volume; urban
+        # centers with a 911 share above ~45% (e.g. Kansas City's 51.5%)
+        # override it to ~0.9 via realism config.
+        floor_ratio = float(pm.get("non_emergency_floor_ratio", NON_EMERGENCY_FLOOR_RATIO))
         total_emergency_received = np.sum(
             [received[num.number] for num in numbers], axis=0
         )
-        floor = np.ceil(total_emergency_received * NON_EMERGENCY_FLOOR_RATIO).astype(int)
+        floor = np.ceil(total_emergency_received * floor_ratio).astype(int)
         non_emergency_calls_received = np.maximum(
             non_emergency_calls_received, floor
         )

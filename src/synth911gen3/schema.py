@@ -23,7 +23,6 @@ from .constants import (
     DEFAULT_OUTPUT_DIR,
     DEFAULT_OUTPUT_STEM,
     DEFAULT_PSAP_AGENCY,
-    DEFAULT_ROWS,
 )
 
 
@@ -156,6 +155,7 @@ class PhoneMetrics(BaseModel):
     night_abandonment_increment: float = Field(ge=0, le=1)
     non_emergency_abandonment_rate: float = Field(ge=0, le=1)
     max_abandonment_rate: float = Field(ge=0, le=1)
+    non_emergency_floor_ratio: float | None = Field(default=None, ge=0)
     weekend_multiplier: float = Field(ge=0)
     nine_one_one_answer_time_mean: float
     nine_one_one_answer_time_sigma: float = Field(gt=0)
@@ -299,7 +299,14 @@ class GenerationRequest(BaseModel):
 
     model_config = ConfigDict(extra="forbid", validate_assignment=True)
 
-    rows: int = Field(default=DEFAULT_ROWS, gt=0, description="Number of incident rows to generate")
+    rows: int | None = Field(
+        default=None,
+        gt=0,
+        description=(
+            "Number of incident rows to generate. Omit to derive from "
+            "population (or fall back to 10000)."
+        ),
+    )
     area_query: str = Field(
         default=DEFAULT_AREA_QUERY, min_length=1, description="OpenStreetMap area query"
     )

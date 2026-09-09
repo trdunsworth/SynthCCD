@@ -131,7 +131,12 @@ def generate(
         "--rows",
         min=1,
         show_default=False,
-        help="Number of incident rows to generate (default: 10000).",
+        help=(
+            "Number of incident rows to generate. Omit to derive the count "
+            "from --population (or fall back to 10000 when neither is given). "
+            "An explicit --rows always wins for incidents, even with "
+            "--population set."
+        ),
     ),
     area: str | None = typer.Option(
         None,
@@ -231,9 +236,11 @@ def generate(
         min=1,
         show_default=False,
         help=(
-            "Population of the service area. When set, phone-metrics volume "
-            "is derived from population (calls per 1,000 residents per year) "
-            "instead of the incident row count."
+            "Population of the service area. When set (and --rows is omitted), "
+            "incident rows and phone-metrics volume both derive from "
+            "population via the tiered population_rates realism section. "
+            "When --rows is also given, rows win for incidents while "
+            "population still drives phone volume."
         ),
     ),
     config: Path | None = typer.Option(
@@ -261,6 +268,14 @@ def generate(
         False,
         "--include-10-digit-emergency",
         help="Include 10-digit direct-dial emergency lines from the registry.",
+    ),
+    include_event_counts: bool = typer.Option(
+        False,
+        "--include-event-counts",
+        help=(
+            "When generating both incidents and phone data (dataset=all), add an "
+            "events_created column to hourly call counts showing incidents per hour."
+        ),
     ),
     psap_agency: str | None = typer.Option(
         None,
@@ -400,6 +415,8 @@ def generate(
         cli_params["emergency_numbers"] = emergency_numbers
     if include_10_digit_emergency:
         cli_params["include_10_digit_emergency"] = True
+    if include_event_counts:
+        cli_params["include_event_counts"] = True
     if psap_agency is not None:
         cli_params["psap_agency"] = psap_agency.lower()
     if db_dialect is not None:
@@ -439,7 +456,7 @@ def generate(
 
     logger.info(
         "Generating %d rows (%s, %s)",
-        request.rows,
+        request.resolved_rows(),
         request.dataset.value,
         request.output_format.value,
     )
@@ -689,7 +706,7 @@ def calibrate_answer_time(
         help="Emit a phone_metrics YAML snippet instead of a human table.",
     ),
 ) -> None:
-    """Calibrate answer-time mean/σ from real PSAP data.
+    """Calibrate answer-time mean/sigma from real PSAP data.
 
     Fit the lognormal that drives SynthCCD's answer-time simulation either from
     published percentile-compliance points (e.g. NENA 90%@15s, 95%@20s) or from

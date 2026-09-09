@@ -551,7 +551,7 @@ uv run SynthCCD generate [OPTIONS]
 |--------|-------|---------|-------------|
 | `--params` | `-p` | *(none)* | Path to a JSON/YAML/TOML file specifying multiple generation parameters at once |
 | `--save-params` | | *(none)* | Write the effective parameters (CLI flags merged over any `--params` file) to a JSON/YAML/TOML file and exit without generating |
-| `--rows` | `-r` | `10000` | Number of incident rows to generate (minimum: 1) |
+| `--rows` | `-r` | *(derived)* | Number of incident rows to generate (minimum: 1). Omit to derive from `--population`, else 10000. Explicit `--rows` always wins for incidents (see [Rows / Population Precedence](#rows--population-precedence)) |
 | `--area` | `-a` | `"Kansas City, MO"` | Area query for OpenStreetMap address lookup |
 | `--format` | `-f` | `csv` | Output format: `csv`, `parquet`, `json`, `yaml`, `pandas`, `polars`, `geojson`, `shapefile`, `postgresql`, `sqlserver`, `mariadb`, `duckdb`, `sqlite` |
 | `--dataset` | `-d` | `incidents` | Dataset to generate: `incidents`, `phone`, `all` |
@@ -565,12 +565,13 @@ uv run SynthCCD generate [OPTIONS]
 | `--dispatcher-pool-size` | | `10` | Number of unique dispatcher names |
 | `--shift-preset` | | *(realism config)* | Shift structure preset: `2x12h-4shift-14day`, `2x12h-2shift`, `3x8h-3shift`, or `4x10h-4shift` |
 | `--max-memory-bytes` | | `2147483648` | Approximate in-memory budget per incident chunk in bytes; CSV/Parquet exports stream in chunks to stay under it |
-| `--population` | | *(none)* | Population of the service area. When set, phone-metrics volume is derived from population (calls per 1,000 residents per year) instead of the incident row count |
+| `--population` | | *(none)* | Population of the service area. Derives incident rows (when `--rows` is omitted) and phone-metrics volume via the tiered `population_rates` realism section. With `--rows` also given, rows win for incidents while population still drives phone volume |
 | `--psap-agency` | | `all` | PSAP agency filter: `all`, `law`, `fire`, `ems`, `fire_ems`. Restricts which agency types appear in the output |
 | `--config` | | *(none)* | Path to YAML realism configuration file |
 | `--country` | | `US` | ISO 3166-1 alpha-2 country code selecting the emergency-number registry (see [Emergency Number Registry](#emergency-number-registry)) |
 | `--emergency-numbers` | | *(registry)* | Comma-separated emergency numbers to model, overriding the country registry (e.g. `"999,112"`) |
 | `--include-10-digit-emergency` | | *(off)* | Include 10-digit direct-dial emergency lines from the registry |
+| `--include-event-counts` | | *(off)* | With `--dataset all`, add an `events_created` column (incidents per hour) to hourly phone metrics |
 | `--db-dialect` | | *(auto)* | Explicit database dialect: `postgresql`, `sqlserver`, `mariadb`, `duckdb`, `sqlite` (auto-detected from `--format`) |
 | `--db-host` | | *(none)* | Database host (not needed for file-based `duckdb`/`sqlite`) |
 | `--db-port` | | *(dialect default)* | Database port (defaults: postgresql 5432, sqlserver 1433, mariadb 3306) |
@@ -709,7 +710,8 @@ The status panel and help tab explain each field.
 
 | Field | Description |
 |-------|-------------|
-| Rows | Number of incident rows (default: 10000) |
+| Rows | Number of incident rows (default: 10000). Clear the field to derive rows from Population instead |
+| Population | Service-area population (blank = off). Derives incident rows when Rows is cleared, and always drives phone-metrics volume |
 | Seed | Random seed for reproducible output (default: 911) |
 | Area query | OpenStreetMap query (default: "Kansas City, MO") |
 | Output format | All supported formats: csv, parquet, json, yaml, pandas, polars, geojson, shapefile, postgresql, sqlserver, mariadb, duckdb, sqlite |
@@ -728,6 +730,7 @@ The status panel and help tab explain each field.
 | Country | ISO 3166-1 alpha-2 code selecting the emergency-number registry (default: US) |
 | Emergency numbers | Comma-separated override of the emergency lines to model (blank uses the country registry, e.g. `999,112`) |
 | 10-digit lines | Include 10-digit direct-dial emergency lines from the registry |
+| Include event counts | With Dataset=all, add an `events_created` column (incidents per hour) to hourly phone metrics |
 | Params file | JSON/YAML/TOML preset; Load Params fills the fields |
 | Realism config file | YAML realism configuration (optional) |
 
@@ -917,7 +920,9 @@ docker run --rm   -v SynthCCD-cache:/home/synth911/.cache/synth911gen3   -v Synt
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `rows` | int | 10000 | Number of CAD incidents to generate |
+| `rows` | int | None (= 10000, or derived from `population`) | Number of CAD incidents to generate; omit to derive from `population`. See [Rows / Population Precedence](#rows--population-precedence) |
+| `population` | int | None | Service-area population. Derives incident rows (when `rows` is omitted) and phone-metrics volume via the tiered `population_rates` realism section |
+| `include_event_counts` | bool | false | With `dataset=all`, add an `events_created` column to hourly phone metrics showing incidents per hour (for correlation analysis and forecasting controls) |
 | `area_query` | str | "Kansas City, MO" | OpenStreetMap Nominatim query for address geocoding |
 | `output_format` | enum | CSV | Export format (see [Output Formats](#output-formats)) |
 | `dataset` | enum | INCIDENTS | Which dataset(s) to generate |
@@ -1010,6 +1015,40 @@ single cross-trained pool. See [Dispatcher Console Disciplines](REALISMGUIDE.md#
 ### Supplying Parameters from a File
 
 All parameters in this section can be supplied at once from a JSON, YAML, or TOML file with `--params`. See [Params Files](#params-files-bundled-options).
+
+### Rows / Population Precedence
+
+Incident rows and phone-metrics volume follow independent precedence rules, so
+the same tool serves both realistic center modeling and free-form synthetic
+training data:
+
+| `--rows` | `--population` | Incident rows | Phone-metrics volume |
+|---|---|---|---|
+| omitted | omitted | 10,000 (default) | derived from rows (legacy) |
+| omitted | given | **derived from population** (`incidents_per_1000_yearly` × days/365) | **derived from population** (tiered 911 rate) |
+| given | omitted | `rows` (pure manual — no population constant is used) | derived from rows (legacy) |
+| given | given | `rows` wins for incidents | population still drives phone volume |
+
+> **Both flags given?** This is the decoupled mode: incidents are exactly
+> `--rows` while phone volume follows `--population`. To train models on fully
+> synthetic volumes, pass `--rows` *without* `--population` — then no
+> population constant touches either dataset.
+
+Example — one Kansas City week, both datasets, hourly event counts included:
+
+```bash
+uv run SynthCCD generate --population 521250 \
+  --config config/calibrations/kansas_city_mo.yaml \
+  --dataset all --include-event-counts \
+  --start-date 2026-01-01 --end-date 2026-01-07 \
+  --output-dir output --output-stem kc_week
+# kc_week_incidents.csv (~24,000 rows) + kc_week_hourly_call_counts.csv
+# (168 rows with an events_created column summing to the incident count)
+```
+
+Ready-made per-center starting points live in `config/calibrations/`
+(Kansas City, New York, DC, Norfolk, King County, rural Vermont) — see its
+README for the area-to-file map and source citations.
 
 ### Date Range Behavior
 
@@ -1239,7 +1278,8 @@ shift_preset: "4x10h-4shift"
 | `dispatcher_pool_size` | | int | Unique dispatcher names |
 | `shift_preset` | | str | Shift structure preset name |
 | `max_memory_bytes` | | int | Per-chunk memory budget for CSV/Parquet streaming |
-| `population` | | int | Service area population for phone-volume scaling |
+| `population` | | int | Service area population; derives rows (when `rows` omitted) and phone volume (see [Rows / Population Precedence](#rows--population-precedence)) |
+| `include_event_counts` | | bool | With `dataset=all`, add `events_created` per hour to phone metrics |
 | `psap_agency` | | str | PSAP agency filter: `all`, `law`, `fire`, `ems`, `fire_ems` |
 | `realism_config_path` | `config` | str | Path to YAML realism config |
 | `country` | | str | ISO 3166-1 alpha-2 code selecting the emergency-number registry (see [Emergency Number Registry](#emergency-number-registry)) |
@@ -1289,6 +1329,33 @@ uv run SynthCCD generate --params run.toml
 ```
 
 Three ready-made examples are included in the repo: `config/example_params.json`, `config/example_params.yaml`, and `config/example_params.toml`.
+
+### Per-Center Calibrations (`config/calibrations/`)
+
+Open-data-anchored realism starting points for specific centers. Each file cites
+its portal sources and confidence level in its header:
+
+| Area | File | 911/1,000/yr | 911 share | 911 abandon |
+|------|------|--------------|-----------|-------------|
+| Kansas City, MO | `kansas_city_mo.yaml` | 1,148 | 51.5% | ~10% |
+| New York, NY | `new_york_ny.yaml` | 1,200 | ~51% | ~8% |
+| Washington, DC | `washington_dc.yaml` | 1,300 | ~51% | ~12% |
+| Norfolk, VA | `norfolk_va.yaml` | 722 | ~48% | ~15% |
+| King County, WA | `king_county_wa.yaml` | 1,100 | ~51% | ~7% |
+| Vermont (rural) | `vermont_rural.yaml` | 360 | ~51% | ~6.5% |
+
+```bash
+# Kansas City week: both datasets + hourly event counts
+uv run SynthCCD generate --population 521250 \
+  --config config/calibrations/kansas_city_mo.yaml \
+  --dataset all --include-event-counts \
+  --start-date 2026-01-01 --end-date 2026-01-07
+```
+
+To mint a new center file, copy the closest one, replace `population_rates` and
+`phone_metrics` with the center's published volumes, cite the portal URL and
+access date in the header, and check it with
+`SynthCCD validate-config <file>`.
 
 ### Bundled Samples (`config/samples/`)
 
@@ -1658,8 +1725,8 @@ uv run SynthCCD generate --rows 5000000 --format parquet --max-memory-bytes 1073
 | `location` | str | `street_address, city, state` |
 | `call_start_time` | datetime | Call received timestamp |
 | `hour` | int | Hour of day (0–23) of `call_start_time` |
-| `dow` | str | Day of week abbreviation (MON–SUN) of `call_start_time` |
-| `week_no` | int | ISO week number (1–53) of `call_start_time` |
+| `dow` | str | Day of week abbreviation (MON–SUN) of `call_start_time` (`MON`=0 per ISO day-of-week) |
+| `week_no` | int | ISO-8601 week number (1–53) of `call_start_time`. Weeks roll over at **Monday 00:00** — a Sunday and the preceding Saturday share a week number, while the following Monday starts the next one. Note ISO edge behavior: dates in early January can carry week 52/53 of the prior year (the week belongs to the year containing its Thursday) |
 | `incident_start_time` | datetime | CAD incident record opened; 0–3 s after `call_start_time` |
 | `time_phone_pickup` | datetime | Call answered by calltaker |
 | `time_call_enters_queue` | datetime | Call queued for dispatch |

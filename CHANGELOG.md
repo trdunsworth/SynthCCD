@@ -10,6 +10,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Hourly event counts in phone metrics. `--include-event-counts` (params key
+  `include_event_counts`, TUI select) adds an `events_created` column to the
+  hourly phone-metrics frame when `dataset=all`, binning incidents per hour for
+  correlation analysis and forecasting controls. Covered by 6 tests in
+  `tests/test_application.py`.
+- Tiered population-based volume calibration. The flat
+  `CALLS_PER_1000_POPULATION_YEARLY` constant is replaced by a
+  `population_rates` realism section: `emergency_tiers` (911-only calls per
+  1,000 residents/year by population bracket: 400 / 650 / 1,000 / 1,100,
+  anchored to Vermont, Iowa, Norfolk, Kansas City, DC, and NYC open data)
+  plus `incidents_per_1000_yearly` (2,200). 911 phone volume is anchored to
+  the tiered rate; incident rows derive from population when `--rows` is
+  omitted. New per-center calibration library in `config/calibrations/`
+  (Kansas City, New York, DC, Norfolk, King County, rural Vermont) with a
+  source-cited index README. Covered by 21 tests in
+  `tests/test_population_scaling.py`.
+- Optional incident row count. `GenerationRequest.rows` (and the pydantic/API
+  schema) is now `None` by default meaning "unspecified": explicit `--rows`
+  always wins for incidents, population derivation fills the gap, otherwise
+  10,000. With both flags given, rows win for incidents while population
+  still drives phone volume (documented precedence table in USERSGUIDE.md).
+  The TUI Rows field derives from Population when cleared.
 - **Load testing benchmarks.** `tests/test_benchmarks.py` with `pytest-benchmark`
   measures incident-generation throughput at four scale tiers (10K, 100K, 1M, 10M
   rows) and tracks peak memory via `tracemalloc`. Run with `--benchmark-only` for
@@ -85,6 +107,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    are a validation aid only and never affect generated data.
 
 ### Changed
+- Volume-mix recalibration (Reading B). `nine_one_one_received_fraction`
+  `0.48 -> 0.55` and `non_emergency_received_fraction` `0.58 -> 0.52`
+  (≈51.4% 911 of received, matching Kansas City's 51.5%; cross-checked
+  against Norfolk ~47% and MARC regional ~36%).
+  `nine_one_one_abandonment_rate` `0.02 -> 0.07` (published band: Vermont
+  6.5%, DC 6–18%, Norfolk 16.8%, KC ~9%), `max_abandonment_rate`
+  `0.12 -> 0.20`, and the non-emergency floor is now a per-center
+  `non_emergency_floor_ratio` override (default 1.2, KC 0.9 — a 51.5% 911
+  share cannot satisfy a 1.2 floor). Committed regression baseline refreshed
+  (incidents unchanged; `phone.911_abandonment_rate` 0.022 -> 0.072,
+  `phone.received_911_per_hour` 73.6 -> 84.3).
 - 9-1-1 answer-time default now exactly meets NENA 020.1-2020. `nine_one_one_answer_time_mean`
   moved `7.0 -> 7.44` and `nine_one_one_answer_time_sigma` `0.70 -> 0.79`, the joint
   lognormal fit for 90% within 15 s / 95% within 20 s (μ = ln(mean) − σ²/2). At the

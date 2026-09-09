@@ -1,0 +1,45 @@
+# Norfolk, VA calibration (starting point, midsize-city anchor).
+#
+# Sources (accessed September 2026):
+# - City of Norfolk "2026 Calendar Year Call Volume Totals"
+#   (norfolk.gov DocumentCenter): Jan 2026 911 total 13,844 with 2,320
+#   abandoned (16.8% of received); total answered (911 + non-emergency)
+#   24,690, i.e. 911 answered ~= 46.7% of answered.
+#
+# 911-only rate ~= 722/1,000/year (13,844/mo annualized at ~230K residents),
+# anchoring the national 100K-500K tier. Fractions (0.50/0.55 -> ~47.6%
+# 911 of received) mirror the measured mix; floor 1.0 keeps non-emergency
+# at parity instead of forcing the national 1.2 surplus.
+# Usage:
+#   SynthCCD generate --population 230000 --config config/calibrations/norfolk_va.yaml ...
+# Confidence: measured (volume, mix, abandonment).
+
+population_rates:
+  emergency_tiers:
+    - [null, 722.0]
+  incidents_per_1000_yearly: 1300.0
+
+phone_metrics:
+  min_hourly_volume: 2.0
+  nine_one_one_received_fraction: 0.50
+  non_emergency_received_fraction: 0.55
+  outbound_calls_fraction: 0.26
+  nine_one_one_abandonment_rate: 0.15
+  night_abandonment_increment: 0.03
+  non_emergency_abandonment_rate: 0.06
+  max_abandonment_rate: 0.20
+  non_emergency_floor_ratio: 1.0
+  weekend_multiplier: 1.12
+  nine_one_one_answer_time_mean: 7.44
+  nine_one_one_answer_time_sigma: 0.79
+  non_emergency_answer_time_mean: 18.0
+  non_emergency_answer_time_sigma: 0.90
+  answer_time_thresholds: [10.0, 15.0, 20.0, 40.0]
+  answer_time_load_sensitivity: 0.25
+  answer_time_mu_noise_sd: 0.05
+  nine_one_one_phone_duration_mu: 5.10
+  nine_one_one_phone_duration_sigma: 0.70
+  non_emergency_phone_duration_mu: 4.54
+  non_emergency_phone_duration_sigma: 0.70
+  outbound_phone_duration_mu: 3.85
+  outbound_phone_duration_sigma: 0.70

@@ -96,14 +96,19 @@ class IdFormat(StrEnum):
 class GenerationRequest:
     """Everything needed to run one generation, with defaults.
 
-    Defaults match the CLI defaults: 10,000 rows, Kansas City MO,
-    CSV output, incidents only, integer IDs, seed 911. Optional values
-    (``None``) mean "use the built-in default" and are resolved lazily by
-    the ``resolved_*`` methods, so a request always carries an explicit
-    value once resolved.
+    Defaults match the CLI defaults: Kansas City MO, CSV output, incidents
+    only, integer IDs, seed 911. Row counts default to 10,000 unless
+    ``population`` is set (deriving rows from service-area population) — see
+    :meth:`resolved_rows` for the full rows/population precedence. Optional
+    values (``None``) mean "use the built-in default" and are resolved lazily
+    by the ``resolved_*`` methods.
     """
 
-    rows: int = DEFAULT_ROWS
+    # Incident row count. ``None`` (the default) means "not specified": the
+    # count is derived from ``population`` when set, else DEFAULT_ROWS.
+    # Any explicit value — from --rows, a params file, the TUI, or the API —
+    # always wins over population derivation (manual/synthetic-training mode).
+    rows: int | None = None
     area_query: str = DEFAULT_AREA_QUERY
     output_format: OutputFormat = OutputFormat.CSV
     dataset: DatasetKind = DatasetKind.INCIDENTS
@@ -119,9 +124,11 @@ class GenerationRequest:
     realism_config: RealismConfig | None = None
     realism_config_path: Path | None = None
     max_memory_bytes: int | None = None
-    # Population of the service area — when set, phone-metrics volume is
-    # derived from population (calls per 1 000 residents per year) instead
-    # of the incident row count.
+    # Population of the service area. When set (and ``rows`` is omitted),
+    # both incident rows and phone-metrics volume derive from population via
+    # the tiered ``population_rates`` realism section. When ``rows`` is also
+    # given, rows win for incidents while population still drives phone
+    # volume (documented precedence — see ``resolved_rows``).
     population: int | None = None
     # PSAP agency filter — restricts which agencies appear in the output.
     # Valid values: "all", "law", "fire", "ems", "fire_ems".
@@ -130,6 +137,9 @@ class GenerationRequest:
     country: str = DEFAULT_COUNTRY
     emergency_numbers: str | None = None
     include_10_digit_emergency: bool = False
+    # When True and dataset=ALL, add an ``events_created`` column to the
+    # hourly call counts showing how many incidents fell into each hour.
+    include_event_counts: bool = False
     # Database export options
     db_dialect: DatabaseDialect | None = None
     db_host: str | None = None
@@ -143,6 +153,31 @@ class GenerationRequest:
     db_batch_size: int = 10000
     db_if_exists: str = "append"  # "append", "replace", "fail"
     db_create_indexes: bool = True
+
+    def resolved_rows(self) -> int:
+        """Effective incident row count under the rows/population precedence.
+
+        Explicit ``rows`` always wins. Otherwise, when ``population`` is set,
+        rows derive from population (``incidents_per_1000_yearly`` scaled to
+        the requested date range, at least 1). With neither set, DEFAULT_ROWS.
+        Phone-metrics volume follows the same precedence independently: an
+        explicit ``rows`` never suppresses population-driven phone volume —
+        only the incident count is manual in that case.
+        """
+        if self.rows is not None:
+            return self.rows
+        if self.population is not None:
+            realism = self.get_realism_config()
+            days = (self.resolved_end_date() - self.resolved_start_date()).days + 1
+            derived = round(
+                self.population
+                / 1_000.0
+                * realism.incidents_per_1000_yearly()
+                * days
+                / 365.0
+            )
+            return max(1, derived)
+        return DEFAULT_ROWS
 
     def resolved_start_date(self) -> date:
         """Effective start date: the request value, or Jan 1 of this year."""
@@ -175,7 +210,7 @@ class GenerationRequest:
         shift-preset names, emergency-number overrides, realism config,
         and database options (for database formats).
         """
-        if self.rows <= 0:
+        if self.rows is not None and self.rows <= 0:
             raise ValidationError("rows must be greater than zero.")
         if not self.area_query.strip():
             raise ValidationError("area_query must not be empty.")

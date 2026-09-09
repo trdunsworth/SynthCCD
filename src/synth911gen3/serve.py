@@ -190,7 +190,12 @@ class GenerationRequestModel(BaseModel):
     shift_preset: str | None = Field(default=None, description="Shift preset name")
     max_memory_bytes: int | None = Field(default=None, ge=1, description="Per-chunk memory budget")
     population: int | None = Field(
-        default=None, ge=1, description="Service area population for phone-volume scaling"
+        default=None,
+        ge=1,
+        description=(
+            "Service area population. Derives incident rows (when rows is "
+            "omitted) and phone volume via tiered population_rates."
+        ),
     )
     psap_agency: str | None = Field(
         default=None,

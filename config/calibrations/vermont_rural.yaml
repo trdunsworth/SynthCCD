@@ -1,0 +1,44 @@
+# Vermont statewide calibration (rural/low-volume anchor).
+#
+# Sources (accessed September 2026):
+# - Vermont Enhanced 911 Board 2025 System Statistics (e911.vermont.gov):
+#   233,237 total 911 received (+0.4% YoY), 77% cellular, 15,075 abandoned
+#   (6.5% of received), 6 s average answer, 2:16 average call duration,
+#   1,391 texts-to-911.
+#
+# 911-only rate ~= 360/1,000/year (233K at ~648K residents) — far below the
+# national <100K tier default, so this file pins a flat rural rate. Use it
+# as the starting point for rural and small-county centers.
+# Usage:
+#   SynthCCD generate --population 648000 --config config/calibrations/vermont_rural.yaml ...
+# Confidence: measured (volume, mix, abandonment).
+
+population_rates:
+  emergency_tiers:
+    - [null, 360.0]
+  incidents_per_1000_yearly: 800.0
+
+phone_metrics:
+  min_hourly_volume: 2.0
+  nine_one_one_received_fraction: 0.55
+  non_emergency_received_fraction: 0.52
+  outbound_calls_fraction: 0.26
+  nine_one_one_abandonment_rate: 0.065
+  night_abandonment_increment: 0.03
+  non_emergency_abandonment_rate: 0.05
+  max_abandonment_rate: 0.20
+  non_emergency_floor_ratio: 1.2
+  weekend_multiplier: 1.12
+  nine_one_one_answer_time_mean: 7.44
+  nine_one_one_answer_time_sigma: 0.79
+  non_emergency_answer_time_mean: 18.0
+  non_emergency_answer_time_sigma: 0.90
+  answer_time_thresholds: [10.0, 15.0, 20.0, 40.0]
+  answer_time_load_sensitivity: 0.25
+  answer_time_mu_noise_sd: 0.05
+  nine_one_one_phone_duration_mu: 5.10
+  nine_one_one_phone_duration_sigma: 0.70
+  non_emergency_phone_duration_mu: 4.54
+  non_emergency_phone_duration_sigma: 0.70
+  outbound_phone_duration_mu: 3.85
+  outbound_phone_duration_sigma: 0.70

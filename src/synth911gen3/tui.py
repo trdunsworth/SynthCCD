@@ -328,7 +328,15 @@ class Synth911Tui(App[None]):
                         with Vertical(id="form"):
                             yield _section_title("General")
                             with Grid(classes="fields"):
-                                yield _field("Rows", "rows", Input(str(defaults.rows), id="rows"))
+                                yield _field(
+                                    "Rows",
+                                    "rows",
+                                    Input(
+                                        str(defaults.rows) if defaults.rows else "10000",
+                                        id="rows",
+                                        placeholder="clear to derive from Population",
+                                    ),
+                                )
                                 yield _field("Seed", "seed", Input(str(defaults.seed), id="seed"))
                                 yield _field(
                                     "Population",
@@ -378,6 +386,15 @@ class Synth911Tui(App[None]):
                                         ],
                                         value=defaults.psap_agency,
                                         id="psap_agency",
+                                    ),
+                                )
+                                yield _field(
+                                    "Include event counts",
+                                    "include_event_counts",
+                                    Select(
+                                        [("No", "0"), ("Yes", "1")],
+                                        value="0",
+                                        id="include_event_counts",
                                     ),
                                 )
                                 yield _field(
@@ -564,7 +581,11 @@ class Synth911Tui(App[None]):
 
     def _apply_request(self, request: GenerationRequest) -> None:
         """Populate every form widget from a GenerationRequest."""
-        self.query_one("#rows", Input).value = str(request.rows)
+        # ``None`` rows display as the 10000 fallback; clearing the field
+        # re-enters derive-from-population mode (see _build_request).
+        self.query_one("#rows", Input).value = (
+            str(request.rows) if request.rows is not None else "10000"
+        )
         self.query_one("#seed", Input).value = str(request.seed)
         self.query_one("#population", Input).value = (
             str(request.population) if request.population else ""
@@ -651,10 +672,15 @@ class Synth911Tui(App[None]):
                 errors[field_id] = str(exc)
                 return None
 
-        rows = parse(
-            "rows",
-            lambda: _parse_int(self.query_one("#rows", Input).value, "rows", min_value=1),
-        )
+        # Blank rows means "derive from Population" (rows=None); a value
+        # means explicit manual mode and always wins over population.
+        rows_raw = self.query_one("#rows", Input).value.strip()
+        rows: int | None = None
+        if rows_raw:
+            rows = parse(
+                "rows",
+                lambda: _parse_int(rows_raw, "rows", min_value=1),
+            )
         seed = parse("seed", lambda: _parse_int(self.query_one("#seed", Input).value, "seed"))
         population_raw = self.query_one("#population", Input).value.strip()
         population: int | None = None
@@ -732,7 +758,7 @@ class Synth911Tui(App[None]):
         if errors:
             raise FieldValidationError("; ".join(errors.values()), list(errors))
 
-        assert rows is not None and seed is not None
+        assert seed is not None
         assert calltaker_pool_size is not None and dispatcher_pool_size is not None
 
         area_query = self.query_one("#area", Input).value.strip() or DEFAULT_AREA_QUERY
@@ -753,6 +779,9 @@ class Synth911Tui(App[None]):
             str(self.query_one("#include_10_digit_emergency", Select).value) == "1"
         )
         psap_agency = str(self.query_one("#psap_agency", Select).value)
+        include_event_counts = (
+            str(self.query_one("#include_event_counts", Select).value) == "1"
+        )
 
         return GenerationRequest(
             rows=rows,
@@ -776,6 +805,7 @@ class Synth911Tui(App[None]):
             country=country,
             emergency_numbers=emergency_numbers,
             include_10_digit_emergency=include_10_digit_emergency,
+            include_event_counts=include_event_counts,
         )
 
     def _generate(self) -> None:
@@ -787,6 +817,14 @@ class Synth911Tui(App[None]):
             self._style_invalid_fields(exc.fields)
             self._set_status(f"Invalid input: {exc}", "error")
             return
+        try:
+            # Resolve blank-rows (population-derived) up front so the
+            # progress bar has a concrete total; the worker reuses it.
+            request.rows = request.resolved_rows()
+        except (ValidationError, ValueError) as exc:
+            self._set_status(f"Invalid input: {exc}", "error")
+            return
+        assert request.rows is not None  # narrowed: resolved above
 
         self.query_one("#generate", Button).disabled = True
         progress = self.query_one("#progress", ProgressBar)

@@ -1,0 +1,44 @@
+# Washington, DC calibration (starting point).
+#
+# Sources (accessed September 2026):
+# - DC OUC 911 Performance Dashboard (opendata.dc.gov, 4th-busiest US
+#   center) daily snapshots: ~2,100-3,200 incoming 911/day with abandoned
+#   shares ranging ~6-18% day to day (e.g. 173/2,862 = 6.0% on 4/30/25,
+#   566/3,181 = 17.8% on 5/3/25).
+#
+# 911-only rate ~= 1,300/1,000/year (~2,500/day at ~700K residents).
+# Abandonment default 0.12 reflects the upper-mid DC band; lower it toward
+# 0.06 for well-staffed-day scenarios.
+# Usage:
+#   SynthCCD generate --population 700000 --config config/calibrations/washington_dc.yaml ...
+# Confidence: measured (volume + abandonment range), estimated (mix shares).
+
+population_rates:
+  emergency_tiers:
+    - [null, 1300.0]
+  incidents_per_1000_yearly: 2200.0
+
+phone_metrics:
+  min_hourly_volume: 2.0
+  nine_one_one_received_fraction: 0.55
+  non_emergency_received_fraction: 0.52
+  outbound_calls_fraction: 0.26
+  nine_one_one_abandonment_rate: 0.12
+  night_abandonment_increment: 0.03
+  non_emergency_abandonment_rate: 0.06
+  max_abandonment_rate: 0.20
+  non_emergency_floor_ratio: 0.9
+  weekend_multiplier: 1.12
+  nine_one_one_answer_time_mean: 7.44
+  nine_one_one_answer_time_sigma: 0.79
+  non_emergency_answer_time_mean: 18.0
+  non_emergency_answer_time_sigma: 0.90
+  answer_time_thresholds: [10.0, 15.0, 20.0, 40.0]
+  answer_time_load_sensitivity: 0.25
+  answer_time_mu_noise_sd: 0.05
+  nine_one_one_phone_duration_mu: 5.10
+  nine_one_one_phone_duration_sigma: 0.70
+  non_emergency_phone_duration_mu: 4.54
+  non_emergency_phone_duration_sigma: 0.70
+  outbound_phone_duration_mu: 3.85
+  outbound_phone_duration_sigma: 0.70

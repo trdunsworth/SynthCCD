@@ -242,23 +242,23 @@
   },
   "meta": {
     "end_date": "2026-12-31",
-    "generated_at": "2026-08-30T03:17:12+00:00",
+    "generated_at": "2026-09-09T16:58:36+00:00",
     "incident_rows": 20000,
     "package_version": "0.9.5",
     "phone_days": 28,
     "phone_rows": 100000,
-    "realism_config_hash": "853875d6afd67011",
+    "realism_config_hash": "81e607a8d414f065",
     "schema_version": "1.2",
     "seed": 4242,
     "start_date": "2026-01-01"
   },
   "phone": {
-    "phone.911_abandonment_rate": 0.02233045024654434,
-    "phone.911_answered_10s_mean": 74.68333333333332,
-    "phone.911_answered_40s_mean": 96.76264880952381,
-    "phone.non_emergency_abandonment_rate": 0.05004398089972355,
-    "phone.outbound_per_hour": 40.04017857142857,
-    "phone.received_911_per_hour": 73.63690476190476,
-    "phone.received_non_emergency_per_hour": 94.73809523809524
+    "phone.911_abandonment_rate": 0.07185829466664315,
+    "phone.911_answered_10s_mean": 71.07113095238095,
+    "phone.911_answered_40s_mean": 91.89181547619049,
+    "phone.non_emergency_abandonment_rate": 0.04960161106733211,
+    "phone.outbound_per_hour": 40.123511904761905,
+    "phone.received_911_per_hour": 84.34672619047619,
+    "phone.received_non_emergency_per_hour": 101.97321428571429
   }
 }

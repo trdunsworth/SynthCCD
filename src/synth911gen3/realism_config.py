@@ -40,7 +40,13 @@ from .constants import (
     DISPOSITION_PROFILES as DEFAULT_DISPOSITION_PROFILES,
 )
 from .constants import (
+    EMERGENCY_CALLS_PER_1000_BY_POPULATION as DEFAULT_EMERGENCY_TIERS,
+)
+from .constants import (
     HOURLY_WEIGHTS as DEFAULT_HOURLY_WEIGHTS,
+)
+from .constants import (
+    INCIDENTS_PER_1000_POPULATION_YEARLY as DEFAULT_INCIDENTS_PER_1000,
 )
 from .constants import (
     PHONE_METRICS as DEFAULT_PHONE_METRICS,
@@ -124,6 +130,11 @@ class RealismConfig:
     problem_phone_multipliers: dict[str, float] = field(default_factory=dict)
     dispatcher_disciplines: dict[str, Any] = field(default_factory=dict)
     answer_time_targets: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
+    # Population-based volume calibration: ``emergency_tiers`` is a list of
+    # ``[exclusive_upper_bound, calls_per_1000_per_year]`` pairs (a null bound
+    # means infinity); ``incidents_per_1000_yearly`` drives incident-row
+    # derivation when ``rows`` is omitted and ``population`` is set.
+    population_rates: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Fill any empty section with its constants-module default."""
@@ -163,6 +174,14 @@ class RealismConfig:
         if not self.dispatcher_disciplines:
             self.dispatcher_disciplines = {
                 k: v for k, v in DEFAULT_DISPATCHER_DISCIPLINES.items()
+            }
+        if not self.population_rates:
+            self.population_rates = {
+                "emergency_tiers": [
+                    [float(bound), float(rate)]
+                    for bound, rate in DEFAULT_EMERGENCY_TIERS
+                ],
+                "incidents_per_1000_yearly": float(DEFAULT_INCIDENTS_PER_1000),
             }
         if not self.shift_config.shifts and not self.shift_config.rotation:
             self.shift_config = get_default_shift_config()
@@ -331,6 +350,39 @@ class RealismConfig:
                 str(k): v for k, v in section.items()
             }
 
+        if "population_rates" in data:
+            section = data["population_rates"]
+            if not isinstance(section, dict):
+                raise ValidationError("population_rates must be a mapping")
+            parsed_rates: dict[str, Any] = {}
+            if "emergency_tiers" in section:
+                tiers_in = section["emergency_tiers"]
+                if not isinstance(tiers_in, list) or not tiers_in:
+                    raise ValidationError(
+                        "population_rates.emergency_tiers must be a non-empty list of "
+                        "[upper_bound, rate] pairs"
+                    )
+                tiers: list[list[float]] = []
+                for tier in tiers_in:
+                    if not isinstance(tier, (list, tuple)) or len(tier) != 2:
+                        raise ValidationError(
+                            "population_rates.emergency_tiers entries must be "
+                            f"[upper_bound, rate] pairs, got {tier!r}"
+                        )
+                    bound_raw, rate_raw = tier
+                    bound = (
+                        float("inf") if bound_raw is None else float(bound_raw)  # type: ignore[arg-type]
+                    )
+                    tiers.append([bound, float(rate_raw)])  # type: ignore[arg-type]
+                parsed_rates["emergency_tiers"] = tiers
+            if "incidents_per_1000_yearly" in section:
+                parsed_rates["incidents_per_1000_yearly"] = float(
+                    section["incidents_per_1000_yearly"]
+                )
+            # Merge over the __post_init__ defaults so partial sections
+            # (tiers only, or rate only) keep the remaining defaults.
+            config.population_rates.update(parsed_rates)
+
         if "answer_time_targets" in data:
             raw = data["answer_time_targets"]
             if not isinstance(raw, dict):
@@ -461,6 +513,14 @@ class RealismConfig:
         min_vol = self.phone_metrics.get("min_hourly_volume", 0)
         if isinstance(min_vol, (int, float)) and min_vol < 0:
             raise ValidationError("phone_metrics.min_hourly_volume must be non-negative")
+        floor_ratio = self.phone_metrics.get("non_emergency_floor_ratio")
+        if floor_ratio is not None:
+            if isinstance(floor_ratio, list):
+                floor_ratio = floor_ratio[0]
+            if not isinstance(floor_ratio, (int, float)) or float(floor_ratio) < 0:
+                raise ValidationError(
+                    "phone_metrics.non_emergency_floor_ratio must be non-negative"
+                )
 
         _PHONE_LINE_KEYS = {
             "received_fraction",
@@ -522,6 +582,37 @@ class RealismConfig:
         if int(split_threshold) < 1:
             raise ValidationError(
                 "dispatcher_disciplines.min_dispatchers_for_split must be at least 1"
+            )
+
+        rates = self.population_rates
+        if not isinstance(rates, dict):
+            raise ValidationError("population_rates must be a mapping")
+        tiers = rates.get("emergency_tiers")
+        if not isinstance(tiers, list) or not tiers:
+            raise ValidationError(
+                "population_rates.emergency_tiers must be a non-empty list"
+            )
+        prev_bound = 0.0
+        for tier in tiers:
+            if not isinstance(tier, (list, tuple)) or len(tier) != 2:
+                raise ValidationError(
+                    "population_rates.emergency_tiers entries must be "
+                    f"[upper_bound, rate] pairs, got {tier!r}"
+                )
+            bound, rate = float(tier[0]), float(tier[1])
+            if bound <= prev_bound:
+                raise ValidationError(
+                    "population_rates.emergency_tiers bounds must be strictly increasing"
+                )
+            if rate <= 0:
+                raise ValidationError(
+                    "population_rates.emergency_tiers rates must be positive"
+                )
+            prev_bound = bound
+        incidents_rate = rates.get("incidents_per_1000_yearly")
+        if incidents_rate is None or float(incidents_rate) <= 0:
+            raise ValidationError(
+                "population_rates.incidents_per_1000_yearly must be positive"
             )
 
         for line, points in self.answer_time_targets.items():
@@ -607,6 +698,13 @@ class RealismConfig:
                 ),
             },
             "name_locales": self._name_locales_for_yaml(),
+            "population_rates": {
+                "emergency_tiers": [
+                    [None if bound == float("inf") else bound, rate]
+                    for bound, rate in self.population_rates.get("emergency_tiers", [])
+                ],
+                "incidents_per_1000_yearly": self.incidents_per_1000_yearly(),
+            },
             "answer_time_targets": {
                 line: [[t, p] for t, p in points]
                 for line, points in self.answer_time_targets.items()
@@ -636,3 +734,27 @@ class RealismConfig:
     def get_agency_display_name(self, agency: str) -> str:
         """Human-readable agency name (e.g. ``POLICE``) or the code itself."""
         return self.agency_names.get(agency, agency)
+
+    def emergency_rate_for_population(self, population: int) -> float:
+        """911-only calls per 1,000 residents per year for a service population.
+
+        Uses the first ``emergency_tiers`` bracket whose exclusive upper bound
+        exceeds ``population``; populations past every bound use the last rate.
+        """
+        tiers = self.population_rates.get(
+            "emergency_tiers",
+            [[float(bound), float(rate)] for bound, rate in DEFAULT_EMERGENCY_TIERS],
+        )
+        fallback = float(tiers[-1][1])
+        for tier in tiers:
+            if population < float(tier[0]):
+                return float(tier[1])
+        return fallback
+
+    def incidents_per_1000_yearly(self) -> float:
+        """Incident rows per 1,000 residents per year for row derivation."""
+        return float(
+            self.population_rates.get(
+                "incidents_per_1000_yearly", DEFAULT_INCIDENTS_PER_1000
+            )
+        )

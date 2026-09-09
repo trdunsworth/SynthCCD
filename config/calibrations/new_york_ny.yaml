@@ -1,0 +1,45 @@
+# New York City, NY calibration (starting point).
+#
+# Sources (accessed September 2026):
+# - NYC Open Data "911 End-to-End Data" (data.cityofnewyork.us, 11.8K rows,
+#   weekly incident-type volumes + segment response times) and "NYPD Calls
+#   for Service (Year to Date)" (~7M ICAD entries/year for ~8.3M residents).
+# - NYC 911 Reporting portal (nyc.gov/site/911reporting) for end-to-end
+#   response-time definitions.
+#
+# 911-only rate ~= 1,200/1,000/year (high-urban band, consistent with the
+# national 1M+ tier). Incident rate is provisional: ICAD entries mix
+# public calls and self-initiated units, so 848 is an upper bound.
+# Usage:
+#   SynthCCD generate --population 8300000 --config config/calibrations/new_york_ny.yaml ...
+# Confidence: estimated (refine against a full year of End-to-End volumes).
+
+population_rates:
+  emergency_tiers:
+    - [null, 1200.0]
+  incidents_per_1000_yearly: 848.0
+
+phone_metrics:
+  min_hourly_volume: 2.0
+  nine_one_one_received_fraction: 0.55
+  non_emergency_received_fraction: 0.52
+  outbound_calls_fraction: 0.26
+  nine_one_one_abandonment_rate: 0.08
+  night_abandonment_increment: 0.03
+  non_emergency_abandonment_rate: 0.05
+  max_abandonment_rate: 0.20
+  non_emergency_floor_ratio: 0.9
+  weekend_multiplier: 1.12
+  nine_one_one_answer_time_mean: 7.44
+  nine_one_one_answer_time_sigma: 0.79
+  non_emergency_answer_time_mean: 18.0
+  non_emergency_answer_time_sigma: 0.90
+  answer_time_thresholds: [10.0, 15.0, 20.0, 40.0]
+  answer_time_load_sensitivity: 0.25
+  answer_time_mu_noise_sd: 0.05
+  nine_one_one_phone_duration_mu: 5.10
+  nine_one_one_phone_duration_sigma: 0.70
+  non_emergency_phone_duration_mu: 4.54
+  non_emergency_phone_duration_sigma: 0.70
+  outbound_phone_duration_mu: 3.85
+  outbound_phone_duration_sigma: 0.70

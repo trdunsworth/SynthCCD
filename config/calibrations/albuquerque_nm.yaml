@@ -1,0 +1,43 @@
+# Albuquerque, NM staffing spec (starting point).
+#
+# Encodes the requested staffing posture: 12-hour day/night shifts carrying
+# 14 calltakers + 8 dispatchers each, with dispatch split LAW vs FIRE/EMS
+# (4 PD + 4 FIRE/EMS consoles). Volume follows the national tier defaults
+# (pop ~557K -> 500K-1M tier, 1,000 911-only calls per 1,000/yr) until
+# measured ABQ figures are available.
+#
+# Usage:
+#   SynthCCD generate --population 557198 --area "Albuquerque, NM" \
+#     --config config/calibrations/albuquerque_nm.yaml --dataset all \
+#     --include-event-counts --start-date 2026-04-06 --end-date 2026-07-26 ...
+# Confidence: estimated (staffing as specified; volumes from national tiers).
+
+shift_config:
+  name: "2x12h-abq"
+  cycle_start_weekday: 0
+  rotation: [1]
+  shifts:
+    - name: DAY
+      label: DAY
+      start_hour: 6
+      start_minute: 0
+      end_hour: 18
+      end_minute: 0
+      rotation: 1
+      calltakers: 14
+      dispatchers: 8
+    - name: NIGHT
+      label: NIGHT
+      start_hour: 18
+      start_minute: 0
+      end_hour: 6
+      end_minute: 0
+      rotation: 1
+      calltakers: 14
+      dispatchers: 8
+
+# 8 dispatchers/shift split LAW vs FIRE/EMS (4 PD + 4 FIRE/EMS consoles).
+# Explicit two_way: auto mode would split 8 positions three ways.
+dispatcher_disciplines:
+  mode: two_way
+  min_dispatchers_for_split: 4

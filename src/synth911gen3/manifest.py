@@ -106,7 +106,9 @@ class Manifest:
             python_version=f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
             platform=platform.platform(),
             seed=request.seed,
-            rows_requested=request.rows,
+            rows_requested=(
+                request.rows if request.rows is not None else request.resolved_rows()
+            ),
             dataset=request.dataset.value,
             output_format=request.output_format.value,
             area_query=request.area_query,
@@ -151,6 +153,7 @@ def _hash_realism_config(realism: RealismConfig) -> str:
         },
         "phone_metrics": realism.phone_metrics,
         "phone_metric_lines": realism.phone_metric_lines,
+        "population_rates": realism.population_rates,
         "hourly_weights": realism.hourly_weights.tolist(),
         "agency_names": realism.agency_names,
         "shift_config": realism.shift_config.to_dict(),

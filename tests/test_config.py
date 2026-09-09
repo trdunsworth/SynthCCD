@@ -16,7 +16,10 @@ from synth911gen3.exceptions import ValidationError
 def test_generation_request_defaults() -> None:
     request = GenerationRequest()
 
-    assert request.rows == 10_000
+    # Rows default to "unspecified" (None) and resolve to 10,000 without
+    # population, or derive from population when set.
+    assert request.rows is None
+    assert request.resolved_rows() == 10_000
     assert request.area_query == "Kansas City, MO"
     assert request.output_format is OutputFormat.CSV
     assert request.dataset is DatasetKind.INCIDENTS

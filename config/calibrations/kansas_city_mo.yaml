@@ -1,0 +1,56 @@
+# Kansas City, MO calibration (Reading B).
+#
+# Sources (accessed September 2026):
+# - Operator-provided weekly volumes: ~20,335 answered (all lines) + ~2,000
+#   abandoned per week; ~51.5% of received calls are 911; abandoned ~= 10.5%
+#   of answered volume. Reading B: 20,335 is TOTAL answered across lines, so
+#   911 received ~= 11,500/week -> ~1,148 per 1,000 residents/year at 521,250
+#   population, and ~24,000 incidents/week -> ~2,394 incidents per 1,000/year.
+# - MARC Regional 911 (marc.org): ~4.5M 911+admin calls/year regionally.
+# - KCPD 911 Calls Received reports (kcpolice.org) and Open Data KC
+#   911 Calls For Service (data.kcmo.org/dataset/911-Calls-For-Service/4cef-rqti).
+# - NENA 020.1-2020 call-processing standard for answer-time targets.
+#
+# Usage:
+#   SynthCCD generate --population 521250 --config config/calibrations/kansas_city_mo.yaml \
+#     --dataset all --include-event-counts --start-date 2026-01-01 --end-date 2026-01-07 ...
+# Confidence: measured (operator figures + open portals).
+
+population_rates:
+  # Flat measured 911-only rate for this center (overrides national tiers).
+  emergency_tiers:
+    - [null, 1148.0]
+  incidents_per_1000_yearly: 2394.0
+
+phone_metrics:
+  min_hourly_volume: 2.0
+  nine_one_one_received_fraction: 0.55
+  non_emergency_received_fraction: 0.52
+  outbound_calls_fraction: 0.26
+  nine_one_one_abandonment_rate: 0.10
+  night_abandonment_increment: 0.03
+  non_emergency_abandonment_rate: 0.05
+  max_abandonment_rate: 0.20
+  # 51.5% 911 share exceeds what a 1.2 floor allows (cap 45.5%), so the
+  # floor is relaxed to 0.9 for this center.
+  non_emergency_floor_ratio: 0.9
+  weekend_multiplier: 1.12
+  nine_one_one_answer_time_mean: 7.44
+  nine_one_one_answer_time_sigma: 0.79
+  non_emergency_answer_time_mean: 18.0
+  non_emergency_answer_time_sigma: 0.90
+  answer_time_thresholds: [10.0, 15.0, 20.0, 40.0]
+  answer_time_load_sensitivity: 0.25
+  answer_time_mu_noise_sd: 0.05
+  nine_one_one_phone_duration_mu: 5.10
+  nine_one_one_phone_duration_sigma: 0.70
+  non_emergency_phone_duration_mu: 4.54
+  non_emergency_phone_duration_sigma: 0.70
+  outbound_phone_duration_mu: 3.85
+  outbound_phone_duration_sigma: 0.70
+
+# NENA 020.1-2020 compliance points (validation aid for `validate-config`).
+answer_time_targets:
+  nine_one_one:
+    - [15.0, 0.90]
+    - [20.0, 0.95]

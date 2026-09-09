@@ -1,0 +1,50 @@
+# King County (Seattle), WA calibration (starting point).
+#
+# Sources (accessed September 2026):
+# - King County 911 Program Office call statistics (kingcounty.gov):
+#   NENA framing (90% <= 15 s, 95% <= 20 s), majority-non-emergency mix,
+#   wireless-dominant 911, and rising text-to-911 (1.29% of calls in 2025).
+# - 11 PSAPs; pronounced July peak / February trough seasonality.
+#
+# Uses national tier defaults (pop ~2.3M -> 1M+ tier) with a NENA
+# answer-time target block for `validate-config`. Seasonal peaks are left
+# to the generator's diurnal weights; encode July/February effects in
+# seasonal_multipliers when fitting a specific year.
+# Usage:
+#   SynthCCD generate --population 2300000 --config config/calibrations/king_county_wa.yaml ...
+# Confidence: estimated (framing + mix), national tiers for volume.
+
+population_rates:
+  emergency_tiers:
+    - [null, 1100.0]
+  incidents_per_1000_yearly: 2200.0
+
+phone_metrics:
+  min_hourly_volume: 2.0
+  nine_one_one_received_fraction: 0.55
+  non_emergency_received_fraction: 0.52
+  outbound_calls_fraction: 0.26
+  nine_one_one_abandonment_rate: 0.07
+  night_abandonment_increment: 0.03
+  non_emergency_abandonment_rate: 0.05
+  max_abandonment_rate: 0.20
+  non_emergency_floor_ratio: 1.2
+  weekend_multiplier: 1.12
+  nine_one_one_answer_time_mean: 7.44
+  nine_one_one_answer_time_sigma: 0.79
+  non_emergency_answer_time_mean: 18.0
+  non_emergency_answer_time_sigma: 0.90
+  answer_time_thresholds: [10.0, 15.0, 20.0, 40.0]
+  answer_time_load_sensitivity: 0.25
+  answer_time_mu_noise_sd: 0.05
+  nine_one_one_phone_duration_mu: 5.10
+  nine_one_one_phone_duration_sigma: 0.70
+  non_emergency_phone_duration_mu: 4.54
+  non_emergency_phone_duration_sigma: 0.70
+  outbound_phone_duration_mu: 3.85
+  outbound_phone_duration_sigma: 0.70
+
+answer_time_targets:
+  nine_one_one:
+    - [15.0, 0.90]
+    - [20.0, 0.95]
