@@ -566,6 +566,7 @@ uv run SynthCCD generate [OPTIONS]
 | `--shift-preset` | | *(realism config)* | Shift structure preset: `2x12h-4shift-14day`, `2x12h-2shift`, `3x8h-3shift`, or `4x10h-4shift` |
 | `--max-memory-bytes` | | `2147483648` | Approximate in-memory budget per incident chunk in bytes; CSV/Parquet exports stream in chunks to stay under it |
 | `--population` | | *(none)* | Population of the service area. Derives incident rows (when `--rows` is omitted) and phone-metrics volume via the tiered `population_rates` realism section. With `--rows` also given, rows win for incidents while population still drives phone volume |
+| `--auto-parquet-threshold` | | `100000` | Automatically switch to Parquet format when row count exceeds this threshold. Set to 0 to disable auto-switching (always use the explicit format). Only applies when `--format` is `csv` |
 | `--psap-agency` | | `all` | PSAP agency filter: `all`, `law`, `fire`, `ems`, `fire_ems`. Restricts which agency types appear in the output |
 | `--config` | | *(none)* | Path to YAML realism configuration file |
 | `--country` | | `US` | ISO 3166-1 alpha-2 country code selecting the emergency-number registry (see [Emergency Number Registry](#emergency-number-registry)) |
@@ -1279,6 +1280,7 @@ shift_preset: "4x10h-4shift"
 | `shift_preset` | | str | Shift structure preset name |
 | `max_memory_bytes` | | int | Per-chunk memory budget for CSV/Parquet streaming |
 | `population` | | int | Service area population; derives rows (when `rows` omitted) and phone volume (see [Rows / Population Precedence](#rows--population-precedence)) |
+| `auto_parquet_threshold` | | int | Auto-switch to Parquet when rows exceed this threshold (default: 100000). Set to 0 to disable |
 | `include_event_counts` | | bool | With `dataset=all`, add `events_created` per hour to phone metrics |
 | `psap_agency` | | str | PSAP agency filter: `all`, `law`, `fire`, `ems`, `fire_ems` |
 | `realism_config_path` | `config` | str | Path to YAML realism config |
@@ -1495,6 +1497,38 @@ metadata = pf.metadata.metadata  # {b'synth911:seed': b'31337', ...}
 Notes:
 - `row_counts`/`column_counts` are intentionally **not** embedded (the footer row count and the sidecar manifest cover those); this keeps chunked-mode exports truthful, since final counts may be unknown at write time.
 - The embedded metadata matches the sidecar manifest values on the same run.
+
+### Auto-Parquet Threshold
+
+By default, the generator automatically switches from CSV to Parquet format when the row count reaches 100,000 rows or more. This provides better compression and performance for large datasets while maintaining CSV compatibility for smaller runs.
+
+**How it works:**
+- When `--format csv` (the default) and `--rows` ≥ 100,000: output is Parquet
+- When `--format csv` and `--rows` < 100,000: output is CSV
+- When `--format parquet` (explicit): always Parquet regardless of row count
+- When `--format` is any other value: format is unchanged
+
+**Custom threshold:**
+```bash
+# Switch to Parquet at 50,000 rows instead of 100,000
+uv run SynthCCD generate --rows 75000 --auto-parquet-threshold 50000
+
+# Disable auto-switching (always use CSV)
+uv run SynthCCD generate --rows 200000 --auto-parquet-threshold 0
+```
+
+**Params file:**
+```yaml
+# In your params.yaml file
+rows: 150000
+auto_parquet_threshold: 100000  # Default value
+format: csv  # Will auto-switch to parquet when rows >= threshold
+```
+
+**Benefits:**
+- Small datasets (< 100K rows): CSV for compatibility and ease of use
+- Large datasets (≥ 100K rows): Parquet for 3-10x compression and faster analytics
+- No manual format switching needed - the system optimizes automatically
 
 ### File Naming
 

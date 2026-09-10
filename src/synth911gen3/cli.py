@@ -243,6 +243,17 @@ def generate(
             "population still drives phone volume."
         ),
     ),
+    auto_parquet_threshold: int | None = typer.Option(
+        None,
+        "--auto-parquet-threshold",
+        min=0,
+        show_default=False,
+        help=(
+            "Automatically switch to Parquet format when row count exceeds this threshold. "
+            "Set to 0 to disable auto-switching (always use the explicit format). "
+            "Default: 100000 rows."
+        ),
+    ),
     config: Path | None = typer.Option(
         None,
         "--config",
@@ -407,6 +418,8 @@ def generate(
         cli_params["max_memory_bytes"] = max_memory_bytes
     if population is not None:
         cli_params["population"] = population
+    if auto_parquet_threshold is not None:
+        cli_params["auto_parquet_threshold"] = auto_parquet_threshold
     if config is not None:
         cli_params["realism_config_path"] = config
     if country is not None:
@@ -458,7 +471,7 @@ def generate(
         "Generating %d rows (%s, %s)",
         request.resolved_rows(),
         request.dataset.value,
-        request.output_format.value,
+        request.resolved_output_format().value,
     )
     try:
         if dry_run or schema:
@@ -472,7 +485,7 @@ def generate(
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(code=1) from exc
 
-    if request.output_format in (OutputFormat.PANDAS, OutputFormat.POLARS):
+    if request.resolved_output_format() in (OutputFormat.PANDAS, OutputFormat.POLARS):
         if result.incidents is not None:
             typer.echo(_describe_frame("incidents", result.incidents))
         if result.hourly_call_counts is not None:

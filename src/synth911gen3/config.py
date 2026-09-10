@@ -130,6 +130,10 @@ class GenerationRequest:
     # given, rows win for incidents while population still drives phone
     # volume (documented precedence — see ``resolved_rows``).
     population: int | None = None
+    # Auto-switch to Parquet when row count exceeds this threshold.
+    # Set to 0 to disable auto-switching (always use the explicit format).
+    # Set to None to use the default threshold (100000).
+    auto_parquet_threshold: int | None = None
     # PSAP agency filter — restricts which agencies appear in the output.
     # Valid values: "all", "law", "fire", "ems", "fire_ems".
     psap_agency: str = DEFAULT_PSAP_AGENCY
@@ -178,6 +182,33 @@ class GenerationRequest:
             )
             return max(1, derived)
         return DEFAULT_ROWS
+
+    def resolved_output_format(self) -> OutputFormat:
+        """Effective output format under the auto-parquet-threshold logic.
+
+        When ``auto_parquet_threshold`` is set (or defaults to 100000) and
+        the resolved row count exceeds it, the format automatically switches
+        to Parquet for better compression and performance. Set threshold to
+        0 to disable auto-switching (always use the explicit format).
+        """
+        threshold = self.auto_parquet_threshold
+        if threshold is None:
+            threshold = 100_000  # Default threshold
+
+        # If threshold is 0 or negative, disable auto-switching
+        if threshold <= 0:
+            return self.output_format
+
+        # Only auto-switch from CSV to Parquet (not from other formats)
+        if self.output_format != OutputFormat.CSV:
+            return self.output_format
+
+        # Check if row count exceeds threshold
+        row_count = self.resolved_rows()
+        if row_count >= threshold:
+            return OutputFormat.PARQUET
+
+        return self.output_format
 
     def resolved_start_date(self) -> date:
         """Effective start date: the request value, or Jan 1 of this year."""

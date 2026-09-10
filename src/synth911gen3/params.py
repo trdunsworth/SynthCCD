@@ -131,7 +131,7 @@ def coerce_param(key: str, value: Any) -> Any:
         return Path(value)
     if key in ("start_date", "end_date"):
         return date.fromisoformat(str(value))
-    if key in ("rows", "seed", "calltaker_pool_size", "dispatcher_pool_size", "max_memory_bytes", "population"):
+    if key in ("rows", "seed", "calltaker_pool_size", "dispatcher_pool_size", "max_memory_bytes", "population", "auto_parquet_threshold"):
         return int(value)
     if key in ("include_10_digit_emergency", "include_event_counts"):
         if isinstance(value, bool):

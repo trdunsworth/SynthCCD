@@ -66,6 +66,16 @@ class Synth911Application:
                 )
         assert request.rows is not None  # narrowed: resolved above
 
+        # Resolve the effective output format (may auto-switch to Parquet)
+        effective_format = request.resolved_output_format()
+        if effective_format != request.output_format:
+            logger.info(
+                "Auto-switched format: %s -> %s (threshold: %s rows)",
+                request.output_format.value,
+                effective_format.value,
+                request.auto_parquet_threshold if request.auto_parquet_threshold is not None else 100000,
+            )
+
         datasets = {}
         incidents = None
         hourly_call_counts = None
@@ -80,7 +90,7 @@ class Synth911Application:
                 if on_progress is not None
                 else None
             )
-            if request.output_format in (OutputFormat.CSV, OutputFormat.PARQUET):
+            if effective_format in (OutputFormat.CSV, OutputFormat.PARQUET):
                 chunk_frames = incident_generator.generate_chunks(
                     request, on_progress=incident_progress
                 )
@@ -90,7 +100,7 @@ class Synth911Application:
                     # …) in the Parquet footer; the first chunk's columns give an
                     # accurate schema hash for the whole incident dataset.
                     chunk_metadata: dict[str, str] | None = None
-                    if request.output_format is OutputFormat.PARQUET:
+                    if effective_format is OutputFormat.PARQUET:
                         chunk_metadata = Manifest.from_request(
                             request, {"incidents": first_chunk}
                         ).to_kv_metadata()
@@ -111,7 +121,7 @@ class Synth911Application:
                         all_chunks.extend(chunk_frames)
                     path = export_chunked_generator(
                         iter(all_chunks),
-                        output_format=request.output_format,
+                        output_format=effective_format,
                         output_dir=request.output_dir,
                         output_stem=request.output_stem,
                         dataset_name="incidents",
@@ -163,10 +173,11 @@ class Synth911Application:
             )
             GENERATION_ROWS.labels(dataset="phone").inc(len(hourly_call_counts))
 
-        logger.debug("Exporting datasets (%s)", request.output_format.value)
+        logger.debug("Exporting datasets (%s)", effective_format.value)
         artifacts: dict[str, object] = dict(streamed_artifacts)
 
         # Handle database exports separately
+        # Note: Database formats are explicit and should NOT auto-switch to Parquet
         db_formats = (
             OutputFormat.POSTGRESQL,
             OutputFormat.SQLSERVER,
@@ -183,15 +194,15 @@ class Synth911Application:
             # their footer metadata; the sidecar is written afterwards.
             manifest = None
             if (
-                request.output_format != OutputFormat.PANDAS
-                and request.output_format != OutputFormat.POLARS
+                effective_format != OutputFormat.PANDAS
+                and effective_format != OutputFormat.POLARS
             ):
                 manifest = Manifest.from_request(request, datasets)
 
             artifacts = {
                 **export_generated_data(
                     datasets=datasets,
-                    output_format=request.output_format,
+                    output_format=effective_format,
                     output_dir=request.output_dir,
                     output_stem=request.output_stem,
                     parquet_metadata=manifest.to_kv_metadata() if manifest is not None else None,
@@ -205,7 +216,7 @@ class Synth911Application:
                     manifest=manifest,
                     output_dir=request.output_dir,
                     output_stem=request.output_stem,
-                    output_format=request.output_format,
+                    output_format=effective_format,
                 )
                 artifacts["manifest"] = manifest_path
                 logger.info("Wrote manifest: %s", manifest_path)
