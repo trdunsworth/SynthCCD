@@ -31,3 +31,6 @@ output/
 
 # TUI screenshot artifacts (written on quit)
 tui_*.svg
+
+# Coding agent session state
+.omo/

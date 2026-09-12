@@ -71,6 +71,7 @@ On networks behind a TLS-inspecting proxy, prefix the audit with
 
 ## Documentation
 
+- `GENAGENT.md` — AI assistant guide for helping users generate synthetic data
 - `USERSGUIDE.md` — quick start, CLI reference, params files, output formats, schema, examples, Python API
 - `REALISMGUIDE.md` — realism YAML configuration reference, validation rules, and default distributions
 - `docs/adr/` — architecture decision records explaining the significant design decisions

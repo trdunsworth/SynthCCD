@@ -65,6 +65,48 @@ recommendation docs in `docs/`, and direct code review.
 - [ ] **P1 — Add a business/landmark indicator column.** AGENTS.md: "If an address is a
       business address or a known landmark then that should be reflected in a column on its
       own." Requires mapping `amenity`/`shop`/`tourism` OSM tags onto address results.
+
+      **Implementation outline:**
+
+      1. **`domain.py`** — Add `address_type: str = "RESIDENTIAL"` field to the `Address`
+         dataclass (frozen, slots). Default preserves backward compatibility.
+
+      2. **`addresses.py`** — Add `_classify_address_type(tags: dict[str, str]) -> str`
+         method to `OpenStreetMapAddressProvider`. Tag mapping:
+         - `LANDMARK`: `tourism` in (attraction, museum, monument, memorial, viewpoint,
+           artwork); `historic` in (monument, memorial, castle, ruins, heritage); `leisure`
+           in (park, nature_reserve, stadium, sports_centre).
+         - `BUSINESS`: any `amenity` tag (hospital, school, restaurant, police, fire_station,
+           etc.); any `shop` tag; any `office` tag; `building` in (commercial, retail, hotel,
+           office, supermarket).
+         - `RESIDENTIAL`: everything else (default).
+
+      3. **`addresses.py`** — Call `_classify_address_type` in `_parse_elements` and pass
+         result to `Address(... address_type=...)`. Also add to `_synthesize_addresses`
+         (default `"RESIDENTIAL"`).
+
+      4. **`addresses.py`** — Add `address_type` to `_write_cache` (new parquet column) and
+         `_load_cache` (default to `"RESIDENTIAL"` when column is absent for backward
+         compatibility with existing caches).
+
+      5. **`incidents.py`** — Add `"address_type"` to the `_ADDRESS_FIELDS` tuple (after
+         `"zone"`). Add `"address_type": address_columns["address_type"]` to the output
+         dict (after `"zone"`, before `"location"`).
+
+      6. **`constants.py`** — Bump `DATA_SCHEMA_VERSION` from `"1.2"` to `"1.3"` (new
+         column = schema change).
+
+      7. **`describe.py`** — Add `address_type` to the preview schema output so
+         `--schema`/`--dry-run` shows the column.
+
+      8. **Tests** — New tests in `tests/test_addresses.py` for `_classify_address_type`
+         with various tag combinations (landmark, business, residential, mixed, empty).
+         Update `tests/test_incidents.py` and refresh regression baseline for new column.
+
+      9. **Docs** — Update `USERSGUIDE.md` (schema section), `REALISMGUIDE.md`, and
+         `CHANGELOG.md` to document the new column.
+
+      **Output column placement:** `... zone, address_type, location, ...`
 - [x] **P2 — Make call reception and disposition use real CAD code vocabulary.** Reception
       methods now use E-911/Phone/OFFICER/Radio/C2C/NOT CAPTURED/Text/CAD2CAD and dispositions
       use code+label pairs (e.g., `NR-No Report`, `RE-Report`, `CI-Citation`),
@@ -299,7 +341,8 @@ recommendation docs in `docs/`, and direct code review.
   Added multi-agency assist problem types (Assist Police, Assist Fire, Assist EMS) to problem
   profiles for all three agencies at priority 5, enabling LAW to call for FIRE/EMS assist,
   FIRE to call for EMS assist, and EMS to call for LAW/FIRE assist. Full multi-record
-  incidents with unit counts remain for future work.
+  incidents with unit counts remain for future work — see detailed implementation outline
+  in the "Future Enhancements (Post-0.9.0 / v1.0 Roadmap)" section.
 - **Cadence/queueing simulation.** The recommendation docs propose a constrained simulation
   (unit availability queues, simpy). Worth prototyping for dispatch realism at P2/P3.
 - [x] **Weather and seasonal correlation** (heat → heat-related EMS, winter → slip/fall).
@@ -375,15 +418,64 @@ recommendation docs in `docs/`, and direct code review.
 ## Future Enhancements (Post-0.9.0 / v1.0 Roadmap)
 
 ### Core Functionality
-- [ ] **P1 — Business/landmark indicator column.** AGENTS.md: "If an address is a business address or a known landmark then that should be reflected in a column on its own." Requires mapping `amenity`/`shop`/`tourism` OSM tags onto address results.
+- [ ] **P1 — Business/landmark indicator column.** AGENTS.md: "If an address is a business address or a known landmark then that should be reflected in a column on its own." Requires mapping `amenity`/`shop`/`tourism` OSM tags onto address results. See the detailed implementation outline in the "Functionality (AGENTS.md goal gaps)" section above.
 - [x] **P1 — Geographic zone multipliers** (URBAN/SUBURBAN/RURAL) applied to travel time.
   Implemented via `zone_travel_multipliers` in realism config and OSM-based zone
   classification on the `Address` model (see the checked item under "Realism
   Improvements" above); kept here as a reference to the completed work.
 - [ ] **P2 — Multi-agency incidents with unit counts.** Extend current assist problem types to full multi-record incidents where one call spawns LAW+FIRE+EMS records with unit counts and availability tracking.
+
+      **Implementation outline (MVI approach):**
+
+      **Phase 1 — Config (`realism_config.py` + `schema.py`)**
+      - Add `multi_agency: bool = False` (opt-in, preserves backward compat)
+      - Add `multi_agency_prob: float = 0.1` (fraction of incidents that are multi-agency)
+      - Add `multi_agency_combinations: dict[str, float]` (weights for agency combos, e.g.
+        `{"LAW_FIRE_EMS": 0.4, "LAW_FIRE": 0.3, "FIRE_EMS": 0.3}`)
+      - Add `multi_agency_unit_counts: dict[str, dict[str, int]]` (per-combo per-agency unit
+        counts, e.g. `{"LAW_FIRE_EMS": {"LAW": 2, "FIRE": 1, "EMS": 1}}`)
+      - Add `multi_agency_timing_offsets: dict[str, dict[str, float]]` (per-agency turnout/travel
+        multipliers, e.g. `{"EMS": {"turnout_mean": 0.8}, "FIRE": {"turnout_mean": 1.0}}`)
+      - Schema: expose as `MultiAgencyConfig` pydantic model in `schema.py`
+
+      **Phase 2 — Generation (`incidents.py`)**
+      - After agency selection (line ~609), apply multi-agency filter:
+        `if multi_agency and rng.random() < multi_agency_prob`
+      - For selected incidents, expand 1 row → N rows (one per agency in the combo)
+        - Shared `id_number` (call ID) across all agency records
+        - Unique `internal_reference_number` per agency
+        - Shared `event_time`, `street_address`, `city`, `state`, coordinates
+        - Independent `agency` field per row
+      - Apply per-agency timing offsets to `turnout_seconds`, `travel_seconds`,
+        `on_scene_seconds`, `closeout_seconds`
+      - Add `unit_count` column (from config, default 1)
+      - Add `unit_availability` column: compute from each agency's timeline
+        (e.g., "available" before dispatch, "en_route" after enroute, "on_scene"
+        after arrival, "clear" after cleared)
+      - Each agency row gets its own `calltaker`/`dispatcher` from the appropriate pool
+
+      **Phase 3 — Schema & Export**
+      - Bump `DATA_SCHEMA_VERSION` from `"1.2"` to `"1.3"`
+      - Add `unit_count` (int) and `unit_availability` (str) to output schema
+      - Update `describe.py` preview schema
+      - Update `USERSGUIDE.md`, `REALISMGUIDE.md`, `CHANGELOG.md`
+
+      **Phase 4 — Tests**
+      - Default (`multi_agency=False`) produces byte-identical output
+      - When enabled, correct number of agency rows per call
+      - Shared timestamps + address across agency records
+      - Agency-specific timing offsets applied correctly
+      - Unit counts match config
+      - Unit availability status transitions are logical
+      - Regression baseline refreshed
+
+      **Key design decisions:**
+      - **Opt-in** via `multi_agency: false` default (backward compatible)
+      - **Shared `id_number`** across agency records (one call = one ID)
+      - **One primary problem_nature** per call (not per-agency)
+      - **Agency-specific timing offsets** (EMS faster turnout than FIRE typical)
 - [ ] **P2 — Cadence/queueing simulation.** Constrained simulation with unit availability queues (simpy) for dispatch realism. Prototype at P2/P3.
 - [ ] **P2 — Weather and seasonal correlation enhancements.** Current seasonal multipliers are static; integrate real weather data (temperature, precipitation) to drive problem type correlations dynamically.
-- [ ] **P2 — Timezone-aware timestamps.** Support non-UTC timestamps and hourly-metric localization for deployments outside single timezone.
 - [ ] **P2 — Automatic population lookup when `--population` is omitted.** When the
   requester doesn't know the service-area population, resolve it from the area before
   generation so population-derived rows/volume still engage: (1) OSM Nominatim
@@ -433,7 +525,7 @@ recommendation docs in `docs/`, and direct code review.
 
 ### Usability / Developer Experience
 - [x] **P2 — `config/example_params` parity.** Add TOML example alongside JSON/YAML, and params-driven CI regression run. Created `config/example_params.toml` with a distinct example configuration; all three formats (JSON/YAML/TOML) load and round-trip via the CLI `--params` and `--save-params` flags. Added a `params-regression` CI job that exercises each example file and verifies TOML round-trip.
-- [ ] **P2 — PyQt6 GUI.** Requires re-adding `pyqt6` dependency; desktop GUI for non-technical operators. **Deferred** — not being pursued for now.
+- [x] **P2 — PyQt6 GUI.** Requires re-adding `pyqt6` dependency; desktop GUI for non-technical operators. **Deferred** — not being pursued for now.
 - [x] **P2 — Param file generation CLI.** `SynthCCD generate --save-params my_run.yaml`
       writes the effective parameters (CLI flags merged over any `--params` file) to a JSON/YAML/TOML
       params file and exits without generating. Canonical `GenerationRequest` keys are serialized
@@ -809,4 +901,3 @@ to `SynthCCD license install`. Valid but expired licenses continue to work durin
   passthrough).
 
 ---
-
