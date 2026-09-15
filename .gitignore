@@ -31,3 +31,7 @@ output/
 
 # TUI screenshot artifacts (written on quit)
 tui_*.svg
+
+
+# td
+.todos/
