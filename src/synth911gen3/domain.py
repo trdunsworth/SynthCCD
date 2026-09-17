@@ -186,6 +186,13 @@ class Address:
     the OSM-derived coordinates and geographic ``zone`` classification
     (URBAN, SUBURBAN, or RURAL) used for travel-time multipliers.
 
+    ``commonplace_name`` holds the business or landmark name (e.g.
+    ``"T-Mobile Center"``) when the OSM element carries an ``amenity``,
+    ``shop``, ``tourism``, or ``historic`` tag, or is a named apartment
+    building.  ``unit_number`` captures sub-address components such as
+    ``"Suite 15"`` or ``"Unit C"`` from ``addr:flats`` / ``addr:unit`` /
+    ``addr:suite`` / ``addr:door`` / ``addr:floor`` tags.
+
     When only the free-form ``street_address`` is supplied, the
     components are derived automatically via :func:`parse_address_parts`.
     """
@@ -202,6 +209,8 @@ class Address:
     latitude: float = 0.0
     longitude: float = 0.0
     zone: str = "URBAN"
+    commonplace_name: str = ""
+    unit_number: str = ""
 
     def __post_init__(self) -> None:
         if not self.street_name:

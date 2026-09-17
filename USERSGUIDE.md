@@ -565,7 +565,7 @@ uv run SynthCCD generate [OPTIONS]
 | `--dispatcher-pool-size` | | `10` | Number of unique dispatcher names |
 | `--shift-preset` | | *(realism config)* | Shift structure preset: `2x12h-4shift-14day`, `2x12h-2shift`, `3x8h-3shift`, or `4x10h-4shift` |
 | `--max-memory-bytes` | | `2147483648` | Approximate in-memory budget per incident chunk in bytes; CSV/Parquet exports stream in chunks to stay under it |
-| `--population` | | *(none)* | Population of the service area. Derives incident rows (when `--rows` is omitted) and phone-metrics volume via the tiered `population_rates` realism section. With `--rows` also given, rows win for incidents while population still drives phone volume |
+| `--population` | | *(auto-resolved)* | Population of the service area. When omitted, automatically resolved from the Nominatim `extratags.population` field during area geocoding (no extra HTTP request). Derives incident rows (when `--rows` is omitted) and phone-metrics volume via the tiered `population_rates` realism section. With `--rows` also given, rows win for incidents while population still drives phone volume. Explicit `--population` always wins over the auto-resolved value. The resolved population and its source (`"explicit"`, `"nominatim"`, or `""`) are recorded in the manifest |
 | `--auto-parquet-threshold` | | `100000` | Automatically switch to Parquet format when row count exceeds this threshold. Set to 0 to disable auto-switching (always use the explicit format). Only applies when `--format` is `csv` |
 | `--psap-agency` | | `all` | PSAP agency filter: `all`, `law`, `fire`, `ems`, `fire_ems`. Restricts which agency types appear in the output |
 | `--config` | | *(none)* | Path to YAML realism configuration file |
@@ -712,7 +712,7 @@ The status panel and help tab explain each field.
 | Field | Description |
 |-------|-------------|
 | Rows | Number of incident rows (default: 10000). Clear the field to derive rows from Population instead |
-| Population | Service-area population (blank = off). Derives incident rows when Rows is cleared, and always drives phone-metrics volume |
+| Population | Service-area population (blank = auto-resolve from OSM). Derives incident rows when Rows is cleared, and always drives phone-metrics volume |
 | Seed | Random seed for reproducible output (default: 911) |
 | Area query | OpenStreetMap query (default: "Kansas City, MO") |
 | Output format | All supported formats: csv, parquet, json, yaml, pandas, polars, geojson, shapefile, postgresql, sqlserver, mariadb, duckdb, sqlite |
@@ -922,7 +922,7 @@ docker run --rm   -v SynthCCD-cache:/home/synth911/.cache/synth911gen3   -v Synt
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `rows` | int | None (= 10000, or derived from `population`) | Number of CAD incidents to generate; omit to derive from `population`. See [Rows / Population Precedence](#rows--population-precedence) |
-| `population` | int | None | Service-area population. Derives incident rows (when `rows` is omitted) and phone-metrics volume via the tiered `population_rates` realism section |
+| `population` | int | None (auto-resolved from Nominatim) | Service-area population. When omitted, automatically resolved from the Nominatim `extratags.population` field during geocoding. Derives incident rows (when `rows` is omitted) and phone-metrics volume via the tiered `population_rates` realism section |
 | `include_event_counts` | bool | false | With `dataset=all`, add an `events_created` column to hourly phone metrics showing incidents per hour (for correlation analysis and forecasting controls) |
 | `area_query` | str | "Kansas City, MO" | OpenStreetMap Nominatim query for address geocoding |
 | `output_format` | enum | CSV | Export format (see [Output Formats](#output-formats)) |
@@ -1062,6 +1062,8 @@ README for the area-to-file map and source citations.
 Addresses are fetched from OpenStreetMap using the `area_query` parameter. The query accepts **any valid location query** that OpenStreetMap's Nominatim API supports, which is geocoded to a bounding box. Real street addresses with `addr:housenumber` + `addr:street` tags are then pulled from that bounding box via the Overpass API (overpy). Where an area lacks mapped house numbers, the generator falls back to real named streets with synthesized house numbers so output is still produced.
 
 Each address is emitted as individual components (`prefix_directional`, `street_number`, `street_name`, `street_type`, `postfix_directional`, `postal_code`) in addition to the combined `street_address`. Directionals are normalized to abbreviations (e.g., `NORTH` → `N`); a component is left empty when it cannot be determined from the source data. US `postal_code` values are normalized to the 5-digit ZIP: OpenStreetMap sometimes stores a 9-digit ZIP+4 (e.g. `64110-1234`), which is truncated to `64110`. Non-US postal codes (e.g. Canadian `L4T 2D6`, UK `SW1A 2AA`) are passed through unchanged.
+
+Addresses that correspond to a business or landmark carry a `commonplace_name` (e.g. `"T-Mobile Center"`, `"Union Station"`) extracted from the OSM `name` tag on elements with `amenity`, `shop`, `tourism`, or `historic` tags, or on named apartment buildings. The field is empty for ordinary residential addresses. Sub-address components such as suite or apartment numbers are captured in `unit_number` (e.g. `"Suite 15"`, `"Unit C"`) from `addr:flats` / `addr:unit` / `addr:suite` / `addr:door` / `addr:floor` OSM tags.
 
 Larger areas provide more address variety but take longer to fetch initially (addresses are cached locally after first query).
 
@@ -1451,6 +1453,8 @@ For every file-based export (CSV, Parquet, JSON, YAML), a **data governance mani
 | `shift_preset` | Shift structure preset (if any) |
 | `realism_config_hash` | SHA-256 hash (first 16 chars) of the realism YAML config |
 | `max_memory_bytes` | Per-chunk memory budget for chunked exports |
+| `population` | Service-area population used for row/phone-volume derivation |
+| `population_source` | How population was resolved: `"explicit"` (user-provided), `"nominatim"` (auto-resolved from OSM), or `""` (not set) |
 | `schema_hash` | SHA-256 hash (first 16 chars) of the output schema |
 | `schema_version` | Data schema version (`DATA_SCHEMA_VERSION` in `constants.py`) |
 | `datasets_generated` | List of dataset names produced |
@@ -1482,6 +1486,7 @@ Every Parquet file (incidents, hourly call counts — both full and chunked expo
 | `synth911:area_query` / `synth911:id_format` | Address area and ID scheme |
 | `synth911:calltaker_pool_size` / `synth911:dispatcher_pool_size` | Personnel pools |
 | `synth911:shift_preset` / `synth911:max_memory_bytes` | Shift structure / memory budget |
+| `synth911:population` / `synth911:population_source` | Service-area population and its resolution source |
 | `synth911:datasets_generated` | JSON list of datasets produced |
 | `synth911:manifest_version` | Manifest schema version (`1.0`) |
 
@@ -1756,6 +1761,8 @@ uv run SynthCCD generate --rows 5000000 --format parquet --max-memory-bytes 1073
 | `latitude` | float | Latitude from OSM address node; `0.0` when no coordinates available (synthesized fallback addresses) |
 | `longitude` | float | Longitude from OSM address node; `0.0` when no coordinates available |
 | `zone` | str | Geographic zone classification: URBAN, SUBURBAN, or RURAL (OSM-based) |
+| `commonplace_name` | str | Business or landmark name from OSM (e.g. `"T-Mobile Center"`, `"Union Station"`); empty for residential addresses |
+| `unit_number` | str | Sub-address component from OSM `addr:flats`/`addr:unit`/`addr:suite`/`addr:door`/`addr:floor` tags (e.g. `"Suite 15"`, `"Unit C"`); empty when not present |
 | `location` | str | `street_address, city, state` |
 | `call_start_time` | datetime | Call received timestamp |
 | `hour` | int | Hour of day (0–23) of `call_start_time` |

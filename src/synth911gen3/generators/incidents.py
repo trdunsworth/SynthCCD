@@ -62,6 +62,8 @@ _ADDRESS_FIELDS = (
     "latitude",
     "longitude",
     "zone",
+    "commonplace_name",
+    "unit_number",
 )
 
 logger = get_logger("incidents")
@@ -836,6 +838,8 @@ class IncidentGenerator:
             "latitude": address_columns["latitude"],
             "longitude": address_columns["longitude"],
             "zone": address_columns["zone"],
+            "commonplace_name": address_columns["commonplace_name"],
+            "unit_number": address_columns["unit_number"],
             "location": location,
             "call_start_time": event_times,
             "hour": hour,

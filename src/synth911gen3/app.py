@@ -52,6 +52,28 @@ class Synth911Application:
             streamed artifacts instead of frames.
         """
         request.validate()
+        # Auto-resolve population from the address provider when the user
+        # did not supply --population.  The provider extracts it from the
+        # Nominatim extratags.population field during geocoding, so we
+        # trigger address loading here (cache hit is cheap on repeat runs).
+        if request.population is None and hasattr(self._address_provider, "resolved_population"):
+            try:
+                self._address_provider.load_addresses(request.area_query)
+            except Exception:
+                logger.debug("Address preload for population lookup failed; continuing")
+            resolved_pop = self._address_provider.resolved_population()
+            if resolved_pop is not None and resolved_pop > 0:
+                request.population = resolved_pop
+                request.population_source = "nominatim"
+                logger.info(
+                    "Auto-resolved population from Nominatim: %d (area: %s)",
+                    resolved_pop,
+                    request.area_query,
+                )
+            else:
+                logger.info(
+                    "No population available from Nominatim for '%s'", request.area_query
+                )
         # Resolve the rows/population precedence once up front so every
         # downstream consumer (chunking, generators, manifest, logging) sees
         # a concrete count. Explicit rows always win; population derivation
