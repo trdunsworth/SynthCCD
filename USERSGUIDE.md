@@ -1093,6 +1093,22 @@ Larger areas provide more address variety but take longer to fetch initially (ad
 - Landmarks: `"Central Park, New York, NY"`
 - Bounding boxes: `"40.7128,-74.0060,40.7739,-73.9636"` (minlat,minlon,maxlat,maxlon)
 
+#### County-Wide PSAPs
+
+When the `--area` query resolves to a county (e.g., `"Douglas County, KS"`, `"Los Angeles County, CA"`), the generator automatically discovers real city and town names within the county via Overpass. Synthesized addresses are distributed across these discovered cities instead of all receiving the county name. For US areas, USPS postal code data is also used as a fallback when OSM elements lack `addr:city` tags.
+
+This produces realistic output for county-wide PSAPs where calls come from multiple jurisdictions:
+
+```bash
+# Generate incidents for a county-wide PSAP
+uv run SynthCCD generate --rows 5000 --area "Douglas County, KS" --format parquet
+
+# The output will include addresses from Lawrence, Eudora, Baldwin City, etc.
+# rather than all addresses labeled "Douglas County"
+```
+
+> **Note**: County-level Nominatim features often lack population data. For accurate phone metrics, supply `--population` explicitly when using a county area query.
+
 Larger areas provide more address variety but may take longer to fetch initially (addresses are cached locally after first query).
 
 ---
@@ -1469,6 +1485,17 @@ The manifest enables:
 
 > **Note**: The manifest is not emitted for in-memory formats (`pandas`/`polars`) since no files are written.
 
+### Data Dictionaries
+
+For every file-based export, **data dictionary YAML files** are copied into the output directory alongside the generated data:
+
+- `incidents_data_dict.yaml` — full column reference for the incidents dataset (50 columns, types, glossary, definitions)
+- `phone_volume_data_dict.yaml` — full column reference for the hourly phone metrics dataset (22 columns, types, glossary, definitions)
+
+These files follow the [tidyverse data-dict spec](https://data-dict.tidyverse.org/) and can be validated, rendered as HTML, or consumed by agents/LLMs for schema-aware analysis. See the `docs/` directory for the source dictionaries and rendered HTML versions.
+
+> **Note**: Like the manifest, data dictionaries are not emitted for in-memory formats (`pandas`/`polars`).
+
 ### Parquet Metadata Embedding
 
 Every Parquet file (incidents, hourly call counts — both full and chunked exports) embeds the generation provenance directly in the file's **key-value footer metadata**, so each file is self-documenting and readable without the sidecar manifest. Keys are namespaced with a `synth911:` prefix (plain Parquet key-value metadata — visible to any Parquet reader, not just pyarrow):
@@ -1543,6 +1570,7 @@ format: csv  # Will auto-switch to parquet when rows >= threshold
 - **Shapefile**: `{output_stem}_incidents.shp` + sidecars (`.shx`, `.dbf`, `.prj`, `.cpg`)
 - **DuckDB/SQLite**: `{output_stem}.duckdb` / `{output_stem}.sqlite3` unless `--db-name` is given
 - **Manifest**: `{output_stem}_manifest.json` (data governance sidecar; all file-based formats)
+- **Data dictionaries**: `incidents_data_dict.yaml` and `phone_volume_data_dict.yaml` (schema specs emitted alongside CSV, Parquet, JSON, YAML, GeoJSON, and Shapefile exports)
 
 ### Geospatial Exports
 
@@ -1742,7 +1770,7 @@ uv run SynthCCD generate --rows 5000000 --format parquet --max-memory-bytes 1073
 | Column | Type | Description |
 |--------|------|-------------|
 | `id_number` | int or str | Incident ID: sequential integer (1 to N), or UUID v4 string when `id_format` is `guid` |
-| `internal_reference_number` | str | Agency-specific reference: `{AGENCY}-{YYMMDD}-{SEQ:06d}` |
+| `internal_reference_number` | str | Agency-specific reference: `{AGENCY}-{DDD}-{SEQ:05d}` where DDD is the 3-digit day of year (001–366) |
 | `agency` | str | Responding agency: LAW, FIRE, EMS |
 | `shift` | str | Shift on duty at `call_start_time` (e.g., A, B, C, D) |
 | `shift_label` | str | Shift label (e.g., DAY, NIGHT) |

@@ -13,7 +13,11 @@ from synth911gen3.app import Synth911Application
 from synth911gen3.config import DatasetKind, GenerationRequest, OutputFormat
 from synth911gen3.domain import Address
 from synth911gen3.exceptions import ExportError
-from synth911gen3.exporters import export_chunked_generator, export_generated_data
+from synth911gen3.exporters import (
+    export_chunked_generator,
+    export_data_dictionary,
+    export_generated_data,
+)
 
 
 def _provider() -> StaticAddressProvider:
@@ -136,3 +140,39 @@ def test_chunked_export_rejects_unsupported_format(tmp_path: Path) -> None:
             output_stem="sample",
             dataset_name="incidents",
         )
+
+
+class TestDataDictionaryExport:
+    def test_copies_incidents_dict(self, tmp_path: Path) -> None:
+        frame = pd.DataFrame({"col": [1]})
+        paths = export_data_dictionary(tmp_path, {"incidents": frame})
+        assert len(paths) == 1
+        assert paths[0].name == "incidents_data_dict.yaml"
+        assert paths[0].is_file()
+        content = paths[0].read_text(encoding="utf-8")
+        assert "synth911gen3-incidents" in content
+
+    def test_copies_phone_volume_dict(self, tmp_path: Path) -> None:
+        frame = pd.DataFrame({"col": [1]})
+        paths = export_data_dictionary(tmp_path, {"hourly_call_counts": frame})
+        assert len(paths) == 1
+        assert paths[0].name == "phone_volume_data_dict.yaml"
+        assert paths[0].is_file()
+
+    def test_copies_both_dicts(self, tmp_path: Path) -> None:
+        frames = {
+            "incidents": pd.DataFrame({"a": [1]}),
+            "hourly_call_counts": pd.DataFrame({"b": [2]}),
+        }
+        paths = export_data_dictionary(tmp_path, frames)
+        names = {p.name for p in paths}
+        assert names == {"incidents_data_dict.yaml", "phone_volume_data_dict.yaml"}
+
+    def test_unknown_dataset_skipped(self, tmp_path: Path) -> None:
+        frame = pd.DataFrame({"col": [1]})
+        paths = export_data_dictionary(tmp_path, {"unknown_dataset": frame})
+        assert paths == []
+
+    def test_returns_empty_for_empty_datasets(self, tmp_path: Path) -> None:
+        paths = export_data_dictionary(tmp_path, {})
+        assert paths == []

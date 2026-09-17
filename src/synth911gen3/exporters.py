@@ -307,3 +307,37 @@ def export_manifest(
 ) -> Path:
     """Write the data governance manifest as a JSON sidecar file."""
     return write_manifest(manifest, output_dir, output_stem, output_format)
+
+
+_DATA_DICT_DIR = Path(__file__).resolve().parent.parent.parent / "docs"
+
+
+def export_data_dictionary(
+    output_dir: Path,
+    datasets: dict[str, Any],
+) -> list[Path]:
+    """Copy data-dict YAML files for the generated datasets into *output_dir*.
+
+    The data dictionaries are maintained in ``docs/`` and bundled alongside
+    the generated data files so consumers can validate or browse the schema.
+    Returns the list of paths written (empty if no matching dictionaries
+    exist).
+    """
+    mapping = {
+        "incidents": "incidents_data_dict.yaml",
+        "hourly_call_counts": "phone_volume_data_dict.yaml",
+    }
+    written: list[Path] = []
+    for dataset_name in datasets:
+        filename = mapping.get(dataset_name)
+        if filename is None:
+            continue
+        src = _DATA_DICT_DIR / filename
+        if not src.is_file():
+            logger.debug("Data dictionary not found, skipping: %s", src)
+            continue
+        dst = output_dir / filename
+        dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+        written.append(dst)
+        logger.info("Wrote data dictionary: %s", dst)
+    return written

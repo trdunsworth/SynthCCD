@@ -1,0 +1,543 @@
+$version: "0.1.0"
+$learn_more: https://data-dict.tidyverse.org/
+
+name: synth911gen3-incidents
+label: CAD Incident Records
+description: >
+  Synthetic CAD (Computer-Aided Dispatch) archival records. Each row represents
+  one call/incident processed through a public-safety answering point (PSAP),
+  containing identifiers, location data, lifecycle timestamps, personnel
+  assignments, and derived elapsed-time fields. Timestamps use priority-weighted
+  lognormal distributions calibrated to real-world CAD data. Addresses are
+  sourced from OpenStreetMap and parsed into CAD-style components.
+version:
+  number: "1.2.0"
+
+tables:
+  - name: incidents
+    source:
+      parquet: incidents.parquet
+    origin: src/synth911gen3/generators/incidents.py
+    columns:
+      # ── Identifiers ──────────────────────────────────────────────
+      - name: id_number
+        label: Row Identifier
+        type: number
+        constraints: [primary_key]
+        description: >
+          Sequential integer (default) or UUID v4 string, depending on the
+          id_format configuration.
+        examples: [1, 2, 3, 10000, 99999]
+
+      - name: internal_reference_number
+        label: Internal Reference Number
+        type: string
+        constraints: [required, unique]
+        description: >
+          Per-agency daily sequential reference in the format
+          AGENCY-DDD-NNNNN where DDD is the 3-digit day of year (001-366)
+          and NNNNN is a 5-digit sequential counter. Counters reset daily
+          per agency.
+        examples: ["LAW-260-00001", "FIRE-001-00107", "EMS-355-00042"]
+
+      # ── Agency & Classification ──────────────────────────────────
+      - name: agency
+        label: Responding Agency
+        type: enum
+        values:
+          LAW: Law enforcement
+          FIRE: Fire services
+          EMS: Emergency medical services
+        constraints: [required]
+        description: >
+          Responding agency type. Default weights: LAW 0.52, FIRE 0.20,
+          EMS 0.28.
+
+      - name: shift
+        label: Shift Identifier
+        type: string
+        constraints: [required]
+        description: Active shift identifier (e.g., A, B, C, D).
+        examples: ["A", "B", "C", "D"]
+
+      - name: shift_label
+        label: Shift Label
+        type: enum
+        values:
+          DAY: Day shift
+          NIGHT: Night shift
+          MORNING: Morning shift
+          SWING: Swing shift
+        constraints: [required]
+        description: Human-readable shift label.
+
+      - name: shift_group
+        label: Shift Group
+        type: number(id)
+        constraints: [required]
+        description: Rotation group number for the active shift.
+        examples: [1, 2]
+
+      - name: problem_nature
+        label: Problem Nature
+        type: string
+        constraints: [required]
+        description: >
+          Call type / nature of incident. Weighted by agency, priority, and
+          season. Examples vary by agency.
+        examples:
+          - Shots Fired
+          - Structure Fire
+          - Cardiac Arrest
+          - Domestic Disturbance
+          - Theft Report
+          - Fire Alarm
+          - Fall Injury
+
+      - name: priority
+        label: Dispatch Priority
+        type: number(ordinal)
+        range: [1, 5]
+        constraints: [required]
+        description: >
+          Dispatch priority level. 1 = highest (most urgent), 5 = lowest.
+          Distribution varies by agency.
+
+      # ── Address Fields ───────────────────────────────────────────
+      - name: prefix_directional
+        label: Prefix Directional
+        type: string
+        description: >
+          Street prefix directional, appearing before the street name.
+          Empty string when not applicable.
+        examples: ["N", "S", "E", "W", "NE", "NW", "SE", "SW", ""]
+
+      - name: street_number
+        label: Street Number
+        type: string
+        description: House/street address number.
+        examples: ["204", "890", "777", "12"]
+
+      - name: street_name
+        label: Street Name
+        type: string
+        description: Street name without type or directional.
+        examples: ["Main", "12th", "Oak Trafficway", "Broadway"]
+
+      - name: street_type
+        label: Street Type
+        type: string
+        description: Street type abbreviation.
+        examples: ["St", "Ave", "Blvd", "Dr", "Ln", "Ct", "Rd", "Hwy"]
+
+      - name: postfix_directional
+        label: Postfix Directional
+        type: string
+        description: >
+          Street postfix directional, appearing after the street type.
+          Empty string when not applicable.
+        examples: ["N", "S", "E", "W", ""]
+
+      - name: street_address
+        label: Full Street Address
+        type: string
+        constraints: [required]
+        description: >
+          Full street address composed of number, name, type, and directionals.
+        examples:
+          - 204 E 12th St
+          - 890 N Main St
+          - 777 Broadway
+
+      - name: city
+        label: City
+        type: string
+        constraints: [required]
+        description: City name.
+        examples: ["Kansas City", "St. Louis", "Springfield"]
+
+      - name: state
+        label: State
+        type: string
+        constraints: [required]
+        description: State or province name.
+        examples: ["Missouri", "Kansas", "Illinois"]
+
+      - name: postal_code
+        label: Postal Code
+        type: string
+        description: >
+          Postal or ZIP code. US ZIP+4 is truncated to 5 digits.
+        examples: ["64110", "64111", "66101"]
+
+      - name: latitude
+        label: Latitude
+        type: number(quantity)
+        units: degrees
+        range: [25.0, 49.0]
+        constraints: [required]
+        description: WGS-84 latitude coordinate.
+
+      - name: longitude
+        label: Longitude
+        type: number(quantity)
+        units: degrees
+        range: [-125.0, -66.0]
+        constraints: [required]
+        description: WGS-84 longitude coordinate.
+
+      - name: zone
+        label: Geographic Zone
+        type: enum
+        values:
+          URBAN: Dense city center (0.8x travel multiplier)
+          SUBURBAN: Residential outskirts (1.0x baseline)
+          RURAL: Sparse areas (1.5x travel multiplier)
+        constraints: [required]
+        description: >
+          Geographic zone classification. Affects travel-time multipliers.
+
+      - name: commonplace_name
+        label: Business or Landmark Name
+        type: string
+        description: >
+          Business or landmark name when the address is a named place (from
+          OpenStreetMap amenity, shop, or tourism tags). Empty string for
+          residential or unnamed locations.
+        examples: ["T-Mobile Center", "Union Station", ""]
+
+      - name: unit_number
+        label: Unit Number
+        type: string
+        description: >
+          Sub-address component (suite, unit, floor). From OpenStreetMap
+          addr:flats, addr:unit, or addr:suite tags. Empty string when
+          not applicable.
+        examples: ["Suite 15", "Unit C", "Floor 3", ""]
+
+      - name: location
+        label: Combined Location
+        type: string
+        constraints: [required]
+        description: "Combined display string: street_address, city, state."
+        examples:
+          - "204 E 12th St, Kansas City, Missouri"
+
+      # ── Timestamps ───────────────────────────────────────────────
+      - name: call_start_time
+        label: Call Start Time
+        type: datetime
+        time_zone: UTC
+        range: [2026-01-01T00:00:00, 2026-12-31T23:59:59]
+        constraints: [required]
+        description: >
+          When the call first enters the system (ringing). Distributed across
+          hours via diurnal weights. Earliest timestamp in the lifecycle.
+
+      - name: hour
+        label: Hour of Day
+        type: number(ordinal)
+        range: [0, 23]
+        constraints: [required]
+        description: Hour of day (0-23) extracted from call_start_time.
+
+      - name: dow
+        label: Day of Week
+        type: enum
+        values: [MON, TUE, WED, THU, FRI, SAT, SUN]
+        constraints: [required]
+        description: Day-of-week abbreviation from call_start_time.
+
+      - name: week_no
+        label: ISO Week Number
+        type: number(ordinal)
+        range: [1, 53]
+        constraints: [required]
+        description: ISO week number from call_start_time.
+
+      - name: incident_start_time
+        label: Incident Start Time
+        type: datetime
+        time_zone: UTC
+        range: [2026-01-01T00:00:00, 2026-12-31T23:59:59]
+        constraints: [required]
+        description: >
+          CAD system recording start. Offset 0-30 seconds after call_start_time.
+
+      - name: time_phone_pickup
+        label: Phone Pickup Time
+        type: datetime
+        time_zone: UTC
+        range: [2026-01-01T00:00:00, 2026-12-31T23:59:59]
+        constraints: [required]
+        description: >
+          When calltaker picks up the line. Lognormal delay (mean ~3s, max 20s)
+          after call_start_time.
+
+      - name: time_call_enters_queue
+        label: Call Enters Queue Time
+        type: datetime
+        time_zone: UTC
+        range: [2026-01-01T00:00:00, 2026-12-31T23:59:59]
+        constraints: [required]
+        description: >
+          When call enters the dispatch queue (call-taking complete). After
+          time_phone_pickup plus interview duration.
+
+      - name: time_first_unit_assigned
+        label: First Unit Assigned Time
+        type: datetime
+        time_zone: UTC
+        range: [2026-01-01T00:00:00, 2026-12-31T23:59:59]
+        constraints: [required]
+        description: >
+          When first unit is assigned. May occur while call is still in
+          progress for high-priority calls (parallel dispatch).
+
+      - name: time_unit_enroute
+        label: Unit Enroute Time
+        type: datetime
+        time_zone: UTC
+        range: [2026-01-01T00:00:00, 2026-12-31T23:59:59]
+        constraints: [required]
+        description: >
+          When assigned unit goes enroute (wheels rolling). After first unit
+          assigned plus turnout duration.
+
+      - name: time_unit_arrived
+        label: Unit Arrived Time
+        type: datetime
+        time_zone: UTC
+        range: [2026-01-01T00:00:00, 2026-12-31T23:59:59]
+        constraints: [required]
+        description: >
+          When unit arrives on scene. Travel time is zone-adjusted (urban,
+          suburban, rural).
+
+      - name: time_last_unit_cleared
+        label: Last Unit Cleared Time
+        type: datetime
+        time_zone: UTC
+        range: [2026-01-01T00:00:00, 2026-12-31T23:59:59]
+        constraints: [required]
+        description: When last unit clears the scene.
+
+      - name: time_call_closed
+        label: Call Closed Time
+        type: datetime
+        time_zone: UTC
+        range: [2026-01-01T00:00:00, 2026-12-31T23:59:59]
+        constraints: [required]
+        description: >
+          When call is closed in the CAD system. After last unit cleared
+          plus closeout duration.
+
+      - name: time_phone_disconnect
+        label: Phone Disconnect Time
+        type: datetime
+        time_zone: UTC
+        range: [2026-01-01T00:00:00, 2026-12-31T23:59:59]
+        constraints: [required]
+        description: >
+          When the phone call disconnects. May differ from time_call_closed
+          when dispatch continues after hangup.
+
+      # ── Personnel ────────────────────────────────────────────────
+      - name: calltaker
+        label: Calltaker
+        type: string
+        display: restricted
+        constraints: [required]
+        description: >
+          Name of the calltaker who handled the call. Drawn from the active
+          shift's calltaker pool with Zipf weighting (earlier names take more
+          calls).
+        examples: ["Maria Johnson", "James Williams", "Sarah Chen"]
+
+      - name: dispatcher
+        label: Dispatcher
+        type: string
+        display: restricted
+        constraints: [required]
+        description: >
+          Name of the dispatcher who dispatched the call. For medium/large
+          centres, dispatchers are split by discipline console (LAW, FIRE, EMS).
+        examples: ["Robert Davis", "Jennifer Martinez", "Michael Brown"]
+
+      # ── Call Metadata ────────────────────────────────────────────
+      - name: method_of_call_reception
+        label: Method of Call Reception
+        type: enum
+        values:
+          E-911: Enhanced 911 call
+          Phone: Non-emergency phone call
+          OFFICER: Officer-initiated radio call
+          Radio: Radio transmission
+          C2C: Centre-to-centre transfer
+          NOT-CAPTURED: Method not captured
+          Text: Text message
+          CAD2CAD: CAD-to-CAD transfer
+        constraints: [required]
+        description: How the call was received by the PSAP.
+
+      - name: call_disposition
+        label: Call Disposition
+        type: string
+        constraints: [required]
+        description: >
+          Final disposition code. Varies by agency. Common codes include
+          NR-No Report, RE-Report, FALSE-False Alarm, CN-Cancellation,
+          CI-Citation, UNDEFINED.
+        examples:
+          - NR-No Report
+          - RE-Report
+          - FALSE-False Alarm
+          - CN-Cancellation
+          - CI-Citation
+          - UNDEFINED
+
+      # ── Elapsed Time Fields ──────────────────────────────────────
+      - name: pickup_delay_seconds
+        label: Pickup Delay
+        type: number(quantity)
+        units: seconds
+        range: [0, 20]
+        constraints: [required]
+        description: >
+          Delay from call_start_time to time_phone_pickup. Lognormal
+          distribution, mean ~3s, sigma 0.45, capped at 20s.
+
+      - name: pre_cad_offset_seconds
+        label: Pre-CAD Offset
+        type: number(quantity)
+        units: seconds
+        range: [0, 3]
+        constraints: [required]
+        description: >
+          Offset from call_start_time to incident_start_time. Uniform
+          distribution between 0 and 3 seconds.
+
+      - name: interview_seconds
+        label: Interview Duration
+        type: number(quantity)
+        units: seconds
+        range: [0, 1800]
+        constraints: [required]
+        description: >
+          Calltaker questioning duration (phone_pickup to queue). Lognormal
+          distribution with priority/agency-specific mean.
+
+      - name: dispatch_queue_seconds
+        label: Dispatch Queue Duration
+        type: number(quantity)
+        units: seconds
+        range: [0, 7200]
+        constraints: [required]
+        description: >
+          Time in queue before unit assignment. Lognormal distribution with
+          priority/agency-specific mean.
+
+      - name: turnout_seconds
+        label: Turnout Duration
+        type: number(quantity)
+        units: seconds
+        range: [0, 900]
+        constraints: [required]
+        description: >
+          Station-to-wheels-rolling time. Lognormal distribution with
+          priority/agency-specific mean.
+
+      - name: travel_seconds
+        label: Travel Duration
+        type: number(quantity)
+        units: seconds
+        range: [0, 3600]
+        constraints: [required]
+        description: >
+          Wheels-rolling to on-scene time. Multiplied by zone factor (0.8 urban,
+          1.0 suburban, 1.5 rural). Lognormal distribution.
+
+      - name: on_scene_seconds
+        label: On-Scene Duration
+        type: number(quantity)
+        units: seconds
+        range: [0, 10800]
+        constraints: [required]
+        description: >
+          On-scene duration. Lognormal distribution with priority/agency-specific
+          mean.
+
+      - name: closeout_seconds
+        label: Closeout Duration
+        type: number(quantity)
+        units: seconds
+        range: [0, 1800]
+        constraints: [required]
+        description: >
+          Scene-clear to incident-close time. Lognormal distribution with
+          priority/agency-specific mean.
+
+      - name: phone_duration_seconds
+        label: Phone Duration
+        type: number(quantity)
+        units: seconds
+        range: [0, 3600]
+        constraints: [required]
+        description: >
+          Total phone call duration. May extend beyond dispatch for high-priority
+          parallel dispatch. Adjusted by problem-specific multipliers.
+
+      - name: total_elapsed_seconds
+        label: Total Elapsed Time
+        type: number(quantity)
+        units: seconds
+        range: [0, 86400]
+        constraints: [required]
+        description: >
+          Total elapsed time from call_start_time to time_call_closed. Sum of
+          all lifecycle intervals.
+
+    definitions:
+      - name: priority_label
+        label: Priority Label
+        description: Human-readable priority label.
+        expr: "CASE WHEN priority = 1 THEN 'Highest' WHEN priority = 2 THEN 'High' WHEN priority = 3 THEN 'Medium' WHEN priority = 4 THEN 'Low' ELSE 'Lowest' END"
+
+      - name: is_emergency
+        label: Is Emergency
+        description: Whether the incident is an emergency (LAW, FIRE, or EMS).
+        expr: "agency IN ('LAW', 'FIRE', 'EMS')"
+
+      - name: phone_to_dispatch_seconds
+        label: Phone to Dispatch Duration
+        description: Time from phone pickup to first unit assigned.
+        expr: "phone_duration_seconds"
+
+      - name: response_time_seconds
+        label: Response Time
+        description: Time from call start to unit arrival on scene.
+        expr: "pickup_delay_seconds + interview_seconds + dispatch_queue_seconds + turnout_seconds + travel_seconds"
+
+glossary:
+  CAD: >
+    Computer-Aided Dispatch. Software used by PSAPs to track calls, dispatch
+    units, and manage incident lifecycles.
+  PSAP: >
+    Public-Safety Answering Point. The call centre that receives 911 calls and
+    dispatches appropriate emergency services.
+  Parallel Dispatch: >
+    When a high-priority call is dispatched to a unit while the caller is still
+    on the phone with the calltaker. Controlled by the dispatch_init_fraction
+    parameter.
+  Turnout Time: >
+    The interval between a unit being notified of a call and the unit departing
+    the station (wheels rolling).
+  Closeout Time: >
+    The interval between the last unit clearing the scene and the call being
+    closed in the CAD system. Includes paperwork and scene documentation.
+  Zipf Weighting: >
+    A workload distribution where the first-generated names in a personnel pool
+    handle disproportionately more calls, reflecting real-world seniority
+    patterns.
+
+relationships: []

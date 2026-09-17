@@ -79,7 +79,7 @@ _TIMING_FIELD_MAP = {
     "closeout_seconds": "closeout_mean",
 }
 
-_REFERENCE_PATTERN = re.compile(r"^[A-Z]+-\d{6}-\d{6}$")
+_REFERENCE_PATTERN = re.compile(r"^[A-Z]+-\d{3}-\d{5}$")
 
 _POSITIVE_FLOAT = st.floats(min_value=0.01, max_value=10.0, allow_nan=False, allow_infinity=False)
 

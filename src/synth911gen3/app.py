@@ -18,7 +18,12 @@ from .addresses import AddressProvider, OpenStreetMapAddressProvider
 from .config import DatasetKind, GenerationRequest, OutputFormat
 from .db_exporter import export_to_database
 from .domain import GenerationResult
-from .exporters import export_chunked_generator, export_generated_data, export_manifest
+from .exporters import (
+    export_chunked_generator,
+    export_data_dictionary,
+    export_generated_data,
+    export_manifest,
+)
 from .generators import HourlyCallCountGenerator, IncidentGenerator
 from .logging_conf import get_logger
 from .manifest import Manifest
@@ -242,6 +247,15 @@ class Synth911Application:
                 )
                 artifacts["manifest"] = manifest_path
                 logger.info("Wrote manifest: %s", manifest_path)
+
+            # Emit data-dict YAML files alongside generated data (file formats only)
+            if effective_format not in (OutputFormat.PANDAS, OutputFormat.POLARS):
+                dict_paths = export_data_dictionary(
+                    output_dir=request.output_dir,
+                    datasets=datasets,
+                )
+                if dict_paths:
+                    artifacts["data_dictionaries"] = dict_paths
 
         return GenerationResult(
             incidents=incidents,
