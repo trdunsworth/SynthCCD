@@ -27,10 +27,12 @@ import httpx
 import overpy
 import pandas as pd
 
+from .city_discovery import CityPlace, discover_cities_in_bbox
 from .domain import Address
 from .emergency_numbers import normalize_country
 from .exceptions import AddressConnectionError, AddressLookupError
 from .logging_conf import get_logger
+from .postal import get_postal_lookup
 
 logger = get_logger("addresses")
 
@@ -108,6 +110,9 @@ class AddressProvider(Protocol):
     def resolved_country(self) -> str | None:
         """ISO 3166-1 alpha-2 country code of the loaded region, or ``None`` when unknown."""
 
+    def resolved_population(self) -> int | None:
+        """Population of the loaded region, or ``None`` when unknown."""
+
 
 class StaticAddressProvider:
     """Address provider backed by a fixed in-memory list (tests, offline runs)."""
@@ -126,6 +131,10 @@ class StaticAddressProvider:
         """Static address pools carry no region metadata, so the country is unknown."""
         return None
 
+    def resolved_population(self) -> int | None:
+        """Static address pools carry no region metadata, so the population is unknown."""
+        return None
+
 
 @dataclass(frozen=True, slots=True)
 class _GeocodedArea:
@@ -138,6 +147,8 @@ class _GeocodedArea:
     city: str
     state: str
     country_code: str = ""
+    population: int | None = None
+    feature_type: str = "unknown"  # "city" | "county" | "state" | "country" | "unknown"
 
 
 def _normalize_country_code(value: str) -> str:
@@ -149,6 +160,42 @@ def _normalize_country_code(value: str) -> str:
         return normalize_country(value)
     except ValueError:
         return ""
+
+
+def _detect_feature_type(
+    components: dict[str, Any],
+    nominatim_type: str = "",
+) -> str:
+    """Derive a coarse feature type from Nominatim address components and ``type``.
+
+    Returns one of ``"city"``, ``"county"``, ``"state"``, ``"country"``,
+    or ``"unknown"``.
+    """
+    # County: Nominatim returns type="county" or type="administrative" for admin_level=6
+    if nominatim_type in ("county", "administrative") or "county" in components:
+        return "county"
+    if "city" in components or nominatim_type in ("city", "town"):
+        return "city"
+    if "state" in components or nominatim_type in ("state",):
+        return "state"
+    if "country" in components or nominatim_type in ("country",):
+        return "country"
+    return "city"
+
+
+def _extract_population(item: dict[str, Any]) -> int | None:
+    """Extract population from a Nominatim result's extratags, or ``None``."""
+    extratags_raw = item.get("extratags")
+    if not isinstance(extratags_raw, dict):
+        return None
+    raw = extratags_raw.get("population")
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
 
 
 def _parse_bbox(area_query: str) -> tuple[float, float, float, float] | None:
@@ -269,6 +316,9 @@ class OpenStreetMapAddressProvider:
         self._nominatim_min_interval = nominatim_min_interval
         self._last_nominatim_request = 0.0
         self._resolved_country = ""
+        self._resolved_population: int | None = None
+        self._postal_lookup = None  # lazy-init for US areas
+        self._discovered_cities: list[CityPlace] = []
 
     def load_addresses(self, area_query: str) -> list[Address]:
         """Return the address pool for ``area_query``, using cache when possible."""
@@ -277,19 +327,31 @@ class OpenStreetMapAddressProvider:
         cached = self._load_cache(cache_path)
         if cached is not None:
             logger.debug("Cache hit for '%s' (%d addresses)", area_query, len(cached))
-            self._resolved_country = self._load_meta(meta_path)
+            meta = self._load_meta(meta_path)
+            country = meta["country_code"]
+            self._resolved_country = country if isinstance(country, str) else ""
+            pop = meta["population"]
+            self._resolved_population = pop if isinstance(pop, int) else None
             return cached
 
         logger.info("Fetching addresses for '%s' (no cache at %s)", area_query, cache_path)
         addresses = self._fetch_addresses(area_query)
         logger.info("Fetched %d addresses", len(addresses))
         self._write_cache(cache_path, addresses)
-        self._write_meta(meta_path, self._resolved_country)
+        self._write_meta(
+            meta_path,
+            self._resolved_country,
+            self._resolved_population,
+        )
         return addresses
 
     def resolved_country(self) -> str | None:
         """ISO 3166-1 alpha-2 country of the last loaded area, or ``None`` when unknown."""
         return self._resolved_country or None
+
+    def resolved_population(self) -> int | None:
+        """Population of the last loaded area from Nominatim extratags, or ``None``."""
+        return self._resolved_population
 
     @staticmethod
     def _digest(area_query: str) -> str:
@@ -305,19 +367,39 @@ class OpenStreetMapAddressProvider:
         return self._cache_dir / f"addresses_{self._digest(area_query)}.meta.json"
 
     @staticmethod
-    def _write_meta(path: Path, country_code: str) -> None:
-        """Persist the resolved country code next to the cached address pool."""
+    def _write_meta(
+        path: Path, country_code: str, population: int | None = None
+    ) -> None:
+        """Persist the resolved country code and population next to the cached address pool."""
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"country_code": country_code}), encoding="utf-8")
+        data: dict[str, object] = {"country_code": country_code}
+        if population is not None:
+            data["population"] = population
+        path.write_text(json.dumps(data), encoding="utf-8")
 
     @staticmethod
-    def _load_meta(path: Path) -> str:
-        """Read the cached country code; returns ``""`` when absent or unreadable."""
+    def _load_meta(path: Path) -> dict[str, str | int | None]:
+        """Read cached metadata; returns ``{"country_code": "", "population": None}`` on failure."""
+        defaults: dict[str, str | int | None] = {"country_code": "", "population": None}
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            return str(data.get("country_code") or "")
+            if not isinstance(data, dict):
+                return defaults
+            result = dict(defaults)
+            result["country_code"] = str(data.get("country_code") or "")
+            raw_pop = data.get("population")
+            if isinstance(raw_pop, int) and raw_pop > 0:
+                result["population"] = raw_pop
+            elif isinstance(raw_pop, str):
+                try:
+                    parsed = int(raw_pop)
+                    if parsed > 0:
+                        result["population"] = parsed
+                except ValueError:
+                    pass
+            return result
         except (OSError, ValueError, TypeError):
-            return ""
+            return defaults
 
     def _load_cache(self, path: Path) -> list[Address] | None:
         """Read the parquet cache into Address objects; ``None`` on miss/corruption."""
@@ -333,6 +415,12 @@ class OpenStreetMapAddressProvider:
         latitudes = frame["latitude"] if "latitude" in frame.columns else [0.0] * len(frame)
         longitudes = frame["longitude"] if "longitude" in frame.columns else [0.0] * len(frame)
         zones = frame["zone"] if "zone" in frame.columns else ["URBAN"] * len(frame)
+        commonplace_names = (
+            frame["commonplace_name"] if "commonplace_name" in frame.columns else [""] * len(frame)
+        )
+        unit_numbers = (
+            frame["unit_number"] if "unit_number" in frame.columns else [""] * len(frame)
+        )
         return [
             Address(
                 str(street),
@@ -342,8 +430,10 @@ class OpenStreetMapAddressProvider:
                 latitude=float(lat) if pd.notna(lat) else 0.0,
                 longitude=float(lon) if pd.notna(lon) else 0.0,
                 zone=str(zone) if pd.notna(zone) else "URBAN",
+                commonplace_name=str(poi) if pd.notna(poi) else "",
+                unit_number=str(unit) if pd.notna(unit) else "",
             )
-            for street, city, state, postal, lat, lon, zone in zip(
+            for street, city, state, postal, lat, lon, zone, poi, unit in zip(
                 frame["street_address"],
                 frame["city"],
                 frame["state"],
@@ -351,6 +441,8 @@ class OpenStreetMapAddressProvider:
                 latitudes,
                 longitudes,
                 zones,
+                commonplace_names,
+                unit_numbers,
             )
         ]
 
@@ -370,6 +462,8 @@ class OpenStreetMapAddressProvider:
                 "latitude": [address.latitude for address in addresses],
                 "longitude": [address.longitude for address in addresses],
                 "zone": [address.zone for address in addresses],
+                "commonplace_name": [address.commonplace_name for address in addresses],
+                "unit_number": [address.unit_number for address in addresses],
             }
         )
         self._cache_dir.mkdir(parents=True, exist_ok=True)
@@ -383,6 +477,33 @@ class OpenStreetMapAddressProvider:
         else:
             area = self._geocode_bbox(bbox)
         self._resolved_country = _normalize_country_code(area.country_code)
+        self._resolved_population = area.population
+
+        # Lazy-init postal lookup for US areas.
+        if self._postal_lookup is None and area.country_code == "US":
+            try:
+                self._postal_lookup = get_postal_lookup()
+            except Exception:
+                logger.debug("Postal lookup unavailable for US area")
+
+        # Discover real city names for county-level areas.
+        self._discovered_cities = []
+        if area.feature_type == "county":
+            self._discovered_cities = discover_cities_in_bbox(
+                area.south, area.west, area.north, area.east, self._query_runner
+            )
+            if self._discovered_cities:
+                logger.info(
+                    "County area '%s': discovered %d cities via Overpass",
+                    area.city,
+                    len(self._discovered_cities),
+                )
+            if area.population is None:
+                logger.info(
+                    "County area '%s': Nominatim returned no population; "
+                    "consider supplying --population for accurate phone metrics",
+                    area.city,
+                )
 
         addresses = self._query_real_addresses(area)
         if len(addresses) < self._min_addresses:
@@ -434,7 +555,13 @@ class OpenStreetMapAddressProvider:
         """Resolve a place-name query to a bounding box via Nominatim search."""
         payload = self._nominatim_get(
             _NOMINATIM_SEARCH_URL,
-            params={"q": area_query, "format": "jsonv2", "addressdetails": 1, "limit": 1},
+            params={
+                "q": area_query,
+                "format": "jsonv2",
+                "addressdetails": 1,
+                "extratags": 1,
+                "limit": 1,
+            },
         )
 
         if not isinstance(payload, list) or not payload:
@@ -446,6 +573,7 @@ class OpenStreetMapAddressProvider:
 
         south, north, west, east = (float(value) for value in item["boundingbox"])
         components = item.get("address") if isinstance(item.get("address"), dict) else {}
+        nominatim_type = str(item.get("type") or "")
         return _GeocodedArea(
             south=south,
             west=west,
@@ -454,6 +582,8 @@ class OpenStreetMapAddressProvider:
             city=_extract_city(components),
             state=_normalize_state(str(components.get("state") or "")),
             country_code=_normalize_country_code(str(components.get("country_code") or "")),
+            population=_extract_population(item),
+            feature_type=_detect_feature_type(components, nominatim_type),
         )
 
     def _geocode_bbox(self, bbox: tuple[float, float, float, float]) -> _GeocodedArea:
@@ -466,10 +596,12 @@ class OpenStreetMapAddressProvider:
                 "lat": (south + north) / 2,
                 "lon": (west + east) / 2,
                 "addressdetails": 1,
+                "extratags": 1,
             },
         )
 
         components = payload.get("address") if isinstance(payload, dict) else {}
+        nominatim_type = str(payload.get("type") or "") if isinstance(payload, dict) else ""
         return _GeocodedArea(
             south=south,
             west=west,
@@ -478,6 +610,8 @@ class OpenStreetMapAddressProvider:
             city=_extract_city(components),
             state=_normalize_state(str(components.get("state") or "")),
             country_code=_normalize_country_code(str(components.get("country_code") or "")),
+            population=_extract_population(payload if isinstance(payload, dict) else {}),
+            feature_type=_detect_feature_type(components, nominatim_type),
         )
 
     def _run_overpass_query(self, query: str) -> overpy.Result:
@@ -512,6 +646,44 @@ class OpenStreetMapAddressProvider:
         except AddressLookupError:
             return []
         return self._parse_elements(result, area.city, area.state)
+
+    @staticmethod
+    def _extract_commonplace_name(tags: dict[str, str]) -> str:
+        """Return the OSM ``name`` when the element is a business or landmark.
+
+        Sets the commonplace name when the element carries an ``amenity``,
+        ``shop``, ``tourism``, or ``historic`` tag, *or* when it is a named
+        apartment building (``building=apartments`` with a ``name``).
+        Returns an empty string for ordinary residential addresses.
+        """
+        has_indicator = any(tags.get(t) for t in ("amenity", "shop", "tourism", "historic"))
+        is_named_apartment = tags.get("building", "").lower() == "apartments" and tags.get("name")
+        if has_indicator or is_named_apartment:
+            return tags.get("name", "")
+        return ""
+
+    @staticmethod
+    def _extract_unit_number(tags: dict[str, str]) -> str:
+        """Extract a sub-address unit from standard OSM addressing tags.
+
+        Checks ``addr:flats``, ``addr:unit``, ``addr:suite``, ``addr:door``,
+        and ``addr:floor`` in priority order, returning the first non-empty
+        value prefixed with its type (e.g. ``"Suite 15"``).  Values that
+        already include the prefix are returned as-is.
+        """
+        for tag_key, prefix in (
+            ("addr:flats", "Flats"),
+            ("addr:unit", "Unit"),
+            ("addr:suite", "Suite"),
+            ("addr:door", "Door"),
+            ("addr:floor", "Floor"),
+        ):
+            val = tags.get(tag_key, "").strip()
+            if val:
+                if val.lower().startswith(prefix.lower()):
+                    return val
+                return f"{prefix} {val}"
+        return ""
 
     def _classify_zone(self, tags: dict[str, str], lat: float, lon: float) -> str:
         """Classify address zone as URBAN, SUBURBAN, or RURAL based on OSM tags."""
@@ -560,7 +732,15 @@ class OpenStreetMapAddressProvider:
         except AddressLookupError:
             return []
         street_names = self._named_streets(result)
-        return self._synthesize_addresses(street_names, area.city, area.state, self._max_addresses)
+        candidate_cities = (
+            [c.name for c in self._discovered_cities]
+            if self._discovered_cities
+            else None
+        )
+        return self._synthesize_addresses(
+            street_names, area.city, area.state, self._max_addresses,
+            candidate_cities=candidate_cities,
+        )
 
     def _parse_elements(
         self, result: overpy.Result, fallback_city: str, fallback_state: str
@@ -574,6 +754,11 @@ class OpenStreetMapAddressProvider:
             if not housenumber or not street:
                 continue
             city = tags.get("addr:city") or fallback_city
+            # For county areas, try USPS postal lookup when addr:city is missing.
+            if not tags.get("addr:city") and self._postal_lookup and tags.get("addr:postcode"):
+                postal_city = self._postal_lookup.lookup_city(tags["addr:postcode"])
+                if postal_city:
+                    city = postal_city
             state = _normalize_state(tags.get("addr:state") or fallback_state)
             if not city or not state:
                 continue
@@ -586,6 +771,8 @@ class OpenStreetMapAddressProvider:
             lat_val = float(lat) if lat is not None else 0.0
             lon_val = float(lon) if lon is not None else 0.0
             zone = self._classify_zone(tags, lat_val, lon_val)
+            commonplace_name = self._extract_commonplace_name(tags)
+            unit_number = self._extract_unit_number(tags)
             addresses.append(
                 Address(
                     f"{housenumber} {street}".strip(),
@@ -596,6 +783,8 @@ class OpenStreetMapAddressProvider:
                     latitude=lat_val,
                     longitude=lon_val,
                     zone=zone,
+                    commonplace_name=commonplace_name,
+                    unit_number=unit_number,
                 )
             )
         return self._dedupe(addresses)
@@ -624,15 +813,22 @@ class OpenStreetMapAddressProvider:
         city: str,
         state: str,
         count: int,
+        candidate_cities: list[str] | None = None,
     ) -> list[Address]:
         """Build plausible house numbers on the given streets (deterministic by name).
 
         Each entry in *street_names* is ``(name, lat, lon)`` — the centre
         coordinate of the source Way.  Synthesised addresses inherit those
         coordinates so the output carries real location data.
+
+        When *candidate_cities* is provided, addresses are round-robin
+        distributed across those city names instead of all receiving the
+        same *city* value.  This produces realistic multi-city output for
+        county-level areas.
         """
         if not street_names:
             return []
+        cities = candidate_cities if candidate_cities else [city]
         addresses: list[Address] = []
         seen: set[tuple[str, str, str]] = set()
         index = 0
@@ -642,15 +838,16 @@ class OpenStreetMapAddressProvider:
             number = (
                 100 + (int(hashlib.md5(name.encode("utf-8")).hexdigest(), 16) + offset * 97) % 8_900
             )
+            assigned_city = cities[len(addresses) % len(cities)]
             address = Address(
                 f"{number} {name}",
-                city,
+                assigned_city,
                 state,
                 zone="SUBURBAN",
                 latitude=src_lat,
                 longitude=src_lon,
             )
-            key = (address.street_address, city, state)
+            key = (address.street_address, assigned_city, state)
             if key not in seen:
                 seen.add(key)
                 addresses.append(address)

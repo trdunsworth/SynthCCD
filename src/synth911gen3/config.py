@@ -130,6 +130,9 @@ class GenerationRequest:
     # given, rows win for incidents while population still drives phone
     # volume (documented precedence — see ``resolved_rows``).
     population: int | None = None
+    # Tracks how population was resolved: "" (not set), "explicit" (user-provided),
+    # or "nominatim" (auto-resolved from OSM extratags).
+    population_source: str = ""
     # Auto-switch to Parquet when row count exceeds this threshold.
     # Set to 0 to disable auto-switching (always use the explicit format).
     # Set to None to use the default threshold (100000).
@@ -241,6 +244,10 @@ class GenerationRequest:
         shift-preset names, emergency-number overrides, realism config,
         and database options (for database formats).
         """
+        if self.population is not None and self.population <= 0:
+            raise ValidationError("population must be greater than zero when set.")
+        if self.population is not None and not self.population_source:
+            self.population_source = "explicit"
         if self.rows is not None and self.rows <= 0:
             raise ValidationError("rows must be greater than zero.")
         if not self.area_query.strip():
@@ -252,8 +259,6 @@ class GenerationRequest:
             raise ValidationError("dispatcher_pool_size must be greater than zero.")
         if self.max_memory_bytes is not None and self.max_memory_bytes <= 0:
             raise ValidationError("max_memory_bytes must be greater than zero when set.")
-        if self.population is not None and self.population <= 0:
-            raise ValidationError("population must be greater than zero when set.")
         from .constants import PSAP_AGENCY_FILTERS
 
         psap_normalized = self.psap_agency.strip().lower()

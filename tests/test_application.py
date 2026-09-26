@@ -51,6 +51,8 @@ def test_application_generates_incidents_and_hourly_counts() -> None:
         "city",
         "state",
         "postal_code",
+        "commonplace_name",
+        "unit_number",
         "location",
         "call_start_time",
         "hour",
@@ -595,6 +597,38 @@ def test_application_incidents_only_excludes_phone_metrics() -> None:
     assert result.hourly_call_counts is None
 
 
+def test_application_commonplace_name_and_unit_number_columns() -> None:
+    """Generated incidents include commonplace_name and unit_number columns."""
+    provider = StaticAddressProvider(
+        [
+            Address(
+                "1407 Grand Blvd",
+                "Kansas City",
+                "Missouri",
+                commonplace_name="T-Mobile Center",
+                unit_number="Suite 100",
+            ),
+            Address("527 S Evanston Ave", "Independence", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=20,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.incidents is not None
+    assert "commonplace_name" in result.incidents.columns
+    assert "unit_number" in result.incidents.columns
+    assert result.incidents["commonplace_name"].dtype == "string"
+    assert result.incidents["unit_number"].dtype == "string"
+    poi_values = set(result.incidents["commonplace_name"].unique())
+    assert poi_values <= {"T-Mobile Center", ""}
+
+
 def test_application_phone_only_excludes_incidents_and_scales_to_days() -> None:
     request = GenerationRequest(
         rows=10_000,
@@ -1101,3 +1135,94 @@ def test_event_counts_csv_export(tmp_path) -> None:
     df = pd.read_csv(phone_path)
     assert "events_created" in df.columns
     assert df["events_created"].sum() > 0
+
+
+# ---------------------------------------------------------------------------
+# Auto-population resolution from address provider
+# ---------------------------------------------------------------------------
+
+
+class _PopulationProvider:
+    """Address provider with a known resolved population (for testing)."""
+
+    def __init__(self, addresses, population: int | None = None) -> None:
+        self._addresses = list(addresses)
+        self._population = population
+
+    def load_addresses(self, area_query: str):
+        return list(self._addresses)
+
+    def resolved_country(self) -> str | None:
+        return "US"
+
+    def resolved_population(self) -> int | None:
+        return self._population
+
+
+def test_app_auto_resolves_population_from_provider() -> None:
+    """When population is None, app should use the provider's resolved_population."""
+    provider = _PopulationProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ],
+        population=508090,
+    )
+    request = GenerationRequest(
+        rows=10,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+    )
+    assert request.population is None
+
+    result = Synth911Application(address_provider=provider).generate(request)
+    assert result.incidents is not None
+    assert len(result.incidents) == 10
+    assert request.population == 508090
+    assert request.population_source == "nominatim"
+
+
+def test_app_explicit_population_wins_over_provider() -> None:
+    """When user provides --population, it should win over provider's resolved value."""
+    provider = _PopulationProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+        ],
+        population=508090,
+    )
+    request = GenerationRequest(
+        rows=10,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+        population=100000,
+    )
+    request.validate()  # sets population_source = "explicit"
+
+    result = Synth911Application(address_provider=provider).generate(request)
+    assert result.incidents is not None
+    assert request.population == 100000
+    assert request.population_source == "explicit"
+
+
+def test_app_no_population_when_provider_returns_none() -> None:
+    """When provider returns None for population, app should proceed without it."""
+    provider = _PopulationProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+        ],
+        population=None,
+    )
+    request = GenerationRequest(
+        rows=10,
+        dataset=DatasetKind.INCIDENTS,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+    )
+    assert request.population is None
+
+    result = Synth911Application(address_provider=provider).generate(request)
+    assert result.incidents is not None
+    assert len(result.incidents) == 10
+    assert request.population is None

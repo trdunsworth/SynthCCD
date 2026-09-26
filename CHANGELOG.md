@@ -10,6 +10,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Automatic population lookup when `--population` is omitted. When the user
+  does not provide a population, the generator now extracts it from the
+  Nominatim `extratags.population` field during area geocoding (no extra HTTP
+  request). The resolved value is persisted in the address-cache `.meta.json`
+  sidecar and reused on cache hits. The manifest records `population_source`
+  as `"explicit"` (user-provided), `"nominatim"` (auto-resolved), or `""` (not
+  set). Explicit `--population` always wins. Covered by 15 tests in
+  `tests/test_addresses.py` and 3 tests in `tests/test_application.py`.
+- Business/landmark indicator and unit-number columns. Two new incident-output
+  columns: `commonplace_name` holds the OSM `name` when the address is a business
+  or landmark (amenity/shop/tourism/historic tags or named apartment building),
+  otherwise empty; `unit_number` captures sub-address components (suite, unit,
+  apartment, floor) from `addr:flats`/`addr:unit`/`addr:suite`/`addr:door`/`addr:floor`
+  OSM tags. Backward-compatible with old address caches. Covered by
+  `tests/test_addresses.py` and `tests/test_application.py`.
 - Hourly event counts in phone metrics. `--include-event-counts` (params key
   `include_event_counts`, TUI select) adds an `events_created` column to the
   hourly phone-metrics frame when `dataset=all`, binning incidents per hour for

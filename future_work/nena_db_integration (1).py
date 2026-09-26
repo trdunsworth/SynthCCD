@@ -28,7 +28,7 @@ class CADIncident(Base):
     
     # Core Identifiers
     id_number = Column(UUID(as_uuid=True), primary_key=True, comment="Seeded GUID/UUID v4 unique incident identifier")
-    internal_reference_number = Column(String(50), unique=True, nullable=False, comment="Unique agency reference tracking ID (e.g. LAW-260810-000001)")
+    internal_reference_number = Column(String(50), unique=True, nullable=False, comment="Unique agency reference tracking ID (e.g. LAW-260-00001)")
     agency = Column(String(10), nullable=False, comment="Emergency discipline: LAW, FIRE, or EMS")
     shift = Column(String(5), nullable=False, comment="Operational shift code on duty (A, B, C, D)")
     shift_label = Column(String(10), nullable=False, comment="Shift period label (DAY, NIGHT)")

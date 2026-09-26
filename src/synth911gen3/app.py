@@ -18,7 +18,12 @@ from .addresses import AddressProvider, OpenStreetMapAddressProvider
 from .config import DatasetKind, GenerationRequest, OutputFormat
 from .db_exporter import export_to_database
 from .domain import GenerationResult
-from .exporters import export_chunked_generator, export_generated_data, export_manifest
+from .exporters import (
+    export_chunked_generator,
+    export_data_dictionary,
+    export_generated_data,
+    export_manifest,
+)
 from .generators import HourlyCallCountGenerator, IncidentGenerator
 from .logging_conf import get_logger
 from .manifest import Manifest
@@ -52,6 +57,28 @@ class Synth911Application:
             streamed artifacts instead of frames.
         """
         request.validate()
+        # Auto-resolve population from the address provider when the user
+        # did not supply --population.  The provider extracts it from the
+        # Nominatim extratags.population field during geocoding, so we
+        # trigger address loading here (cache hit is cheap on repeat runs).
+        if request.population is None and hasattr(self._address_provider, "resolved_population"):
+            try:
+                self._address_provider.load_addresses(request.area_query)
+            except Exception:
+                logger.debug("Address preload for population lookup failed; continuing")
+            resolved_pop = self._address_provider.resolved_population()
+            if resolved_pop is not None and resolved_pop > 0:
+                request.population = resolved_pop
+                request.population_source = "nominatim"
+                logger.info(
+                    "Auto-resolved population from Nominatim: %d (area: %s)",
+                    resolved_pop,
+                    request.area_query,
+                )
+            else:
+                logger.info(
+                    "No population available from Nominatim for '%s'", request.area_query
+                )
         # Resolve the rows/population precedence once up front so every
         # downstream consumer (chunking, generators, manifest, logging) sees
         # a concrete count. Explicit rows always win; population derivation
@@ -220,6 +247,15 @@ class Synth911Application:
                 )
                 artifacts["manifest"] = manifest_path
                 logger.info("Wrote manifest: %s", manifest_path)
+
+            # Emit data-dict YAML files alongside generated data (file formats only)
+            if effective_format not in (OutputFormat.PANDAS, OutputFormat.POLARS):
+                dict_paths = export_data_dictionary(
+                    output_dir=request.output_dir,
+                    datasets=datasets,
+                )
+                if dict_paths:
+                    artifacts["data_dictionaries"] = dict_paths
 
         return GenerationResult(
             incidents=incidents,

@@ -142,7 +142,8 @@ def generate(
         None,
         "--area",
         show_default=False,
-        help='Area query sent to OpenStreetMap for address generation (default: "Kansas City, MO").',
+        help='Area query: city name, county name, or bounding box. '
+             'Examples: "Kansas City, MO", "Douglas County, KS", "39.0,-94.7,39.15,-94.5".',
     ),
     output_format: OutputFormat | None = typer.Option(
         None,

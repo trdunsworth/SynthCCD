@@ -1,0 +1,266 @@
+$version: "0.1.0"
+$learn_more: https://data-dict.tidyverse.org/
+
+name: synth911gen3-phone-volume
+label: Hourly Call Counts
+description: >
+  Synthetic call-centre phone metrics, one row per hour of the requested date
+  range. Models traffic on each emergency line a PSAP answers (e.g., 9-1-1),
+  plus a non-emergency line and outbound calls. Each hour includes
+  received/abandoned counts, answer-time service-level percentages, mean phone
+  durations, and aggregate totals. Volumes follow a diurnal pattern (peak
+  midday, valley overnight) with weekend multipliers.
+version:
+  number: "1.2.0"
+
+tables:
+  - name: phone_volume
+    source:
+      parquet: phone_volume.parquet
+    origin: src/synth911gen3/generators/phone_metrics.py
+    columns:
+      # ── Time Dimension ───────────────────────────────────────────
+      - name: hour_start
+        label: Hour Start
+        type: datetime
+        time_zone: UTC
+        range: [2026-01-01T00:00:00, 2026-12-31T23:00:00]
+        constraints: [primary_key]
+        description: Start of the hour (midnight-aligned).
+
+      - name: hour_of_day
+        label: Hour of Day
+        type: number(ordinal)
+        range: [0, 23]
+        constraints: [required]
+        description: Hour of day (0-23).
+
+      # ── Emergency Line: Calls Received ───────────────────────────
+      - name: nine_one_one_calls_received
+        label: 911 Calls Received
+        type: number(quantity)
+        units: calls
+        range: [0, 200]
+        constraints: [required]
+        description: >
+          Number of 9-1-1 calls received this hour. Poisson draw; base volume
+          multiplied by line fraction, diurnal weight, and weekend multiplier.
+
+      # ── Non-Emergency and Outbound: Calls Received ───────────────
+      - name: non_emergency_calls_received
+        label: Non-Emergency Calls Received
+        type: number(quantity)
+        units: calls
+        range: [0, 200]
+        constraints: [required]
+        description: >
+          Non-emergency calls received this hour. Floored to at least
+          non_emergency_floor_ratio times total emergency received.
+
+      - name: outbound_calls_placed
+        label: Outbound Calls Placed
+        type: number(quantity)
+        units: calls
+        range: [0, 100]
+        constraints: [required]
+        description: >
+          Outbound calls placed by the centre this hour. Poisson draw.
+
+      # ── Emergency Line: Calls Abandoned ──────────────────────────
+      - name: nine_one_one_calls_abandoned
+        label: 911 Calls Abandoned
+        type: number(quantity)
+        units: calls
+        range: [0, 50]
+        constraints: [required]
+        description: >
+          9-1-1 calls abandoned (hung up before answer). Night hours (0-5) have
+          a higher abandonment rate.
+
+      # ── Non-Emergency: Calls Abandoned ───────────────────────────
+      - name: non_emergency_calls_abandoned
+        label: Non-Emergency Calls Abandoned
+        type: number(quantity)
+        units: calls
+        range: [0, 50]
+        constraints: [required]
+        description: >
+          Non-emergency calls abandoned this hour.
+
+      # ── Emergency Line: Answer-Time Service Levels ───────────────
+      - name: nine_one_one_answered_10s_pct
+        label: 911 Answered Within 10s
+        type: number(quantity)
+        units: "%"
+        range: [0, 100]
+        constraints: [required]
+        description: >
+          Percentage of answered 9-1-1 calls answered within 10 seconds.
+
+      - name: nine_one_one_answered_15s_pct
+        label: 911 Answered Within 15s
+        type: number(quantity)
+        units: "%"
+        range: [0, 100]
+        constraints: [required]
+        description: >
+          Percentage within 15 seconds. NENA 020.1-2020 target: 90%.
+
+      - name: nine_one_one_answered_20s_pct
+        label: 911 Answered Within 20s
+        type: number(quantity)
+        units: "%"
+        range: [0, 100]
+        constraints: [required]
+        description: >
+          Percentage within 20 seconds. NENA target: 95%.
+
+      - name: nine_one_one_answered_40s_pct
+        label: 911 Answered Within 40s
+        type: number(quantity)
+        units: "%"
+        range: [0, 100]
+        constraints: [required]
+        description: Percentage within 40 seconds.
+
+      # ── Non-Emergency: Answer-Time Service Levels ────────────────
+      - name: non_emergency_answered_10s_pct
+        label: Non-Emergency Answered Within 10s
+        type: number(quantity)
+        units: "%"
+        range: [0, 100]
+        constraints: [required]
+        description: >
+          Percentage of answered non-emergency calls within 10 seconds.
+
+      - name: non_emergency_answered_15s_pct
+        label: Non-Emergency Answered Within 15s
+        type: number(quantity)
+        units: "%"
+        range: [0, 100]
+        constraints: [required]
+        description: Percentage within 15 seconds.
+
+      - name: non_emergency_answered_20s_pct
+        label: Non-Emergency Answered Within 20s
+        type: number(quantity)
+        units: "%"
+        range: [0, 100]
+        constraints: [required]
+        description: Percentage within 20 seconds.
+
+      - name: non_emergency_answered_40s_pct
+        label: Non-Emergency Answered Within 40s
+        type: number(quantity)
+        units: "%"
+        range: [0, 100]
+        constraints: [required]
+        description: Percentage within 40 seconds.
+
+      # ── Mean Phone Duration Columns ──────────────────────────────
+      - name: nine_one_one_mean_duration
+        label: 911 Mean Duration
+        type: number(quantity)
+        units: seconds
+        range: [0, 600]
+        constraints: [required]
+        description: >
+          Mean phone duration for answered 9-1-1 calls. Population mean ~210s.
+          Computed as the arithmetic mean of per-call lognormal draws.
+
+      - name: non_emergency_mean_duration
+        label: Non-Emergency Mean Duration
+        type: number(quantity)
+        units: seconds
+        range: [0, 600]
+        constraints: [required]
+        description: >
+          Mean phone duration for answered non-emergency calls. Population
+          mean ~120s.
+
+      - name: outbound_mean_duration
+        label: Outbound Mean Duration
+        type: number(quantity)
+        units: seconds
+        range: [0, 300]
+        constraints: [required]
+        description: >
+          Mean phone duration for outbound calls. Population mean ~60s.
+
+      - name: call_mean_duration
+        label: Overall Mean Duration
+        type: number(quantity)
+        units: seconds
+        range: [0, 600]
+        constraints: [required]
+        description: >
+          Volume-weighted overall mean phone duration across all categories.
+          Not a simple arithmetic average.
+
+      # ── Aggregate Totals ─────────────────────────────────────────
+      - name: total_emergency_calls
+        label: Total Emergency Calls
+        type: number(quantity)
+        units: calls
+        range: [0, 500]
+        constraints: [required]
+        description: Sum of all emergency-line received calls.
+
+      - name: total_nonemergency_calls
+        label: Total Non-Emergency Calls
+        type: number(quantity)
+        units: calls
+        range: [0, 500]
+        constraints: [required]
+        description: Non-emergency calls received this hour.
+
+      - name: total_calls
+        label: Total Calls
+        type: number(quantity)
+        units: calls
+        range: [0, 1000]
+        constraints: [required]
+        description: >
+          Total of all received + outbound calls this hour.
+
+    definitions:
+      - name: abandonment_rate_pct
+        label: Overall Abandonment Rate
+        description: >
+          Percentage of total received calls that were abandoned.
+        expr: "CASE WHEN (nine_one_one_calls_received + non_emergency_calls_received) > 0 THEN (nine_one_one_calls_abandoned + non_emergency_calls_abandoned) * 100.0 / (nine_one_one_calls_received + non_emergency_calls_received) ELSE 0 END"
+
+      - name: nine_one_one_answered_pct
+        label: 911 Answered Percentage
+        description: >
+          Percentage of 9-1-1 calls that were answered (not abandoned).
+        expr: "CASE WHEN nine_one_one_calls_received > 0 THEN (nine_one_one_calls_received - nine_one_one_calls_abandoned) * 100.0 / nine_one_one_calls_received ELSE 0 END"
+
+      - name: is_night_hour
+        label: Is Night Hour
+        description: Whether the hour falls in the overnight period (0-5).
+        expr: "hour_of_day >= 0 AND hour_of_day <= 5"
+
+      - name: is_peak_hour
+        label: Is Peak Hour
+        description: Whether the hour falls in the peak period (11-14).
+        expr: "hour_of_day >= 11 AND hour_of_day <= 14"
+
+glossary:
+  PSAP: >
+    Public-Safety Answering Point. The call centre that receives 911 calls and
+    dispatches appropriate emergency services.
+  NENA: >
+    National Emergency Number Association. Sets standards for 911 call handling,
+    including the target that 90% of 911 calls be answered within 15 seconds.
+  Diurnal Pattern: >
+    The hourly variation in call volumes throughout the day, typically peaking
+    around midday and reaching a valley in the early morning hours.
+  Answer-Time Service Level: >
+    The percentage of calls answered within a specified threshold (e.g., 10s,
+    15s, 20s, 40s). Used as a performance metric for call centres.
+  Abandonment Rate: >
+    The percentage of received calls that are hung up before being answered.
+    Higher during overnight hours due to reduced staffing.
+
+relationships: []

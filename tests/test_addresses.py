@@ -11,6 +11,7 @@ from synth911gen3.addresses import (
     OpenStreetMapAddressProvider,
     _build_named_street_query,
     _build_real_address_query,
+    _extract_population,
     _normalize_state,
     _parse_bbox,
 )
@@ -746,3 +747,448 @@ def test_load_addresses_recovers_missing_or_corrupt_meta(tmp_path: Path) -> None
     meta.write_text("not json {{{", encoding="utf-8")
     provider.load_addresses("Kansas City, MO")
     assert provider.resolved_country() is None
+
+
+# ---------------------------------------------------------------------------
+# commonplace_name and unit_number extraction
+# ---------------------------------------------------------------------------
+
+
+class TestExtractCommonplaceName:
+    """Tests for OpenStreetMapAddressProvider._extract_commonplace_name."""
+
+    def test_amenity_with_name(self) -> None:
+        tags = {"amenity": "restaurant", "name": "Joe's Diner"}
+        assert OpenStreetMapAddressProvider._extract_commonplace_name(tags) == "Joe's Diner"
+
+    def test_shop_with_name(self) -> None:
+        tags = {"shop": "supermarket", "name": "QuikTrip"}
+        assert OpenStreetMapAddressProvider._extract_commonplace_name(tags) == "QuikTrip"
+
+    def test_tourism_with_name(self) -> None:
+        tags = {"tourism": "attraction", "name": "Union Station"}
+        assert OpenStreetMapAddressProvider._extract_commonplace_name(tags) == "Union Station"
+
+    def test_historic_with_name(self) -> None:
+        tags = {"historic": "monument", "name": "Liberty Memorial"}
+        assert OpenStreetMapAddressProvider._extract_commonplace_name(tags) == "Liberty Memorial"
+
+    def test_named_apartment_building(self) -> None:
+        tags = {"building": "apartments", "name": "The Ambassador"}
+        assert OpenStreetMapAddressProvider._extract_commonplace_name(tags) == "The Ambassador"
+
+    def test_apartment_without_name_returns_empty(self) -> None:
+        tags = {"building": "apartments"}
+        assert OpenStreetMapAddressProvider._extract_commonplace_name(tags) == ""
+
+    def test_residential_returns_empty(self) -> None:
+        tags = {"building": "house", "addr:housenumber": "123", "addr:street": "Main St"}
+        assert OpenStreetMapAddressProvider._extract_commonplace_name(tags) == ""
+
+    def test_amenity_without_name_returns_empty(self) -> None:
+        tags = {"amenity": "parking"}
+        assert OpenStreetMapAddressProvider._extract_commonplace_name(tags) == ""
+
+    def test_empty_tags(self) -> None:
+        assert OpenStreetMapAddressProvider._extract_commonplace_name({}) == ""
+
+
+class TestExtractUnitNumber:
+    """Tests for OpenStreetMapAddressProvider._extract_unit_number."""
+
+    def test_addr_flats(self) -> None:
+        tags = {"addr:flats": "2a"}
+        assert OpenStreetMapAddressProvider._extract_unit_number(tags) == "Flats 2a"
+
+    def test_addr_unit(self) -> None:
+        tags = {"addr:unit": "C"}
+        assert OpenStreetMapAddressProvider._extract_unit_number(tags) == "Unit C"
+
+    def test_addr_suite(self) -> None:
+        tags = {"addr:suite": "15"}
+        assert OpenStreetMapAddressProvider._extract_unit_number(tags) == "Suite 15"
+
+    def test_addr_door(self) -> None:
+        tags = {"addr:door": "3"}
+        assert OpenStreetMapAddressProvider._extract_unit_number(tags) == "Door 3"
+
+    def test_addr_floor(self) -> None:
+        tags = {"addr:floor": "2"}
+        assert OpenStreetMapAddressProvider._extract_unit_number(tags) == "Floor 2"
+
+    def test_already_prefixed_value(self) -> None:
+        tags = {"addr:suite": "Suite 15"}
+        assert OpenStreetMapAddressProvider._extract_unit_number(tags) == "Suite 15"
+
+    def test_priority_order_flats_before_unit(self) -> None:
+        tags = {"addr:flats": "B", "addr:unit": "C"}
+        assert OpenStreetMapAddressProvider._extract_unit_number(tags) == "Flats B"
+
+    def test_no_unit_tags(self) -> None:
+        tags = {"addr:housenumber": "123", "addr:street": "Main St"}
+        assert OpenStreetMapAddressProvider._extract_unit_number(tags) == ""
+
+    def test_empty_tags(self) -> None:
+        assert OpenStreetMapAddressProvider._extract_unit_number({}) == ""
+
+
+class TestParseElementsNewFields:
+    """Verify _parse_elements populates commonplace_name and unit_number."""
+
+    def test_business_address_gets_commonplace_name(self, tmp_path: Path) -> None:
+        xml_result = _result_from_xml(
+            _way(
+                1,
+                **{
+                    "addr:housenumber": "1407",
+                    "addr:street": "Grand Blvd",
+                    "addr:city": "Kansas City",
+                    "addr:state": "MO",
+                    "amenity": "arena",
+                    "name": "T-Mobile Center",
+                }
+            )
+        )
+        provider = OpenStreetMapAddressProvider(cache_dir=tmp_path)
+        addresses = provider._parse_elements(xml_result, "Kansas City", "Missouri")
+        assert len(addresses) == 1
+        assert addresses[0].commonplace_name == "T-Mobile Center"
+        assert addresses[0].unit_number == ""
+
+    def test_residential_address_has_empty_commonplace_name(self, tmp_path: Path) -> None:
+        xml_result = _result_from_xml(
+            _way(
+                2,
+                **{
+                    "addr:housenumber": "527",
+                    "addr:street": "S Evanston Ave",
+                    "addr:city": "Independence",
+                    "addr:state": "MO",
+                }
+            )
+        )
+        provider = OpenStreetMapAddressProvider(cache_dir=tmp_path)
+        addresses = provider._parse_elements(xml_result, "Independence", "Missouri")
+        assert len(addresses) == 1
+        assert addresses[0].commonplace_name == ""
+        assert addresses[0].unit_number == ""
+
+    def test_address_with_unit_number(self, tmp_path: Path) -> None:
+        xml_result = _result_from_xml(
+            _way(
+                3,
+                **{
+                    "addr:housenumber": "123",
+                    "addr:street": "Main St",
+                    "addr:city": "Kansas City",
+                    "addr:state": "MO",
+                    "addr:suite": "Suite 15",
+                }
+            )
+        )
+        provider = OpenStreetMapAddressProvider(cache_dir=tmp_path)
+        addresses = provider._parse_elements(xml_result, "Kansas City", "Missouri")
+        assert len(addresses) == 1
+        assert addresses[0].unit_number == "Suite 15"
+        assert addresses[0].commonplace_name == ""
+
+    def test_named_apartment_complex(self, tmp_path: Path) -> None:
+        xml_result = _result_from_xml(
+            _way(
+                4,
+                **{
+                    "addr:housenumber": "900",
+                    "addr:street": "Walnut St",
+                    "addr:city": "Kansas City",
+                    "addr:state": "MO",
+                    "building": "apartments",
+                    "name": "Library District Apartments",
+                }
+            )
+        )
+        provider = OpenStreetMapAddressProvider(cache_dir=tmp_path)
+        addresses = provider._parse_elements(xml_result, "Kansas City", "Missouri")
+        assert len(addresses) == 1
+        assert addresses[0].commonplace_name == "Library District Apartments"
+
+
+class TestCacheBackwardCompatibility:
+    """Verify _load_cache handles old caches without commonplace_name/unit_number."""
+
+    def test_old_cache_without_new_columns_loads(self, tmp_path: Path) -> None:
+        """A cache written before the new columns should still load with defaults."""
+        path = tmp_path / "old_cache.parquet"
+        frame = pd.DataFrame(
+            {
+                "street_address": ["101 Main St", "202 Oak Ave"],
+                "street_number": ["101", "202"],
+                "street_name": ["Main", "Oak"],
+                "street_type": ["St", "Ave"],
+                "prefix_directional": ["", ""],
+                "postfix_directional": ["", ""],
+                "postal_code": ["64110", "64111"],
+                "city": ["Kansas City", "Kansas City"],
+                "state": ["Missouri", "Missouri"],
+                "latitude": [39.0, 39.1],
+                "longitude": [-94.5, -94.6],
+                "zone": ["URBAN", "SUBURBAN"],
+            }
+        )
+        frame.to_parquet(path)
+        provider = OpenStreetMapAddressProvider(cache_dir=tmp_path, min_addresses=1)
+        addresses = provider._load_cache(path)
+        assert addresses is not None
+        assert len(addresses) == 2
+        assert addresses[0].commonplace_name == ""
+        assert addresses[0].unit_number == ""
+        assert addresses[1].commonplace_name == ""
+        assert addresses[1].unit_number == ""
+
+    def test_write_cache_includes_new_columns(self, tmp_path: Path) -> None:
+        """_write_cache should persist commonplace_name and unit_number."""
+        from synth911gen3.domain import Address
+
+        path = tmp_path / "new_cache.parquet"
+        addresses = [
+            Address(
+                "1407 Grand Blvd",
+                "Kansas City",
+                "Missouri",
+                commonplace_name="T-Mobile Center",
+                unit_number="Suite 100",
+            ),
+            Address(
+                "527 S Evanston Ave",
+                "Independence",
+                "Missouri",
+            ),
+        ]
+        provider = OpenStreetMapAddressProvider(cache_dir=tmp_path)
+        provider._write_cache(path, addresses)
+        frame = pd.read_parquet(path)
+        assert "commonplace_name" in frame.columns
+        assert "unit_number" in frame.columns
+        assert frame["commonplace_name"].tolist() == ["T-Mobile Center", ""]
+        assert frame["unit_number"].tolist() == ["Suite 100", ""]
+
+
+# ---------------------------------------------------------------------------
+# Population extraction from Nominatim extratags
+# ---------------------------------------------------------------------------
+
+
+class TestExtractPopulation:
+    """Tests for the _extract_population helper."""
+
+    def test_extracts_population_from_extratags(self) -> None:
+        item = {"extratags": {"population": "508090", "website": "http://example.com"}}
+        assert _extract_population(item) == 508090
+
+    def test_returns_none_when_no_extratags(self) -> None:
+        item = {"boundingbox": ["38.8", "39.3", "-94.7", "-94.4"]}
+        assert _extract_population(item) is None
+
+    def test_returns_none_when_empty_extratags(self) -> None:
+        item = {"extratags": {}}
+        assert _extract_population(item) is None
+
+    def test_returns_none_when_population_missing(self) -> None:
+        item = {"extratags": {"website": "http://example.com"}}
+        assert _extract_population(item) is None
+
+    def test_returns_none_for_zero_population(self) -> None:
+        item = {"extratags": {"population": "0"}}
+        assert _extract_population(item) is None
+
+    def test_returns_none_for_negative_population(self) -> None:
+        item = {"extratags": {"population": "-100"}}
+        assert _extract_population(item) is None
+
+    def test_returns_none_for_non_numeric_population(self) -> None:
+        item = {"extratags": {"population": "unknown"}}
+        assert _extract_population(item) is None
+
+    def test_handles_integer_population_value(self) -> None:
+        item = {"extratags": {"population": 12345}}
+        assert _extract_population(item) == 12345
+
+    def test_handles_float_population_value(self) -> None:
+        item = {"extratags": {"population": 12345.6}}
+        assert _extract_population(item) == 12345
+
+    def test_handles_extratags_as_non_dict(self) -> None:
+        item = {"extratags": "invalid"}
+        assert _extract_population(item) is None
+
+
+class TestPopulationFromGeocode:
+    """Tests that population is extracted from Nominatim geocode responses."""
+
+    def test_geocode_area_extracts_population(self, tmp_path: Path) -> None:
+        search_payload = [
+            {
+                "boundingbox": ["38.8", "39.3", "-94.7", "-94.4"],
+                "address": {"city": "Kansas City", "state": "Missouri", "country_code": "us"},
+                "extratags": {"population": "508090"},
+            }
+        ]
+
+        def runner(query: str) -> overpy.Result:
+            return _five_ways()
+
+        provider = OpenStreetMapAddressProvider(
+            client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
+            cache_dir=tmp_path,
+            query_runner=runner,
+        )
+        provider.load_addresses("Kansas City, MO")
+        assert provider.resolved_population() == 508090
+
+    def test_geocode_bbox_extracts_population(self, tmp_path: Path) -> None:
+        reverse_payload = {
+            "address": {"city": "Kansas City", "state": "Missouri", "country_code": "us"},
+            "extratags": {"population": "508090"},
+        }
+
+        def runner(query: str) -> overpy.Result:
+            return _five_ways()
+
+        provider = OpenStreetMapAddressProvider(
+            client=_FakeClient(reverse_payload=reverse_payload),  # type: ignore[arg-type]
+            cache_dir=tmp_path,
+            query_runner=runner,
+        )
+        provider.load_addresses("38.8,-94.7,39.3,-94.4")
+        assert provider.resolved_population() == 508090
+
+    def test_resolved_population_none_when_no_extratags(self, tmp_path: Path) -> None:
+        search_payload = [
+            {
+                "boundingbox": ["38.8", "39.3", "-94.7", "-94.4"],
+                "address": {"city": "Kansas City", "state": "Missouri", "country_code": "us"},
+            }
+        ]
+
+        def runner(query: str) -> overpy.Result:
+            return _five_ways()
+
+        provider = OpenStreetMapAddressProvider(
+            client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
+            cache_dir=tmp_path,
+            query_runner=runner,
+        )
+        provider.load_addresses("Kansas City, MO")
+        assert provider.resolved_population() is None
+
+
+class TestPopulationMetaPersistence:
+    """Tests for population persistence in .meta.json sidecar."""
+
+    def test_write_meta_includes_population(self, tmp_path: Path) -> None:
+        meta_path = tmp_path / "test.meta.json"
+        OpenStreetMapAddressProvider._write_meta(meta_path, "US", population=508090)
+        import json
+
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert data["country_code"] == "US"
+        assert data["population"] == 508090
+
+    def test_write_meta_omits_population_when_none(self, tmp_path: Path) -> None:
+        meta_path = tmp_path / "test.meta.json"
+        OpenStreetMapAddressProvider._write_meta(meta_path, "US")
+        import json
+
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert data == {"country_code": "US"}
+
+    def test_load_meta_reads_population(self, tmp_path: Path) -> None:
+        meta_path = tmp_path / "test.meta.json"
+        meta_path.write_text('{"country_code": "US", "population": 508090}', encoding="utf-8")
+        result = OpenStreetMapAddressProvider._load_meta(meta_path)
+        assert result["country_code"] == "US"
+        assert result["population"] == 508090
+
+    def test_load_meta_backward_compat_old_format(self, tmp_path: Path) -> None:
+        """Old .meta.json with only country_code should load without error."""
+        meta_path = tmp_path / "test.meta.json"
+        meta_path.write_text('{"country_code": "US"}', encoding="utf-8")
+        result = OpenStreetMapAddressProvider._load_meta(meta_path)
+        assert result["country_code"] == "US"
+        assert result["population"] is None
+
+    def test_load_meta_handles_corrupt_json(self, tmp_path: Path) -> None:
+        meta_path = tmp_path / "test.meta.json"
+        meta_path.write_text("not json {{{", encoding="utf-8")
+        result = OpenStreetMapAddressProvider._load_meta(meta_path)
+        assert result["country_code"] == ""
+        assert result["population"] is None
+
+    def test_load_meta_handles_population_as_string(self, tmp_path: Path) -> None:
+        """Population stored as a string should be parsed."""
+        meta_path = tmp_path / "test.meta.json"
+        meta_path.write_text('{"country_code": "US", "population": "508090"}', encoding="utf-8")
+        result = OpenStreetMapAddressProvider._load_meta(meta_path)
+        assert result["population"] == 508090
+
+    def test_load_meta_rejects_zero_population(self, tmp_path: Path) -> None:
+        meta_path = tmp_path / "test.meta.json"
+        meta_path.write_text('{"country_code": "US", "population": 0}', encoding="utf-8")
+        result = OpenStreetMapAddressProvider._load_meta(meta_path)
+        assert result["population"] is None
+
+    def test_provider_persists_population_in_cache(self, tmp_path: Path) -> None:
+        """load_addresses should persist population in .meta.json."""
+        search_payload = [
+            {
+                "boundingbox": ["38.8", "39.3", "-94.7", "-94.4"],
+                "address": {"city": "Kansas City", "state": "Missouri", "country_code": "us"},
+                "extratags": {"population": "508090"},
+            }
+        ]
+
+        def runner(query: str) -> overpy.Result:
+            return _five_ways()
+
+        provider = OpenStreetMapAddressProvider(
+            client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
+            cache_dir=tmp_path,
+            query_runner=runner,
+        )
+        provider.load_addresses("Kansas City, MO")
+
+        import json
+
+        meta_path = provider._meta_path("Kansas City, MO")
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+        assert data["population"] == 508090
+
+    def test_provider_restores_population_from_cache(self, tmp_path: Path) -> None:
+        """A new provider should restore population from cached .meta.json."""
+        search_payload = [
+            {
+                "boundingbox": ["38.8", "39.3", "-94.7", "-94.4"],
+                "address": {"city": "Kansas City", "state": "Missouri", "country_code": "us"},
+                "extratags": {"population": "508090"},
+            }
+        ]
+
+        def runner(query: str) -> overpy.Result:
+            return _five_ways()
+
+        # First provider writes the cache
+        provider1 = OpenStreetMapAddressProvider(
+            client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
+            cache_dir=tmp_path,
+            query_runner=runner,
+        )
+        provider1.load_addresses("Kansas City, MO")
+        assert provider1.resolved_population() == 508090
+
+        # Second provider reads from cache
+        provider2 = OpenStreetMapAddressProvider(
+            client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
+            cache_dir=tmp_path,
+            query_runner=runner,
+        )
+        provider2.load_addresses("Kansas City, MO")
+        assert provider2.resolved_population() == 508090

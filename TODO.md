@@ -62,51 +62,12 @@ recommendation docs in `docs/`, and direct code review.
       `prefix_directional`, `postfix_directional`, and `postal_code` (auto-parsed from the
       street string, with OSM `addr:postcode` preserved through the cache); wired the
       components into the incident schema, OSM parsing, cache, and docs.
-- [ ] **P1 — Add a business/landmark indicator column.** AGENTS.md: "If an address is a
+- [x] **P1 — Add a business/landmark indicator column.** AGENTS.md: "If an address is a
       business address or a known landmark then that should be reflected in a column on its
-      own." Requires mapping `amenity`/`shop`/`tourism` OSM tags onto address results.
-
-      **Implementation outline:**
-
-      1. **`domain.py`** — Add `address_type: str = "RESIDENTIAL"` field to the `Address`
-         dataclass (frozen, slots). Default preserves backward compatibility.
-
-      2. **`addresses.py`** — Add `_classify_address_type(tags: dict[str, str]) -> str`
-         method to `OpenStreetMapAddressProvider`. Tag mapping:
-         - `LANDMARK`: `tourism` in (attraction, museum, monument, memorial, viewpoint,
-           artwork); `historic` in (monument, memorial, castle, ruins, heritage); `leisure`
-           in (park, nature_reserve, stadium, sports_centre).
-         - `BUSINESS`: any `amenity` tag (hospital, school, restaurant, police, fire_station,
-           etc.); any `shop` tag; any `office` tag; `building` in (commercial, retail, hotel,
-           office, supermarket).
-         - `RESIDENTIAL`: everything else (default).
-
-      3. **`addresses.py`** — Call `_classify_address_type` in `_parse_elements` and pass
-         result to `Address(... address_type=...)`. Also add to `_synthesize_addresses`
-         (default `"RESIDENTIAL"`).
-
-      4. **`addresses.py`** — Add `address_type` to `_write_cache` (new parquet column) and
-         `_load_cache` (default to `"RESIDENTIAL"` when column is absent for backward
-         compatibility with existing caches).
-
-      5. **`incidents.py`** — Add `"address_type"` to the `_ADDRESS_FIELDS` tuple (after
-         `"zone"`). Add `"address_type": address_columns["address_type"]` to the output
-         dict (after `"zone"`, before `"location"`).
-
-      6. **`constants.py`** — Bump `DATA_SCHEMA_VERSION` from `"1.2"` to `"1.3"` (new
-         column = schema change).
-
-      7. **`describe.py`** — Add `address_type` to the preview schema output so
-         `--schema`/`--dry-run` shows the column.
-
-      8. **Tests** — New tests in `tests/test_addresses.py` for `_classify_address_type`
-         with various tag combinations (landmark, business, residential, mixed, empty).
-         Update `tests/test_incidents.py` and refresh regression baseline for new column.
-
-      9. **Docs** — Update `USERSGUIDE.md` (schema section), `REALISMGUIDE.md`, and
-         `CHANGELOG.md` to document the new column.
-
-      **Output column placement:** `... zone, address_type, location, ...`
+      own." Implemented as `commonplace_name` (OSM `name` tag on amenity/shop/tourism/
+      historic/named-apartment elements) plus `unit_number` (addr:flats/unit/suite/door/
+      floor). Wired through Address model, OSM parser, address cache, incident generator,
+      and output schema. Covered by tests.
 - [x] **P2 — Make call reception and disposition use real CAD code vocabulary.** Reception
       methods now use E-911/Phone/OFFICER/Radio/C2C/NOT CAPTURED/Text/CAD2CAD and dispositions
       use code+label pairs (e.g., `NR-No Report`, `RE-Report`, `CI-Citation`),
@@ -341,8 +302,7 @@ recommendation docs in `docs/`, and direct code review.
   Added multi-agency assist problem types (Assist Police, Assist Fire, Assist EMS) to problem
   profiles for all three agencies at priority 5, enabling LAW to call for FIRE/EMS assist,
   FIRE to call for EMS assist, and EMS to call for LAW/FIRE assist. Full multi-record
-  incidents with unit counts remain for future work — see detailed implementation outline
-  in the "Future Enhancements (Post-0.9.0 / v1.0 Roadmap)" section.
+  incidents with unit counts remain for future work.
 - **Cadence/queueing simulation.** The recommendation docs propose a constrained simulation
   (unit availability queues, simpy). Worth prototyping for dispatch realism at P2/P3.
 - [x] **Weather and seasonal correlation** (heat → heat-related EMS, winter → slip/fall).
@@ -418,65 +378,16 @@ recommendation docs in `docs/`, and direct code review.
 ## Future Enhancements (Post-0.9.0 / v1.0 Roadmap)
 
 ### Core Functionality
-- [ ] **P1 — Business/landmark indicator column.** AGENTS.md: "If an address is a business address or a known landmark then that should be reflected in a column on its own." Requires mapping `amenity`/`shop`/`tourism` OSM tags onto address results. See the detailed implementation outline in the "Functionality (AGENTS.md goal gaps)" section above.
+- [x] **P1 — Business/landmark indicator column.** AGENTS.md: "If an address is a business address or a known landmark then that should be reflected in a column on its own." Implemented as `commonplace_name` (OSM `name` tag on amenity/shop/tourism/historic/named-apartment elements) plus `unit_number` (addr:flats/unit/suite/door/floor). Wired through Address model, OSM parser, address cache, incident generator, and output schema. Covered by tests.
 - [x] **P1 — Geographic zone multipliers** (URBAN/SUBURBAN/RURAL) applied to travel time.
   Implemented via `zone_travel_multipliers` in realism config and OSM-based zone
   classification on the `Address` model (see the checked item under "Realism
   Improvements" above); kept here as a reference to the completed work.
 - [ ] **P2 — Multi-agency incidents with unit counts.** Extend current assist problem types to full multi-record incidents where one call spawns LAW+FIRE+EMS records with unit counts and availability tracking.
-
-      **Implementation outline (MVI approach):**
-
-      **Phase 1 — Config (`realism_config.py` + `schema.py`)**
-      - Add `multi_agency: bool = False` (opt-in, preserves backward compat)
-      - Add `multi_agency_prob: float = 0.1` (fraction of incidents that are multi-agency)
-      - Add `multi_agency_combinations: dict[str, float]` (weights for agency combos, e.g.
-        `{"LAW_FIRE_EMS": 0.4, "LAW_FIRE": 0.3, "FIRE_EMS": 0.3}`)
-      - Add `multi_agency_unit_counts: dict[str, dict[str, int]]` (per-combo per-agency unit
-        counts, e.g. `{"LAW_FIRE_EMS": {"LAW": 2, "FIRE": 1, "EMS": 1}}`)
-      - Add `multi_agency_timing_offsets: dict[str, dict[str, float]]` (per-agency turnout/travel
-        multipliers, e.g. `{"EMS": {"turnout_mean": 0.8}, "FIRE": {"turnout_mean": 1.0}}`)
-      - Schema: expose as `MultiAgencyConfig` pydantic model in `schema.py`
-
-      **Phase 2 — Generation (`incidents.py`)**
-      - After agency selection (line ~609), apply multi-agency filter:
-        `if multi_agency and rng.random() < multi_agency_prob`
-      - For selected incidents, expand 1 row → N rows (one per agency in the combo)
-        - Shared `id_number` (call ID) across all agency records
-        - Unique `internal_reference_number` per agency
-        - Shared `event_time`, `street_address`, `city`, `state`, coordinates
-        - Independent `agency` field per row
-      - Apply per-agency timing offsets to `turnout_seconds`, `travel_seconds`,
-        `on_scene_seconds`, `closeout_seconds`
-      - Add `unit_count` column (from config, default 1)
-      - Add `unit_availability` column: compute from each agency's timeline
-        (e.g., "available" before dispatch, "en_route" after enroute, "on_scene"
-        after arrival, "clear" after cleared)
-      - Each agency row gets its own `calltaker`/`dispatcher` from the appropriate pool
-
-      **Phase 3 — Schema & Export**
-      - Bump `DATA_SCHEMA_VERSION` from `"1.2"` to `"1.3"`
-      - Add `unit_count` (int) and `unit_availability` (str) to output schema
-      - Update `describe.py` preview schema
-      - Update `USERSGUIDE.md`, `REALISMGUIDE.md`, `CHANGELOG.md`
-
-      **Phase 4 — Tests**
-      - Default (`multi_agency=False`) produces byte-identical output
-      - When enabled, correct number of agency rows per call
-      - Shared timestamps + address across agency records
-      - Agency-specific timing offsets applied correctly
-      - Unit counts match config
-      - Unit availability status transitions are logical
-      - Regression baseline refreshed
-
-      **Key design decisions:**
-      - **Opt-in** via `multi_agency: false` default (backward compatible)
-      - **Shared `id_number`** across agency records (one call = one ID)
-      - **One primary problem_nature** per call (not per-agency)
-      - **Agency-specific timing offsets** (EMS faster turnout than FIRE typical)
 - [ ] **P2 — Cadence/queueing simulation.** Constrained simulation with unit availability queues (simpy) for dispatch realism. Prototype at P2/P3.
 - [ ] **P2 — Weather and seasonal correlation enhancements.** Current seasonal multipliers are static; integrate real weather data (temperature, precipitation) to drive problem type correlations dynamically.
-- [ ] **P2 — Automatic population lookup when `--population` is omitted.** When the
+- [X] **P2 — Timezone-aware timestamps.** Support non-UTC timestamps and hourly-metric localization for deployments outside single timezone.
+- [x] **P2 — Automatic population lookup when `--population` is omitted.** When the
   requester doesn't know the service-area population, resolve it from the area before
   generation so population-derived rows/volume still engage: (1) OSM Nominatim
   `extratags.population` from the already-performed area geocode (no extra request);
@@ -525,7 +436,7 @@ recommendation docs in `docs/`, and direct code review.
 
 ### Usability / Developer Experience
 - [x] **P2 — `config/example_params` parity.** Add TOML example alongside JSON/YAML, and params-driven CI regression run. Created `config/example_params.toml` with a distinct example configuration; all three formats (JSON/YAML/TOML) load and round-trip via the CLI `--params` and `--save-params` flags. Added a `params-regression` CI job that exercises each example file and verifies TOML round-trip.
-- [x] **P2 — PyQt6 GUI.** Requires re-adding `pyqt6` dependency; desktop GUI for non-technical operators. **Deferred** — not being pursued for now.
+- [ ] **P2 — PyQt6 GUI.** Requires re-adding `pyqt6` dependency; desktop GUI for non-technical operators. **Deferred** — not being pursued for now.
 - [x] **P2 — Param file generation CLI.** `SynthCCD generate --save-params my_run.yaml`
       writes the effective parameters (CLI flags merged over any `--params` file) to a JSON/YAML/TOML
       params file and exits without generating. Canonical `GenerationRequest` keys are serialized
@@ -554,7 +465,7 @@ recommendation docs in `docs/`, and direct code review.
 ### Performance / Scalability
 - [ ] **P2 — Incremental/streaming generation API.** Allow generating data in chunks via iterator without holding full DataFrames, for integration with streaming pipelines (Kafka, Flink, Spark).
 - [ ] **P2 — Distributed generation.** Support for horizontal scaling across multiple workers/processes for 10M+ row datasets.
-- [ ] **P2 — Columnar statistics pre-computation.** Pre-compute column statistics during generation for faster downstream analytics (min/max/null counts per column).
+- [X] **P2 — Columnar statistics pre-computation.** Pre-compute column statistics during generation for faster downstream analytics (min/max/null counts per column).
 
 ### Data Quality / Realism
 - [x] **P2 — Correlation between fields.** Implemented geographic zone (URBAN/SUBURBAN/RURAL) correlation with travel time via OSM-based zone classification and configurable `zone_travel_multipliers` (URBAN=0.8, SUBURBAN=1.0, RURAL=1.5). Priority-weighted time distributions already correlate priority with interview/dispatch/turnout/travel times via `TIME_PROFILES` per agency/priority.
@@ -650,7 +561,127 @@ recommendation docs in `docs/`, and direct code review.
 - [x] **P2 — Contribution guide.** Added `CONTRIBUTING.md` covering development setup, TLS-proxy notes, code style (ruff/ty), testing and coverage gates, documentation maintenance, commit discipline, the PR process, and the permissions summary.
 
 ---
+ 
+## Data Dictionary Integration (data-dict)
+ 
+The [data-dict](https://data-dict.tidyverse.org/) bundle provides a YAML-based data dictionary specification (`data-dict.yaml`) and a CLI validator. It documents related tables with columns, types, constraints, relationships; validates data against the spec; renders browsable websites; and is agent/LLM-friendly. Integration would give analysts a living, version-controlled data dictionary for generated EIDO/incident/phone-metrics data.
+ 
+### Implementation Plan
+ 
+- [x] **P2 — Add `data-dict-yaml` as a dev dependency.**
+    Installed via `uv add --group dev data-dict-yaml`. Provides the `data-dict` CLI for validation and rendering.
 
+- [x] **P2 — Create `data-dict.yaml` for generated datasets.**
+    Created `docs/incidents_data_dict.yaml` (50 columns, glossary, definitions) and
+    `docs/phone_volume_data_dict.yaml` (22 columns, glossary, definitions). Both validate
+    cleanly with `data-dict validate-spec`. Rendered as browsable HTML:
+    `docs/incidents_data_dict.html` and `docs/phone_volume_data_dict.html`.
+ 
+- [x] **P2 — Add dictionary generation to export pipeline.**
+    When exporting data (CSV, Parquet, JSON), optionally emit a `data-dict.yaml` alongside the data files. The dictionary should reflect the actual schema of the generated data (including any config-driven column variations like international emergency numbers).
+ 
+- [x] **P2 — Add validation step in CI/tests.**
+    Run `data-dict validate-data data-dict.yaml` against generated test outputs to ensure the dictionary stays in sync with the code. This catches schema drift automatically.
+ 
+- [ ] **P2 — Add `data-dict render-spec` to documentation build.**
+    Integrate `data-dict render-spec data-dict.yaml --output output/docs/data-dictionary/` into `scripts/build_docs.py` so the browsable data dictionary website is published alongside Sphinx docs.
+ 
+- [ ] **P2 — Expose dictionary via API.**
+    Add `/dictionary` endpoint to `serve.py` that returns the `data-dict.yaml` content (or rendered HTML) so consumers can fetch the data contract programmatically.
+ 
+- [ ] **P2 — Agent/LLM integration.**
+    Document how analysts can feed the `data-dict.yaml` to LLMs for context-aware analysis, SQL generation, and anomaly detection. Add a `data-dict` skill for opencode/other agents.
+ 
+- [ ] **P3 — EIDO-specific dictionary extensions.**
+    When EIDO generation is implemented, extend the dictionary to cover EIDO components (incidentComponent, callComponent, dispatchComponent, etc.) with NENA registry value enumerations and cross-component reference mappings.
+
+- [x] **P1 — County-wide PSAP support.**
+    Added `feature_type` detection (city vs county) from Nominatim responses, Overpass-based city discovery for county bounding boxes, USPS postal lookup via `zipcodes` package for fallback `addr:city` resolution, and round-robin city assignment for synthesized addresses. County queries now produce addresses distributed across real city names (e.g., Lawrence, Eudora, Baldwin City for Douglas County, KS) instead of all receiving the county name. New modules: `postal.py`, `city_discovery.py`. New tests: `test_postal.py`, `test_city_discovery.py`, `test_county_support.py`.
+
+---
+ 
+## EIDO Generator Implementation (from EIDO.md)
+ 
+Based on the NENA-STA-021.1b EIDO standard and NENA-STA-019.2-2022 Call Processing Metrics, implement a synthetic EIDO generator that produces NG9-1-1 compliant test data.
+ 
+### Phase 1: Foundation (P1)
+ 
+- [ ] **P1 — Create `src/synth911gen3/eido/` package structure.**
+    Modules: `config.py`, `models/`, `registries/`, `generator/`, `output/`, `validation/`, `cli.py`.
+ 
+- [ ] **P1 — Implement NENA/IANA registry loader (`registries/loader.py`, `registries/values.py`).**
+    Load all registry values from YAML config (agency types, call states, incident types, dispositions, resource types, unit statuses, person roles, location types, etc.). Support registry versioning.
+ 
+- [ ] **P1 — Build Pydantic models for all EIDO components (`models/`).**
+    Map OpenAPI schema to Pydantic v2 models: PrologueType, IncidentInformationType, CallInformationType, CallbackType, DispatchInformationType, AlarmsSensorsType, AgencyType, AgentType, NotesType, AdditionalDataType, LocationInformationType (with PIDF-LO), PersonInformationType, VehicleInformationType, EmergencyResourceType, MergeInformationType, LinkInformationType, DispositionType, EmergencyIncidentDataObjectType. Include JSON-LD `@context` support.
+ 
+- [ ] **P1 — Implement Reference Management System (`generator/reference.py`).**
+    UUID/URN generation for `$id` fields, reference resolution and linking, component deduplication (shared agencies, agents, locations across EIDO).
+ 
+- [ ] **P1 — Create `EIDOConfig` and `EIDORealismConfig` (`config.py`).**
+    YAML-driven configuration for registries, distributions (priority weights, time intervals, agency mix, hourly call weights, zone multipliers), personnel, location defaults. Extend existing `RealismConfig` patterns.
+ 
+### Phase 2: Data Generation (P1)
+ 
+- [ ] **P1 — Implement Incident Generation Pipeline (`generator/incident.py`).**
+    IncidentBuilder: select incident type (weighted), priority (1-5 weighted by type), agency(s), generate location (OSM + PIDF-LO), generate caller/person data, generate call timeline, generate dispatch sequence, generate resource assignments, generate dispositions, link all components with references.
+ 
+- [ ] **P1 — Implement Realistic Timestamp Generation (`generator/timeline.py`).**
+    Leverage existing `PriorityTimeDistributions` and `CallTimelineGenerator` from synth911gen3. Call start → answer → queue → dispatch → enroute → arrive → clear → close. Priority-weighted lognormal distributions. Separate turnout vs travel time. Diurnal patterns. Session-level timestamps (SIP INVITE, 180/183, 200 OK, BYE).
+ 
+- [ ] **P1 — Implement Location Generation with PIDF-LO (`generator/location.py`).**
+    Fetch real addresses from OpenStreetMap via overpy (reuse `AddressGenerator`). Convert to PIDF-LO civicAddress XML. Support RoutingLocation vs Caller location types. Generate cross streets and intersecting streets.
+ 
+- [ ] **P1 — Implement Call Component Generation (`generator/call.py`).**
+    Multiple calls per incident (transfers, callbacks). SIP/TEL URI generation for callbacks. Additional data (ServiceInfo, ProviderInfo XML). verstat, sipIdentity simulation. Call state transitions (callBegin, callAlerting, callAnswered, callQueued, callHold, callPark, callCancel, callEnd).
+ 
+### Phase 3: Advanced Features (P1/P2)
+ 
+- [ ] **P1 — Implement Resource & Dispatch Modeling (`generator/dispatch.py`, `generator/personnel.py`).**
+    Unit status state machines (Available → Enroute → OnScene → Transporting → AtHospital → Available). Multi-unit dispatch. Unit location tracking. ETA calculations. AgentType with agentRoleRegistryText, agencyReference, agentJcard, workstationPosition.
+ 
+- [ ] **P1 — Implement Merge/Link Simulation (`generator/merge.py`, `generator/link.py`).**
+    Duplicate call merging. Related incident linking. Parent/child relationships. MergeInformationType and LinkInformationType components.
+ 
+- [ ] **P2 — Implement Alarms/Sensors (`generator/alarms.py`).**
+    CSAA alarm data simulation. AACN (Automatic Crash Notification) data. AlarmsSensorsType component.
+ 
+- [ ] **P2 — Implement NENA-STA-019 Metrics Computation (`eido/metrics.py`).**
+    `NENAMetricsComputer` class: compute all 30 call-related metrics from EIDO timestamps, compute agent availability/secondary state metrics, compute batch aggregates (mean, median, percentiles), export metrics reports (Parquet, CSV). Add metric distribution parameters to realism config (call_answered_delay, call_queued_delay, route_determination_time, location_dereference_time, lost_query_time, additional_data_query_time, eido_dereference_time, session_duration, media_quality, announcement_duration, agent_state_durations).
+ 
+- [ ] **P2 — Add metrics validation tests (`tests/test_nena_sta_019_metrics.py`).**
+    Verify all 30 call metrics computable from generated EIDO. Verify metric values fall in realistic ranges. Verify agent state timeline supports agent metrics.
+ 
+### Phase 4: Output & Integration (P1)
+ 
+- [ ] **P1 — Implement Serialization Adapters (`output/`).**
+    JSON (strict EIDO schema), JSON-LD with @context, Parquet/Arrow for analytics, CSV (flattened references to IDs), Pandas/Polars DataFrames.
+ 
+- [ ] **P1 — Implement Validation (`validation/`).**
+    Schema validation against NENA OpenAPI. Reference integrity checks. Registry value compliance. Temporal consistency. Cardinality checks.
+ 
+- [ ] **P1 — Add CLI commands (`cli.py`).**
+    `synth911gen3 eido generate --count N --output DIR --format FORMAT --area AREA --config CONFIG --priority-range --agencies`
+    `synth911gen3 eido validate --input DIR --schema SCHEMA`
+    `synth911gen3 eido convert --input FILE --output FILE --format FORMAT`
+ 
+- [ ] **P1 — Integrate with existing synth911gen3 components.**
+    Reuse: AddressGenerator (OSM), PersonnelGenerator, CallTimelineGenerator, PriorityTimeDistributions, ProblemNatureSelector, DispositionSelector, CallReceptionSelector.
+ 
+- [ ] **P1 — Add EIDO to main CLI/TUI.**
+    Add `eido` subcommand to main Typer app. Add EIDO generation tab to TUI with real-time JSON preview, registry editors, batch progress, export format selector.
+ 
+- [ ] **P2 — Vendor NENA OpenAPI schemas.**
+    Place NENA-STA-021.1b and NENA-STA-024.1.1 OpenAPI schemas in `schemas/NENA-EIDO/`. Use `datamodel-code-generator` to generate/update Pydantic models.
+ 
+- [ ] **P2 — Add EIDO realism config example.**
+    Create `config/eido_realism.yaml` with all registry overrides, distributions, personnel, location settings.
+ 
+- [ ] **P2 — Round-trip serialization tests.**
+    Test JSON → model → JSON preserves all data. Test Parquet ↔ DataFrame round-trips.
+ 
+---
+ 
 ## Refactor Backlog: Efficiency, Speed, and Security
 
 Generated 2026-08-17 from a full codebase audit. Items ordered by combined impact

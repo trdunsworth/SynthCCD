@@ -62,6 +62,8 @@ _ADDRESS_FIELDS = (
     "latitude",
     "longitude",
     "zone",
+    "commonplace_name",
+    "unit_number",
 )
 
 logger = get_logger("incidents")
@@ -323,13 +325,14 @@ def _build_reference_numbers(
     times_series: pd.Series,
     start_counts: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Per-agency daily reference numbers like ``LAW-260101-000001``.
+    """Per-agency daily reference numbers like ``LAW-260-00001``.
 
     The counter runs per agency over the whole dataset (continuing across
-    chunks via ``start_counts``); the date portion is the incident's YMD.
+    chunks via ``start_counts``); the date portion is the incident's
+    day-of-year (001-366).
     """
-    ymd = (times_series.dt.year % 100) * 10000 + times_series.dt.month * 100 + times_series.dt.day
-    ymd_str = np.char.zfill(ymd.to_numpy().astype("U6"), 6)
+    doy = times_series.dt.dayofyear
+    doy_str = np.char.zfill(doy.to_numpy().astype("U3"), 3)
 
     counters = np.zeros(int(agency_codes.max()) + 1, dtype=np.int64)
     if start_counts is not None:
@@ -341,11 +344,11 @@ def _build_reference_numbers(
         count = int(mask.sum())
         counter[mask] = counters[agency_index] + np.arange(1, count + 1)
         counters[agency_index] += count
-    counter_str = np.char.zfill(counter.astype("U6"), 6)
+    counter_str = np.char.zfill(counter.astype("U5"), 5)
     if start_counts is not None:
         start_counts[:] = counters
 
-    prefix = np.char.add(np.char.add(agency, "-"), ymd_str)
+    prefix = np.char.add(np.char.add(agency, "-"), doy_str)
     return np.char.add(np.char.add(prefix, "-"), counter_str)
 
 
@@ -836,6 +839,8 @@ class IncidentGenerator:
             "latitude": address_columns["latitude"],
             "longitude": address_columns["longitude"],
             "zone": address_columns["zone"],
+            "commonplace_name": address_columns["commonplace_name"],
+            "unit_number": address_columns["unit_number"],
             "location": location,
             "call_start_time": event_times,
             "hour": hour,
