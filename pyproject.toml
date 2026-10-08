@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Tony Dunsworth", email = "tony.dunsworth@gmail.com" }
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "click>=8.3.3",
     "faker>=40.13.0",
@@ -38,6 +38,13 @@ dependencies = [
     "sphinx>=9.1.0",
     "prometheus-client>=0.26.0",
     "zipcodes>=3.0.0",
+    "statsforecast",
+    "mlforecast",
+    "numba",
+    "llvmlite",
+    "timecopilot",
+    "neuralforecast",
+    "darts",
 ]
 
 [project.scripts]

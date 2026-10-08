@@ -932,3 +932,133 @@ to `SynthCCD license install`. Valid but expired licenses continue to work durin
   passthrough).
 
 ---
+
+## Staffing Model Evaluation Pipeline (staff_models)
+
+Goal: generate realistic call volumes, derive staffing recommendations from each
+model, and re-run the generator with those recommendations to measure how the
+outputs differ.
+
+- [ ] **P1 — Volume generator driver from population & staffing.** Build a small
+  driver (script in `staff_models/`) that calls the SynthCCD call-volume
+  generation with parameters keyed off population and on-hand staff per agency,
+  producing hourly volumes per queue type (911, non-emergency, SMS/RTT).
+- [ ] **P1 — Model recommendation harness.** For each generated volume profile,
+  run every registered model via `runner.py` and capture its recommended staffing
+  (agents/trunks/capacity) into a comparison table.
+- [ ] **P1 — Re-run generation with recommended staffing.** Feed the
+  model-recommended staffing counts back into the SynthCCD generator's staffing
+  parameters so the synthetic incident lifecycle timestamps reflect them.
+- [ ] **P1 — Diff analysis across models.** Compare the resulting datasets
+  (queue wait distributions, abandonment, occupancy, disposition mix) between
+  baseline and each model's staffing to visualize the effect of each model's
+  recommendation.
+- [ ] **P2 — Metrics report export.** Emit a comparison report (markdown + Carve)
+  summarizing per-model deltas and a recommendation on which model best matches
+  observed volumes.
+- [ ] **P2 — Tests.** Add pytest coverage for the driver, harness, and diff
+  computation (unit-level; deterministic with seeded volumes).
+
+### Viability assessment
+
+Feasible because the SynthCCD generator already supports population-driven
+volume, per-shift staffing rosters, and priority-weighted time distributions —
+recommended headcounts map directly onto its staffing config. The main
+caveats: (1) model recommendations must respect shift boundaries (models
+output point staffing; SynthCCD wants per-shift rosters), so a
+rounding/bridging step is needed; (2) Erlang models assume Poisson arrivals,
+so volumes with bursts (radio, redials) will favor Engset/Erlang-R results;
+(3) diffing synthetic datasets is only meaningful with fixed seeds per
+scenario. Expect Erlang A / square-root / PSA to cluster together and
+occupancy-only sizing to diverge most.
+
+## Novel Staffing Models & Skills-Based Evaluator
+
+- [ ] **P1 — Outline the math for novel centre-configuration models.** Extend the
+  model family beyond Erlang/EFPA to cover: (a) common pools where servers have
+  *variable priorities* for different queue/skill types (priority-weighted M/G/c
+  variants, e.g. cμ(1−ρ)-scaled priority classes à la Cobham non-preemptive
+  priority queues); (b) *discrete non-overlapping pools* where each skill has its
+  own closed queue with no cross-overflow (pure M/M/c/K per pool); (c) hybrid
+  topologies mixing dedicated, overflow, and shared pools (EFPA with
+  Wilkinson/equivalent-random-method corrections). Document the assumptions,
+  stability conditions, and known limitations per model.
+- [ ] **P2 — Prototype the novel models in `staff_models/`.** One script per
+  variant, following the existing docstring + demo conventions, registered in
+  `runner.py` so they appear in the TUI.
+- [ ] **P1 — Skills-based centre-configuration evaluator agent.** Define an
+  opencode agent (skill or subagent) whose job is to evaluate a centre
+  configuration: parse the pool/route/priority structure, pick the applicable
+  models, run them, and report the staffing deltas between configurations
+  (common pool with priority weights vs discrete pools vs hybrids). It should
+  produce structured parameters, call `runner.py`, and render results in
+  markdown and Carve.
+- [ ] **P2 — Evaluation criteria for the agent's comparisons.** Standard metrics
+  (per-skill SL, abandonment, occupancy, pool blocking, fairness across
+  priorities), seeded volume generation for reproducibility, and a written
+  recommendation with rationale per centre configuration.
+
+- [P1 — Incorporate `staff_models/queueing_theory_guide.md` into the evaluator.] The
+  centre-configuration evaluator agent should use that guide's checklist and the
+  Robbins safeguards (report Erlang C/A spread, sensitivity to arrival-rate error,
+  balking parameter, per-pool/per-route SL fairness) when evaluating a
+  configuration.
+  _(Todo added to the Novel Staffing Models section checklist.)_
+
+## Research Project: Synthetic-Data Evaluation of Staffing Models
+
+Goal: run the full pipeline — volume generation → model recommendations →
+regeneration with recommended staffing → comparative analysis — at scale,
+with academic rigor.
+
+### Data & ground truth
+- [ ] **P1 — Calibration targets.** Document per-queue-type distributions for AHT
+  (by priority), patience (Weibull), abandonment, arrival-rate uncertainty, and
+  balking rates, sourced from literature/docs guidance files where possible.
+- [ ] **P1 — Reproducibility.** Seeded generation, versioned scenario configs, and
+  config hashes in dataset manifests for every run.
+- [ ] **P1 — Lineage manifest fields.** Record which volumes/params produced each
+  dataset and which model recommendation fed regeneration.
+
+### Modeling rigor
+- [ ] **P1 — Stationarity documentation.** Record steady-state vs transient
+  assumptions per model; add warm-up/transient handling notes to the evaluator.
+- [ ] **P1 — Sensitivity analysis harness.** Sweep arrival-rate forecast error,
+  service-time SCV, and patience shape; report SL/ASA/abandonment deltas.
+- [ ] **P1 — Replication & statistics.** Multi-seed runs with CIs and simple
+  significance checks on predicted-vs-realized differences between models.
+
+### Evaluation infrastructure
+- [ ] **P1 — Ground-truth scoring harness.** Score each model's recommended
+  staffing against the simulated center's realized SL, ASA, occupancy, and
+  abandonment.
+- [ ] **P1 — Comparative report export.** Markdown + Carve reports with a rubric
+  for "which model wins under which conditions."
+- [ ] **P2 — Scale path.** Subprocess/batch generation to millions of rows,
+  parquet outputs, DuckDB/Polars aggregation.
+
+### Process
+- [ ] **P1 — Pre-registered analysis plan.** Hypotheses, metrics, and thresholds
+  written before running the suite.
+- [ ] **P1 — Threats to validity.** Document Poisson assumption, pool
+  independence, EFPA decoupling error, and synthetic-to-real transfer limits.
+- [ ] **P2 — Optional real-data validation sample** to bound transfer error.
+
+## Forecasting Challenge (forecasting/)
+
+Hypothesis: the company's proprietary 168-hour point forecasts are not more
+accurate than a linear forecast over the same horizon. See
+`forecasting/forecasting_experiment.md`.
+
+- [ ] **P1 — Implement `linear_forecast.py`, `score.py`, `run_experiment.py`** with
+  seeded synthetic volumes, paired error stats (Wilcoxon + bootstrap CIs), and
+  per-hour-of-day breakdowns.
+- [ ] **P1 — Integrate the proprietary model** via a wrapper once the company's
+  algorithm/API is available.
+- [ ] **P2 — Staffing-impact analysis** mapping each forecast to hourly staffing
+  via `staff_models/runner.py` (PSA/Erlang A), reporting over/under-staffing cost.
+- [ ] **P2 — Report export** (markdown + Carve) with verdict and scenario charts.
+- [ ] **P0 — Linux migration for forecasting deps.** `uv.lock` is stale on
+  purpose (added via `--frozen`); on macOS/x86_64 numba/llvmlite have no wheels.
+  In the Linux env: `uv lock && uv sync`, then full pytest/ruff/ty. See
+  `forecasting/forecasting_experiment.md` → "Migration note".
