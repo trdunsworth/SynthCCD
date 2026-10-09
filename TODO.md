@@ -813,17 +813,26 @@ the specific problem, and the fix direction.
 
 ### Code Quality (P2)
 
-- [ ] **P2 — Consolidate duplicate enums.**
+- [x] **P2 — Consolidate duplicate enums.**
   `config.py:47-67` and `schema.py:30-45` define `OutputFormat`,
   `DatasetKind`, `IdFormat`, and `DatabaseDialect` independently. Fix:
   define them once in `constants.py` (or a dedicated `_enums.py`) and
   import everywhere.
 
-- [ ] **P2 — Consolidate duplicate validation.**
-  `config.py:171-221` and `schema.py:221-272` both validate output paths,
-  PSAP agency, dates, and database options. Fix: pydantic validators in
-  `schema.py` are the more maintainable layer; have `config.py` delegate
-  to the schema model and remove the redundant checks.
+- [x] **P2 — Consolidate duplicate validation.**
+  `config.py` and `schema.py` both validated output paths, PSAP agency,
+  dates, and database options. Rather than the originally suggested
+  delegation to the pydantic layer (which would put pydantic on the runtime
+  path, contradicting ADR-0002's "no runtime path passes through pydantic"),
+  the rules now live once as pure functions in a new
+  `synth911gen3/validation.py` module. Both
+  `config.GenerationRequest.validate()` (wrapping `ValueError` in
+  `ValidationError`) and the pydantic validators in `schema.py` call the
+  same helpers, so each layer keeps its error surface and the runtime stays
+  dataclass-only. The `db_name`/`db_port` default-filling for database
+  formats is preserved on the runtime path. Covered by
+  `tests/test_validation.py` plus the existing config/schema/db-exporter
+  suites.
 
 - [ ] **P2 — Move `from copy import copy` and `PSAP_AGENCY_FILTERS` to top-level.**
   `incidents.py:257,268` import inside `_prepare()`. Python caches modules,

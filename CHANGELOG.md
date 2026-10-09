@@ -122,6 +122,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
    are a validation aid only and never affect generated data.
 
 ### Changed
+- Validation rules consolidated into `synth911gen3.validation`. The
+  output-path, PSAP-agency, date-range, and database-option checks
+  previously duplicated between `config.GenerationRequest.validate()`
+  (runtime dataclass) and the pydantic `schema.GenerationRequest` validators
+  now live once as pure functions in the new `validation` module, called by
+  both layers. Per ADR-0002 the dataclass remains the single runtime type
+  and pydantic remains the edge contract; neither layer's error surface
+  changed. This also completes the duplicate-enums consolidation:
+  `OutputFormat`, `DatasetKind`, `IdFormat`, and `DatabaseDialect` are now
+  defined once in `constants.py`. No behavior change. Covered by
+  `tests/test_validation.py` plus the existing config/schema/db-exporter
+  suites.
 - Volume-mix recalibration (Reading B). `nine_one_one_received_fraction`
   `0.48 -> 0.55` and `non_emergency_received_fraction` `0.58 -> 0.52`
   (≈51.4% 911 of received, matching Kansas City's 51.5%; cross-checked
