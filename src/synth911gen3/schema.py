@@ -17,56 +17,18 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from . import validation
 from .constants import (
     DEFAULT_AREA_QUERY,
     DEFAULT_COUNTRY,
     DEFAULT_OUTPUT_DIR,
     DEFAULT_OUTPUT_STEM,
     DEFAULT_PSAP_AGENCY,
+    DatabaseDialect,
+    DatasetKind,
+    IdFormat,
+    OutputFormat,
 )
-
-
-class OutputFormat(str, Enum):
-    """Supported dataset output formats; file formats and DB dialects."""
-
-    CSV = "csv"
-    PARQUET = "parquet"
-    JSON = "json"
-    YAML = "yaml"
-    PANDAS = "pandas"
-    POLARS = "polars"
-    GEOJSON = "geojson"
-    SHAPEFILE = "shapefile"
-    POSTGRESQL = "postgresql"
-    SQLSERVER = "sqlserver"
-    MARIADB = "mariadb"
-    DUCKDB = "duckdb"
-    SQLITE = "sqlite"
-
-
-class DatasetKind(str, Enum):
-    """Which dataset(s) a run generates: incidents, phone metrics, or both."""
-
-    INCIDENTS = "incidents"
-    PHONE = "phone"
-    ALL = "all"
-
-
-class IdFormat(str, Enum):
-    """CAD incident identifier style: sequential integers or GUIDs."""
-
-    INTEGER = "integer"
-    GUID = "guid"
-
-
-class DatabaseDialect(str, Enum):
-    """Supported SQL dialects for database exports."""
-
-    POSTGRESQL = "postgresql"
-    SQLSERVER = "sqlserver"
-    MARIADB = "mariadb"
-    DUCKDB = "duckdb"
-    SQLITE = "sqlite"
 
 
 class ShiftPreset(str, Enum):
@@ -370,91 +332,44 @@ class GenerationRequest(BaseModel):
     @classmethod
     def validate_output_stem(cls, v: str) -> str:
         """Reject reserved device names, path separators, and null bytes."""
-        if v in (".", ".."):
-            raise ValueError("output_stem must not be '.' or '..'")
-        if any(c in v for c in ("/", "\\", "\x00")):
-            raise ValueError("output_stem must not contain path separators or null bytes")
-        stem_root = v.split(".", 1)[0].upper()
-        reserved = {
-            "CON",
-            "PRN",
-            "AUX",
-            "NUL",
-            *[f"COM{i}" for i in range(1, 10)],
-            *[f"LPT{i}" for i in range(1, 10)],
-        }
-        if stem_root in reserved:
-            raise ValueError(f"output_stem must not be a reserved device name: {stem_root}")
+        validation.validate_output_stem(v)
         return v
 
     @field_validator("output_dir")
     @classmethod
     def validate_output_dir(cls, v: Path) -> Path:
         """Reject null bytes and ``..`` path segments."""
-        if "\x00" in str(v):
-            raise ValueError("output_dir must not contain null bytes")
-        if any(part == ".." for part in v.parts):
-            raise ValueError("output_dir must not contain '..' path segments")
+        validation.validate_output_dir(v)
         return v
 
     @field_validator("psap_agency")
     @classmethod
     def validate_psap_agency(cls, v: str) -> str:
         """Normalize and validate the PSAP agency filter string."""
-        from .constants import PSAP_AGENCY_FILTERS
-
-        normalized = v.strip().lower()
-        if normalized not in PSAP_AGENCY_FILTERS:
-            raise ValueError(
-                f"psap_agency must be one of {sorted(PSAP_AGENCY_FILTERS)}, got {v!r}"
-            )
-        return normalized
+        return validation.normalize_psap_agency(v)
 
     @model_validator(mode="after")
     def validate_dates(self) -> GenerationRequest:
         """Reject an inverted date range (start after end)."""
-        if self.start_date and self.end_date and self.start_date > self.end_date:
-            raise ValueError("start_date must be on or before end_date")
+        if self.start_date and self.end_date:
+            validation.validate_date_range(self.start_date, self.end_date)
         return self
 
     @model_validator(mode="after")
     def validate_database_options(self) -> GenerationRequest:
         """Require DB connection fields for server dialects; default file names/ports otherwise."""
-        db_formats = {
-            OutputFormat.POSTGRESQL,
-            OutputFormat.SQLSERVER,
-            OutputFormat.MARIADB,
-            OutputFormat.DUCKDB,
-            OutputFormat.SQLITE,
-        }
-        if self.output_format in db_formats:
-            dialect_map = {
-                OutputFormat.POSTGRESQL: DatabaseDialect.POSTGRESQL,
-                OutputFormat.SQLSERVER: DatabaseDialect.SQLSERVER,
-                OutputFormat.MARIADB: DatabaseDialect.MARIADB,
-                OutputFormat.DUCKDB: DatabaseDialect.DUCKDB,
-                OutputFormat.SQLITE: DatabaseDialect.SQLITE,
-            }
-            # An explicit db_dialect wins over the output-format default
-            dialect = self.db_dialect or dialect_map[self.output_format]
-            if dialect in (DatabaseDialect.DUCKDB, DatabaseDialect.SQLITE):
-                if not self.db_name:
-                    suffix = ".duckdb" if dialect == DatabaseDialect.DUCKDB else ".sqlite3"
-                    self.db_name = f"{self.output_stem}{suffix}"
-            else:
-                if not self.db_host:
-                    raise ValueError("db_host is required for database exports")
-                if not self.db_name:
-                    raise ValueError("db_name is required for database exports")
-                if not self.db_user:
-                    raise ValueError("db_user is required for database exports")
-                if self.db_port is None:
-                    defaults = {
-                        DatabaseDialect.POSTGRESQL: 5432,
-                        DatabaseDialect.SQLSERVER: 1433,
-                        DatabaseDialect.MARIADB: 3306,
-                    }
-                    self.db_port = defaults.get(dialect)
+        for key, value in validation.resolve_database_options(
+            output_format=self.output_format,
+            db_dialect=self.db_dialect,
+            output_stem=self.output_stem,
+            db_name=self.db_name,
+            db_host=self.db_host,
+            db_port=self.db_port,
+            db_user=self.db_user,
+            db_if_exists=str(self.db_if_exists.value),
+            db_batch_size=self.db_batch_size,
+        ).items():
+            setattr(self, key, value)
         return self
 
 
