@@ -29,6 +29,8 @@ way; it is embedded in Parquet metadata and the governance manifest.
 
 from __future__ import annotations
 
+from enum import StrEnum
+
 import numpy as np
 
 DEFAULT_ROWS = 10_000
@@ -700,3 +702,51 @@ PROBLEM_PHONE_MULTIPLIERS: dict[str, float] = {
 
 # Default multiplier for any problem type not explicitly listed
 DEFAULT_PROBLEM_PHONE_MULTIPLIER = 1.0
+
+
+class OutputFormat(StrEnum):
+    """Supported export targets for generated datasets.
+
+    File formats (csv, parquet, json, yaml, geojson, shapefile), in-memory
+    formats (pandas, polars), and direct database targets (postgresql,
+    sqlserver, mariadb, duckdb, sqlite).
+    """
+
+    CSV = "csv"
+    PARQUET = "parquet"
+    JSON = "json"
+    YAML = "yaml"
+    PANDAS = "pandas"
+    POLARS = "polars"
+    GEOJSON = "geojson"
+    SHAPEFILE = "shapefile"
+    POSTGRESQL = "postgresql"
+    SQLSERVER = "sqlserver"
+    MARIADB = "mariadb"
+    DUCKDB = "duckdb"
+    SQLITE = "sqlite"
+
+
+class DatabaseDialect(StrEnum):
+    """SQL dialects supported by the database exporter."""
+
+    POSTGRESQL = "postgresql"
+    SQLSERVER = "sqlserver"
+    MARIADB = "mariadb"
+    DUCKDB = "duckdb"
+    SQLITE = "sqlite"
+
+
+class DatasetKind(StrEnum):
+    """Which datasets a run generates: incidents, phone, or both."""
+
+    INCIDENTS = "incidents"
+    PHONE = "phone"
+    ALL = "all"
+
+
+class IdFormat(StrEnum):
+    """How incident ``id_number`` values are produced: sequential ints or UUIDs."""
+
+    INTEGER = "integer"
+    GUID = "guid"
