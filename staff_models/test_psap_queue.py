@@ -3,13 +3,10 @@
 from __future__ import annotations
 
 import heapq
-import math
 import random
 from collections import OrderedDict
 
-import numpy as np
 import pytest
-
 from mm_c_k import MMCK
 from psap_queue import PSAPModel, minimum_servers
 
@@ -17,7 +14,7 @@ LAM0, MU, C, K = 0.06, 1 / 120, 10, 20  # 7.2 erlangs, 120 s handle time
 
 
 def model(**kw):
-    base = dict(fresh_arrival_rate=LAM0, service_rate=MU, servers=C, capacity=K)
+    base = {"fresh_arrival_rate": LAM0, "service_rate": MU, "servers": C, "capacity": K}
     base.update(kw)
     return PSAPModel(**base)
 
@@ -66,23 +63,23 @@ def test_abandonment_flatters_answered_only_basis():
 @pytest.mark.parametrize(
     "kw",
     [
-        dict(patience_rate=1 / 30),
-        dict(patience_rate=1 / 30, redial_probability_blocked=0.85, redial_probability_abandoned=0.3),
-        dict(patience_rate=1 / 30, callback_probability=1.0, callback_service_rate=1 / 60),
-        dict(
-            patience_rate=1 / 20,
-            redial_probability_blocked=0.5,
-            redial_probability_abandoned=0.5,
-            callback_probability=0.7,
-            callback_service_rate=1 / 90,
-            callback_backlog_capacity=8,
-        ),
-        dict(
-            patience_rate=1 / 30,
-            callback_probability=1.0,
-            callback_service_rate=1 / 60,
-            callbacks_preemptible=True,
-        ),
+        {"patience_rate": 1 / 30},
+        {"patience_rate": 1 / 30, "redial_probability_blocked": 0.85, "redial_probability_abandoned": 0.3},
+        {"patience_rate": 1 / 30, "callback_probability": 1.0, "callback_service_rate": 1 / 60},
+        {
+            "patience_rate": 1 / 20,
+            "redial_probability_blocked": 0.5,
+            "redial_probability_abandoned": 0.5,
+            "callback_probability": 0.7,
+            "callback_service_rate": 1 / 90,
+            "callback_backlog_capacity": 8,
+        },
+        {
+            "patience_rate": 1 / 30,
+            "callback_probability": 1.0,
+            "callback_service_rate": 1 / 60,
+            "callbacks_preemptible": True,
+        },
     ],
 )
 def test_flow_and_wait_chain_consistency(kw):
@@ -170,16 +167,16 @@ def test_unstable_redial_feedback_is_reported():
 @pytest.mark.parametrize(
     "kw,exc",
     [
-        (dict(servers=2.5), TypeError),
-        (dict(servers=0), ValueError),
-        (dict(capacity=5), ValueError),
-        (dict(patience_rate=-1.0), ValueError),
-        (dict(patience_rate=float("nan")), ValueError),
-        (dict(redial_probability_blocked=1.5), ValueError),
-        (dict(callback_probability=0.5, patience_rate=1 / 30), ValueError),  # missing rate
-        (dict(callback_probability=0.5, callback_service_rate=1 / 60), ValueError),  # no abandonment
-        (dict(callbacks_preemptible=1), TypeError),
-        (dict(fresh_arrival_rate=0.0), ValueError),
+        ({"servers": 2.5}, TypeError),
+        ({"servers": 0}, ValueError),
+        ({"capacity": 5}, ValueError),
+        ({"patience_rate": -1.0}, ValueError),
+        ({"patience_rate": float("nan")}, ValueError),
+        ({"redial_probability_blocked": 1.5}, ValueError),
+        ({"callback_probability": 0.5, "patience_rate": 1 / 30}, ValueError),  # missing rate
+        ({"callback_probability": 0.5, "callback_service_rate": 1 / 60}, ValueError),  # no abandonment
+        ({"callbacks_preemptible": 1}, TypeError),
+        ({"fresh_arrival_rate": 0.0}, ValueError),
     ],
 )
 def test_validation(kw, exc):
@@ -198,7 +195,7 @@ def test_bad_basis_and_time():
 def test_minimum_servers_monotone_target():
     c1, s1 = minimum_servers(fresh_arrival_rate=LAM0, service_rate=MU, patience_rate=1 / 30,
                              targets=((15.0, 0.90),), capacity_slack=10)
-    c2, s2 = minimum_servers(fresh_arrival_rate=LAM0, service_rate=MU, patience_rate=1 / 30,
+    c2, _s2 = minimum_servers(fresh_arrival_rate=LAM0, service_rate=MU, patience_rate=1 / 30,
                              targets=((15.0, 0.95),), capacity_slack=10)
     assert c1 <= c2
     assert s1.service_level(15) >= 0.90
@@ -233,8 +230,8 @@ def simulate(p: PSAPModel, n_fresh: int, redial_delay: float, seed: int):
     cancelled: set[int] = set()
     backlog = 0
     cid = 0
-    stats = dict(att=0, block=0, aband=0, served=0, w_sum=0.0, within={5: 0, 15: 0, 30: 0, 60: 0})
-    area = dict(m=0.0, b=0.0, inn=0.0)
+    stats = {"att": 0, "block": 0, "aband": 0, "served": 0, "w_sum": 0.0, "within": {5: 0, 15: 0, 30: 0, 60: 0}}
+    area = {"m": 0.0, "b": 0.0, "inn": 0.0}
     last_t = 0.0
 
     def start_inbound(now, call_t, counted):
@@ -316,16 +313,16 @@ def simulate(p: PSAPModel, n_fresh: int, redial_delay: float, seed: int):
                 dispatch(now)
     span = horizon - warm
     n = stats["att"]
-    return dict(
-        att_per_fresh=n / (n_fresh * 0.95),
-        block=stats["block"] / n,
-        aband=stats["aband"] / n,
-        within={k: v / n for k, v in stats["within"].items()},
-        within_answered={k: v / stats["served"] for k, v in stats["within"].items()},
-        e_m=area["m"] / span,
-        e_b=area["b"] / span,
-        e_inn=area["inn"] / span,
-    )
+    return {
+        "att_per_fresh": n / (n_fresh * 0.95),
+        "block": stats["block"] / n,
+        "aband": stats["aband"] / n,
+        "within": {k: v / n for k, v in stats["within"].items()},
+        "within_answered": {k: v / stats["served"] for k, v in stats["within"].items()},
+        "e_m": area["m"] / span,
+        "e_b": area["b"] / span,
+        "e_inn": area["inn"] / span,
+    }
 
 
 def test_matches_simulation_abandonment_only():

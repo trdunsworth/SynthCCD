@@ -60,10 +60,10 @@ __all__ = [
     "MMCK",
     "blocking_probability",
     "delay_probability",
-    "queued_probability",
-    "wait_probability_given_admitted",
     "mean_queue_length",
     "mean_system_size",
+    "queued_probability",
+    "wait_probability_given_admitted",
 ]
 
 
@@ -138,7 +138,7 @@ class MMCK:
         object.__setattr__(self, "capacity", k)
 
     @classmethod
-    def from_erlangs(cls, erlangs: float, servers: int, capacity: int) -> "MMCK":
+    def from_erlangs(cls, erlangs: float, servers: int, capacity: int) -> MMCK:
         """Build from offered load in erlangs (time unit chosen so mu = 1)."""
         return cls(_as_positive_float(erlangs, "erlangs"), 1.0, servers, capacity)
 

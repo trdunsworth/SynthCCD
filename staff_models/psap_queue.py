@@ -61,17 +61,16 @@ from __future__ import annotations
 
 import math
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Sequence
 
 import numpy as np
+import scipy.sparse.linalg  # noqa: F401  (exposes sparse.linalg.MatrixRankWarning)
+from mm_c_k import _as_count, _as_positive_float
 from scipy import sparse
 from scipy.optimize import brentq
 from scipy.sparse import linalg as spla
-import scipy.sparse.linalg  # noqa: F401  (exposes sparse.linalg.MatrixRankWarning)
-
-from mm_c_k import _as_count, _as_positive_float
 
 __all__ = ["PSAPModel", "PSAPSolution", "minimum_servers"]
 
@@ -175,7 +174,7 @@ class PSAPModel:
 
     # -- Markov chain -----------------------------------------------------------
     @cached_property
-    def _chain(self) -> "_Chain":
+    def _chain(self) -> _Chain:
         c, K = self.servers, self.capacity
         mu, th = self.service_rate, self.patience_rate
         pcb = self.callback_probability
@@ -186,7 +185,7 @@ class PSAPModel:
         def norm(n: int, m: int, b: int) -> tuple[int, int, int]:
             idle = c - m - n
             if idle > 0 and b > 0:  # an idle call-taker starts a waiting callback
-                k = idle if idle < b else b
+                k = min(b, idle)
                 m += k
                 b -= k
             return n, m, b
@@ -215,7 +214,7 @@ class PSAPModel:
         while i < len(states):
             n, m, b = states[i]
             s_av = c - m
-            inn = n if n < s_av else s_av
+            inn = min(s_av, n)
             w = n - inn
             if n < K:  # arrival (unit rate; scaled by the attempt rate later)
                 if pre and m > 0 and n == s_av:
@@ -254,7 +253,7 @@ class PSAPModel:
         q_arr = sparse.coo_matrix((np.ones(len(arr_r)), (arr_r, arr_c)), shape=(size, size)).tocsr()
         return _Chain(size, arr[:, 0], arr[:, 1], arr[:, 2], q_base, q_arr)
 
-    def _stationary(self, lam: float) -> "_Stat":
+    def _stationary(self, lam: float) -> _Stat:
         ch = self._chain
         q = ch.q_base + lam * ch.q_arr
         out = np.asarray(q.sum(axis=1)).ravel()
@@ -290,7 +289,7 @@ class PSAPModel:
             raise RuntimeError("stationary solve failed; the chain is numerically unstable at this load")
         return _Stat(self, lam, pi)
 
-    def solve(self) -> "PSAPSolution":
+    def solve(self) -> PSAPSolution:
         """Solve for the steady state, including the redial fixed point."""
         lam0 = self.fresh_arrival_rate
         rb, ra = self.redial_probability_blocked, self.redial_probability_abandoned
@@ -459,7 +458,7 @@ class PSAPSolution:
 
     # ---- answer-time distribution ----------------------------------------------------
     @cached_property
-    def _tagged(self) -> "_Tagged":
+    def _tagged(self) -> _Tagged:
         return _Tagged(self)
 
     @property
@@ -645,20 +644,20 @@ def minimum_servers(
 
 if __name__ == "__main__":
     # 120 s mean handle time, 7.2 erlangs fresh, 10 call-takers, 10 waiting positions.
-    base = dict(fresh_arrival_rate=0.06, service_rate=1 / 120, servers=10, capacity=20)
+    base = {"fresh_arrival_rate": 0.06, "service_rate": 1 / 120, "servers": 10, "capacity": 20}
     scenarios = {
         "No abandonment (M/M/c/K)": {},
-        "+ abandonment (mean patience 30 s)": dict(patience_rate=1 / 30),
-        "+ redials (blocked 85%, abandoned 30%)": dict(
-            patience_rate=1 / 30, redial_probability_blocked=0.85, redial_probability_abandoned=0.30
-        ),
-        "+ callbacks (60 s, all abandoned calls)": dict(
-            patience_rate=1 / 30,
-            redial_probability_blocked=0.85,
-            redial_probability_abandoned=0.30,
-            callback_probability=1.0,
-            callback_service_rate=1 / 60,
-        ),
+        "+ abandonment (mean patience 30 s)": {"patience_rate": 1 / 30},
+        "+ redials (blocked 85%, abandoned 30%)": {
+            "patience_rate": 1 / 30, "redial_probability_blocked": 0.85, "redial_probability_abandoned": 0.30
+        },
+        "+ callbacks (60 s, all abandoned calls)": {
+            "patience_rate": 1 / 30,
+            "redial_probability_blocked": 0.85,
+            "redial_probability_abandoned": 0.30,
+            "callback_probability": 1.0,
+            "callback_service_rate": 1 / 60,
+        },
     }
     print("Scenario                                     attempts/call  P(abandon)  <=15s (all)  <=15s (answered only)")
     for name, extra in scenarios.items():

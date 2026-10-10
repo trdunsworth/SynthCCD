@@ -6,9 +6,8 @@ import heapq
 import math
 import random
 
-import pytest
-
 import mm_c_k as m
+import pytest
 from mm_c_k import MMCK
 
 
