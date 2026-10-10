@@ -113,6 +113,7 @@ class PhoneMetrics(BaseModel):
     nine_one_one_received_fraction: float = Field(ge=0, le=1)
     non_emergency_received_fraction: float = Field(ge=0, le=1)
     outbound_calls_fraction: float = Field(ge=0, le=1)
+    sms_rtt_received_fraction: float = Field(default=0.04, ge=0, le=1)
     nine_one_one_abandonment_rate: float = Field(ge=0, le=1)
     night_abandonment_increment: float = Field(ge=0, le=1)
     non_emergency_abandonment_rate: float = Field(ge=0, le=1)
@@ -124,6 +125,12 @@ class PhoneMetrics(BaseModel):
     non_emergency_answer_time_mean: float
     non_emergency_answer_time_sigma: float = Field(gt=0)
     answer_time_thresholds: list[float] = Field(min_length=1)
+    sms_rtt_abandonment_rate: float = Field(default=0.18, ge=0, le=1)
+    sms_rtt_answer_time_mean: float = Field(default=150.0, gt=0)
+    sms_rtt_answer_time_sigma: float = Field(default=0.95, gt=0)
+    sms_rtt_answer_time_thresholds: list[float] = Field(
+        default_factory=lambda: [60.0, 120.0, 300.0, 600.0], min_length=1
+    )
     answer_time_load_sensitivity: float = Field(default=0.25, ge=0)
     answer_time_mu_noise_sd: float = Field(default=0.05, ge=0)
     nine_one_one_phone_duration_mu: float | None = Field(default=None)
@@ -132,6 +139,8 @@ class PhoneMetrics(BaseModel):
     non_emergency_phone_duration_sigma: float | None = Field(default=None, gt=0)
     outbound_phone_duration_mu: float | None = Field(default=None)
     outbound_phone_duration_sigma: float | None = Field(default=None, gt=0)
+    sms_rtt_phone_duration_mu: float | None = Field(default=None)
+    sms_rtt_phone_duration_sigma: float | None = Field(default=None, gt=0)
     lines: dict[str, LineMetrics] = Field(default_factory=dict)
 
 

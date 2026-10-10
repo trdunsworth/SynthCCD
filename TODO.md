@@ -950,10 +950,38 @@ Goal: generate realistic call volumes, derive staffing recommendations from each
 model, and re-run the generator with those recommendations to measure how the
 outputs differ.
 
+- [x] **P1 — SMS/RTT (text-to-911) queue in the phone-metrics generator.** Needed as
+  a real generator line before the driver below could be built honestly. Added as its
+  own **session-counted line** (not a share of the voice 9-1-1 queue), matching how
+  centres log text contacts separately; minute-scale engagement thresholds
+  (`sms_rtt_answered_{60,120,300,600}s_pct`) because a text reply is not a voice
+  answer time. Seven new columns plus `sms_rtt_*` realism keys; `total_emergency_calls`
+  stays voice-only so 9-1-1 volume and the non-emergency floor are undistorted, while
+  `total_calls` and the four-channel `call_mean_duration` include it. All SMS/RTT draws
+  are appended after existing voice draws, so prior datasets stay byte-identical
+  (regression baseline signatures unchanged). Schema 1.2 → 1.3. 17 tests in
+  `tests/test_sms_rtt.py`.
+- [ ] **P1 — Staffing-driven queue model.** The link that makes personnel changes
+  measurable. Today `interview_seconds` is a pure lognormal draw from
+  `TIME_PROFILES[agency][priority]["interview_mean"]` and the `answered_{t}s_pct`
+  columns come from a sequential-binomial allocation — neither reads staffing, so no
+  score currently responds to headcount. Plan: per-hour per-channel λ → offered load →
+  queue wait solved from actual staffing → feed `interview_seconds` (incidents) **and**
+  `answered_{t}s_pct` (phone metrics) from one shared computation so the two generators
+  agree about the same hour.
+  - **Per-agency staffing scope (decided):** model per-agency headcount on the
+    *dispatcher* side only, with a **single cross-trained calltaker pool**. Real PSAP
+    calltakers answer the 911 call regardless of discipline, so modelling separate
+    per-agency call-answer queues would invent a structure that doesn't exist; agency
+    mix drives dispatcher consoles (already partially modelled via
+    `dispatcher_disciplines`) and field/turnout capacity instead.
 - [ ] **P1 — Volume generator driver from population & staffing.** Build a small
   driver (script in `staff_models/`) that calls the SynthCCD call-volume
   generation with parameters keyed off population and on-hand staff per agency,
   producing hourly volumes per queue type (911, non-emergency, SMS/RTT).
+  Unblocked by the two items above: SMS/RTT now exists as a queue type, and the
+  per-agency staffing question is settled (dispatcher-side; total calltaker pool).
+  Should emit offered load in erlangs so `runner.py` can consume it directly.
 - [ ] **P1 — Model recommendation harness.** For each generated volume profile,
   run every registered model via `runner.py` and capture its recommended staffing
   (agents/trunks/capacity) into a comparison table.

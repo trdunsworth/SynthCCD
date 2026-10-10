@@ -10,6 +10,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- SMS/RTT (text-to-911) channel in the hourly phone-metrics dataset. Modelled
+  as its own session-counted line rather than a share of the voice 9-1-1 queue,
+  because centres log text contacts as discrete sessions and measure them
+  separately. Adds `sms_rtt_calls_received`, `sms_rtt_calls_abandoned`,
+  `sms_rtt_mean_duration`, and four minute-scale engagement columns
+  (`sms_rtt_answered_60s_pct` … `600s_pct`); a text reply is not a voice
+  answer time, so the voice 10/15/20/40 s thresholds do not apply. New
+  `phone_metrics` keys: `sms_rtt_received_fraction` (0.04),
+  `sms_rtt_abandonment_rate` (0.18), `sms_rtt_answer_time_mean` (150.0),
+  `sms_rtt_answer_time_sigma` (0.95), `sms_rtt_answer_time_thresholds`,
+  `sms_rtt_phone_duration_mu`, `sms_rtt_phone_duration_sigma`.
+  `total_emergency_calls` stays voice-only so reported 9-1-1 volume and the
+  non-emergency floor are undistorted; `total_calls` now includes SMS/RTT, and
+  `call_mean_duration` is the volume-weighted mean of four channel means rather
+  than three. Schema version bumped 1.2 → 1.3. All SMS/RTT draws are appended
+  after the existing voice draws, so pre-existing datasets are byte-identical
+  (confirmed: the regression baseline's incident and phone signatures are
+  unchanged). Covered by 17 tests in `tests/test_sms_rtt.py`.
 - Automatic population lookup when `--population` is omitted. When the user
   does not provide a population, the generator now extracts it from the
   Nominatim `extratags.population` field during area geocoding (no extra HTTP

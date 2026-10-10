@@ -156,6 +156,11 @@ phone_metrics:
   nine_one_one_received_fraction: 0.55
   non_emergency_received_fraction: 0.52
   outbound_calls_fraction: 0.26
+  sms_rtt_received_fraction: 0.04
+  sms_rtt_abandonment_rate: 0.18
+  sms_rtt_answer_time_mean: 150.0
+  sms_rtt_answer_time_sigma: 0.95
+  sms_rtt_answer_time_thresholds: [60.0, 120.0, 300.0, 600.0]
   nine_one_one_abandonment_rate: 0.07
   night_abandonment_increment: 0.03
   non_emergency_abandonment_rate: 0.05
@@ -690,6 +695,13 @@ independent per-line Poisson means, not shares of a fixed total:
 | `nine_one_one_received_fraction` | 0.55 | Per-line mean for 9-1-1 received (≈51.4% of received with the 0.52 non-emergency fraction; Kansas City Reading B: 51.5%) |
 | `non_emergency_received_fraction` | 0.52 | Per-line mean for non-emergency received |
 | `outbound_calls_fraction` | 0.26 | Per-line mean for outbound placed |
+| `sms_rtt_received_fraction` | 0.04 | Per-line mean for SMS/RTT (text-to-911) sessions received. Modelled as its own line, not a share of the voice 9-1-1 queue; text is a minority channel in most centres and higher where Deaf/HH outreach is strong |
+| `sms_rtt_abandonment_rate` | 0.18 | Text-session abandonment. Higher than voice because senders routinely give up before a reply arrives; caps the SMS/RTT engagement percentages at ≈82% (see below) |
+| `sms_rtt_answer_time_mean` | 150.0 | Population **mean** time to a first reply in seconds (same μ = ln(mean) − σ²/2 convention) |
+| `sms_rtt_answer_time_sigma` | 0.95 | Lognormal σ for text time-to-reply |
+| `sms_rtt_answer_time_thresholds` | `[60, 120, 300, 600]` | Minute-scale engagement thresholds. The voice 10/15/20/40 s thresholds do not apply to text |
+| `sms_rtt_phone_duration_mu` | 1.35 | Lognormal μ for text-session duration (log-scale; far longer than a voice call) |
+| `sms_rtt_phone_duration_sigma` | 0.80 | Lognormal σ for text-session duration |
 | `nine_one_one_abandonment_rate` | 0.07 | Baseline 9-1-1 abandonment rate (published band: VT 6.5%, DC 6–18%, Norfolk 16.8%, KC ~9%) |
 | `night_abandonment_increment` | 0.03 | Added to 9-1-1 rate during 00:00-05:59 |
 | `non_emergency_abandonment_rate` | 0.05 | Non-emergency abandonment rate |

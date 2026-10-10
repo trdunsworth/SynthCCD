@@ -44,7 +44,7 @@ DEFAULT_PSAP_AGENCY = "all"
 # Version of the generated incident / phone-metrics data schema. Bump when
 # columns change in a breaking way. Embedded in Parquet file metadata and in
 # the data-governance manifest so consumers can detect schema drift.
-DATA_SCHEMA_VERSION = "1.2"
+DATA_SCHEMA_VERSION = "1.3"
 
 # When ``max_memory_bytes`` is unset, incident CSV/Parquet generation is
 # chunked once the estimated in-memory DataFrame would exceed this budget.
@@ -346,6 +346,24 @@ PHONE_METRICS: dict[str, float | list[float]] = {
     "nine_one_one_received_fraction": 0.55,
     "non_emergency_received_fraction": 0.52,
     "outbound_calls_fraction": 0.26,
+    # SMS / RTT (text-to-911) sessions. Modelled as its own line rather than a
+    # share of the voice 9-1-1 queue: centres log text contacts as discrete
+    # sessions and measure them separately, and the interaction happens inside
+    # and between calls rather than as a voice answer-time distribution. The
+    # default share is a small fraction of voice volume (text is a minority
+    # channel in most US centres, higher where Deaf/HH outreach is strong).
+    "sms_rtt_received_fraction": 0.04,
+    # Text sessions have a much longer handling clock than voice: a first reply
+    # is measured in minutes, so the engagement thresholds below are
+    # minute-scale. Abandonment is higher than voice because senders routinely
+    # give up before a reply arrives.
+    "sms_rtt_abandonment_rate": 0.18,
+    "sms_rtt_answer_time_mean": 150.0,
+    "sms_rtt_answer_time_sigma": 0.95,
+    "sms_rtt_answer_time_thresholds": [60.0, 120.0, 300.0, 600.0],
+    # A text session's handling time is far longer than a voice call.
+    "sms_rtt_phone_duration_mu": 1.35,
+    "sms_rtt_phone_duration_sigma": 0.80,
     # Abandonment as a share of received calls. Default ~7% sits inside the
     # published band: Vermont 2025 6.5%, DC dashboard 6-18% day-to-day,
     # Norfolk VA Jan 2026 16.8%, KC Reading B ~9%.

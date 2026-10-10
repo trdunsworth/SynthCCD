@@ -39,6 +39,19 @@ def _thresholds(realism: RealismConfig) -> list[float]:
     return [float(raw)]
 
 
+def _sms_rtt_thresholds(realism: RealismConfig) -> list[float]:
+    """Answer-time thresholds (seconds) for the SMS/RTT engagement columns.
+
+    Text sessions are minutes long, so the voice 10/15/20/40 s thresholds would
+    report near-zero engagement and say nothing useful about the channel.
+    """
+    default = DEFAULT_PHONE_METRICS.get("sms_rtt_answer_time_thresholds", [60.0, 120.0, 300.0, 600.0])
+    raw = realism.phone_metrics.get("sms_rtt_answer_time_thresholds", default)
+    if isinstance(raw, list):
+        return sorted(float(t) for t in raw)
+    return [float(raw)]
+
+
 def _mean_duration(
     rng: np.random.Generator,
     counts: np.ndarray,
@@ -75,21 +88,25 @@ def phone_metrics_columns(request: GenerationRequest, realism: RealismConfig) ->
         prefix = column_prefix(number.number)
         columns.append(f"{prefix}_calls_received")
     columns.append("non_emergency_calls_received")
+    columns.append("sms_rtt_calls_received")
     columns.append("outbound_calls_placed")
     for number in request.resolved_emergency_numbers():
         prefix = column_prefix(number.number)
         columns.append(f"{prefix}_calls_abandoned")
     columns.append("non_emergency_calls_abandoned")
+    columns.append("sms_rtt_calls_abandoned")
     for number in request.resolved_emergency_numbers():
         prefix = column_prefix(number.number)
         columns.extend(f"{prefix}_answered_{int(t)}s_pct" for t in thresholds)
     columns.extend(f"non_emergency_answered_{int(t)}s_pct" for t in thresholds)
+    columns.extend(f"sms_rtt_answered_{int(t)}s_pct" for t in _sms_rtt_thresholds(realism))
     # Mean phone-duration columns (per emergency number, non-emergency, outbound,
     # and the volume-weighted overall mean).
     for number in request.resolved_emergency_numbers():
         prefix = column_prefix(number.number)
         columns.append(f"{prefix}_mean_duration")
     columns.append("non_emergency_mean_duration")
+    columns.append("sms_rtt_mean_duration")
     columns.append("outbound_mean_duration")
     columns.append("call_mean_duration")
     # Aggregate totals
@@ -245,6 +262,7 @@ class HourlyCallCountGenerator:
             abandoned: np.ndarray,
             mean: float,
             sigma: float,
+            thresholds: list[float],
         ) -> dict[str, np.ndarray]:
             """Per-threshold % of calls answered within T seconds, per hour.
 
@@ -252,7 +270,8 @@ class HourlyCallCountGenerator:
             converted to lognormal log-scale location via
             ``mu = ln(mean) - sigma^2 / 2`` so the drawn distribution has the
             requested mean (matching the incident generator's
-            :func:`_lognormal_seconds` convention).
+            :func:`_lognormal_seconds` convention). ``thresholds`` is per-line
+            because the SMS/RTT channel answers in minutes, not seconds.
             """
             answered = np.maximum(received - abandoned, 0)
             mu_log = np.log(max(mean, 1e-6)) - (sigma**2) / 2
@@ -286,14 +305,18 @@ class HourlyCallCountGenerator:
             sigma = float(over.get("answer_time_sigma", _f("nine_one_one_answer_time_sigma")))
             prefix = column_prefix(num.number)
             for key, values in _answered_pct(
-                received[num.number], abandoned[num.number], mean, sigma
+                received[num.number], abandoned[num.number], mean, sigma, thresholds
             ).items():
                 emergency_answered[f"{prefix}_{key}_pct"] = values
 
         ne_mean = _f("non_emergency_answer_time_mean")
         ne_sigma = _f("non_emergency_answer_time_sigma")
         for key, values in _answered_pct(
-            non_emergency_calls_received, non_emergency_calls_abandoned, ne_mean, ne_sigma
+            non_emergency_calls_received,
+            non_emergency_calls_abandoned,
+            ne_mean,
+            ne_sigma,
+            thresholds,
         ).items():
             non_emergency_answered[f"non_emergency_{key}_pct"] = values
 
@@ -301,6 +324,15 @@ class HourlyCallCountGenerator:
         # durations drawn per answered call (received minus abandoned; outbound
         # calls have no abandonment), plus a volume-weighted overall mean.
         def _duration_default(key: str) -> float:
+            v = DEFAULT_PHONE_METRICS[key]
+            return float(v) if isinstance(v, (int, float)) else float(v[0])  # type: ignore[return-value]
+
+        def _pm_default(key: str) -> float:
+            """Fallback to the constants default for a partially-specified config.
+
+            A caller-supplied ``phone_metrics`` mapping need not repeat every key;
+            missing entries take the packaged default rather than raising.
+            """
             v = DEFAULT_PHONE_METRICS[key]
             return float(v) if isinstance(v, (int, float)) else float(v[0])  # type: ignore[return-value]
 
@@ -347,6 +379,52 @@ class HourlyCallCountGenerator:
             0.0,
         )
 
+        # SMS/RTT text sessions. Drawn after every voice draw so the existing
+        # RNG stream is untouched and prior datasets stay byte-identical.
+        sms_rtt_calls_received = rng.poisson(
+            np.maximum(
+                0.5,
+                base_hourly_volume
+                * _f("sms_rtt_received_fraction", _pm_default("sms_rtt_received_fraction"))
+                * busy_factor,
+            )
+        )
+        sms_rtt_calls_abandoned = rng.binomial(
+            sms_rtt_calls_received,
+            min(
+                _f("sms_rtt_abandonment_rate", _pm_default("sms_rtt_abandonment_rate"))
+                + _f("night_abandonment_increment"),
+                _f("max_abandonment_rate"),
+            ),
+        )
+        sms_rtt_thresholds = _sms_rtt_thresholds(realism)
+        sms_rtt_answered: dict[str, np.ndarray] = {}
+        for key, values in _answered_pct(
+            sms_rtt_calls_received,
+            sms_rtt_calls_abandoned,
+            _f("sms_rtt_answer_time_mean", _pm_default("sms_rtt_answer_time_mean")),
+            _f("sms_rtt_answer_time_sigma", _pm_default("sms_rtt_answer_time_sigma")),
+            sms_rtt_thresholds,
+        ).items():
+            sms_rtt_answered[f"sms_rtt_{key}_pct"] = values
+
+        duration_counts["sms_rtt"] = np.maximum(
+            sms_rtt_calls_received - sms_rtt_calls_abandoned, 0
+        )
+        duration_means["sms_rtt"] = _mean_duration(
+            rng,
+            duration_counts["sms_rtt"],
+            _f("sms_rtt_phone_duration_mu", _pm_default("sms_rtt_phone_duration_mu")),
+            _f("sms_rtt_phone_duration_sigma", _pm_default("sms_rtt_phone_duration_sigma")),
+        )
+        sms_weighted = duration_means["sms_rtt"] * duration_counts["sms_rtt"]
+        new_total = total_duration_calls + duration_counts["sms_rtt"]
+        duration_means["call_mean_duration"] = np.where(
+            new_total > 0,
+            (weighted_sum + sms_weighted) / np.maximum(new_total, 1),
+            0.0,
+        )
+
         data: dict[str, object] = {
             "hour_start": hours.to_numpy(),
             "hour_of_day": hour_of_day,
@@ -354,27 +432,36 @@ class HourlyCallCountGenerator:
         for num in numbers:
             data[f"{column_prefix(num.number)}_calls_received"] = received[num.number]
         data["non_emergency_calls_received"] = non_emergency_calls_received
+        data["sms_rtt_calls_received"] = sms_rtt_calls_received
         data["outbound_calls_placed"] = outbound_calls_placed
         for num in numbers:
             data[f"{column_prefix(num.number)}_calls_abandoned"] = abandoned[num.number]
         data["non_emergency_calls_abandoned"] = non_emergency_calls_abandoned
+        data["sms_rtt_calls_abandoned"] = sms_rtt_calls_abandoned
         data.update(emergency_answered)
         data.update(non_emergency_answered)
+        data.update(sms_rtt_answered)
         for num in numbers:
             data[f"{column_prefix(num.number)}_mean_duration"] = duration_means[
                 column_prefix(num.number)
             ]
         data["non_emergency_mean_duration"] = duration_means["non_emergency"]
+        data["sms_rtt_mean_duration"] = duration_means["sms_rtt"]
         data["outbound_mean_duration"] = duration_means["outbound"]
         data["call_mean_duration"] = duration_means["call_mean_duration"]
 
-        # Aggregate totals per hourly row
+        # Aggregate totals per hourly row. SMS/RTT is deliberately excluded from
+        # total_emergency_calls: it is not a voice emergency call, and counting
+        # it there would inflate reported 9-1-1 volume and the denominator the
+        # non-emergency floor is computed against.
         total_emergency = np.sum(
             [received[num.number] for num in numbers], axis=0
         )
         total_nonemergency = non_emergency_calls_received
         data["total_emergency_calls"] = total_emergency
         data["total_nonemergency_calls"] = total_nonemergency
-        data["total_calls"] = total_emergency + total_nonemergency + outbound_calls_placed
+        data["total_calls"] = (
+            total_emergency + total_nonemergency + outbound_calls_placed + sms_rtt_calls_received
+        )
 
         return pd.DataFrame(data)
