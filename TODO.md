@@ -1116,8 +1116,33 @@ Hypothesis: the company's proprietary 168-hour point forecasts are not more
 accurate than a linear forecast over the same horizon. See
 `forecasting/forecasting_experiment.md`.
 
-- [ ] **P1 — Implement `linear_forecast.py`, `score.py`, `run_experiment.py`** with
-  seeded synthetic volumes, paired error stats (Wilcoxon + bootstrap CIs), and
+- [x] **P1 — Implement `score.py` (forecast accuracy metrics + OWA).** Twelve measures
+  grouped by Botchkarev's taxonomy (`forecasting/score.py`): MAE, MSE, RMSE, MdAE, ME,
+  RAE (primary absolute/squared); MAPE, MPE, sMAPE, MdAPE (primary percentage); MASE,
+  RMSSE (composite — he classes these as a primary measure divided by an in-sample
+  naive error, so they take `y_train`); R² (fit statistic, explicitly *not* an error
+  measure). `score_forecast()` returns a hybrid set rather than one scalar, per
+  Botchkarev's argument. Percentage measures raise on zero actuals instead of returning
+  infinity — PSAP volumes hit zero legitimately.
+  **Sekitani & Murakami OWA** added as `owa()` + `seasonal_naive()`:
+  `0.5 * (MASE/Naive2 + sMAPE/Naive2)`, lower better, benchmark scores exactly 1.0.
+  Formula verified against four independent sources (M4 competition paper IJF 36(1)
+  54–74; NeurIPS/N-BEATS supplement; Castle/Doornik/Hendry; sktime's implementation)
+  plus both published worked examples (M4: 0.877 vs published 0.88; NeurIPS: 0.893 vs
+  published 0.89). Two load-bearing constraints encoded and tested: **aggregate-then-
+  ratio** (never ratio-then-average — per-step ratios explode when the benchmark is exact
+  at one step) and a **training-window-only** Naive-2 (an earlier draft indexed into
+  `y_true`; caught against the M4 `Benchmarks and Evaluation.R` source, which fits on
+  `insample` alone — a benchmark that saw the test window would be scored on information
+  no submitted forecast had). Additive rather than multiplicative seasonal adjustment
+  because volume can be zero. 69 tests in `tests/test_forecasting_score.py`.
+  **Corrected `forecasting/forecasting_experiment.md`** → "Scoring matrix": the previous
+  draft proposed averaging RMSE, MAPE and R² with a priori weights, which is not the
+  authors' construction — it aggregates incommensurable quantities, and R² (a ratio of
+  aggregate sums, possibly negative) cannot be normalized per observation and so cannot
+  participate at all.
+- [ ] **P1 — Implement `linear_forecast.py` and `run_experiment.py`** with seeded
+  synthetic volumes, paired error stats (Wilcoxon + bootstrap CIs), and
   per-hour-of-day breakdowns.
 - [ ] **P1 — Integrate the proprietary model** via a wrapper once the company's
   algorithm/API is available.

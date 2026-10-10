@@ -92,12 +92,48 @@ Two metric families, every (forecast arm × staffing arm × scenario) cell:
 1. **Botchkarev taxonomy (B.)**: accuracy-oriented error measures —
    RMSE, MAE, MAPE, MASE, plus symmetric variants; scale-free (MAPE/
    SMAPE/MASE) for cross-volume comparison.
-2. **Classic fit**: R² (coefficient of determination) per scenario.
-3. **Sekitani & Murakami overall weighted average**: aggregate the per-cell
-   error ranks/normalized scores into a single weighted overall score per
-   model, with weights documented a priori (e.g., equal weight to RMSE,
-   MAPE, R²). The overall weighted average decides the ranking; the raw
-   metric grid is reported alongside so the aggregation is auditable.
+2. **Classic fit**: R² (coefficient of determination) per scenario. R² is
+   **not** an error measure — it is a ratio of aggregate sums, may be
+   negative (worse than predicting the mean), and cannot be normalized per
+   observation. It is reported for goodness-of-fit only and is **excluded
+   from OWA**; do not rank on it alone.
+3. **Sekitani & Murakami overall weighted average (OWA)**: the M4
+   competition's ranking criterion, as implemented in `forecasting/score.py`
+   (`owa()`, `seasonal_naive()`). Definition per Makridakis, Spiliotis &
+   Assimakopoulos (2020), *IJF* 36(1) 54–74, following Sekitani & Murakami
+   (2008):
+
+   ```
+   OWA = 0.5 * ( MASE(model) / MASE(Naive-2) + sMAPE(model) / sMAPE(Naive-2) )
+   ```
+
+   Each loss is normalized by the same loss of the **Naive-2 benchmark**
+   before the two are averaged with equal weight. Lower is better, and the
+   benchmark itself scores exactly `1.0`, so the number reads directly as a
+   fraction of the benchmark's error: `0.9` means 10% more accurate than
+   Naive-2. Naive-2 is a random walk on the **seasonally adjusted** series,
+   fit on the training window only and never on the evaluation window.
+
+   Two implementation constraints, both load-bearing:
+   - **Aggregate-then-ratio**, never ratio-then-aggregate. Compute each loss
+     over the whole 168-hour horizon first, *then* divide. Dividing per step
+     and averaging the ratios explodes when the benchmark happens to be exact
+     at one step.
+   - **Seasonality `m`**: M4 used `m=24` for hourly data, which is the right
+     choice for this 168-hour horizon. A multiplicative seasonal index (as in
+     the original M4 R code) is undefined when volume is zero, so the
+     implementation uses additive adjustment, matching sktime's reference
+     implementation.
+
+   This corrects an earlier draft of this document that proposed averaging
+   RMSE, MAPE and R² with a priori weights. That is not the authors'
+   construction: it aggregates *incommensurable* quantities (RMSE is
+   scale-dependent, R² is not an error), and R² cannot participate at all.
+   OWA normalizes first, which is what makes the average meaningful.
+
+   The raw metric grid is reported alongside the OWA so the aggregation stays
+   auditable — a single scalar that hides its inputs is exactly what
+   Botchkarev's hybrid-set argument warns against.
 
 Supporting analyses: paired Wilcoxon signed-rank on hourly errors vs the
 linear arm, bootstrap CIs on RMSE ratios, per-hour-of-day error profiles,

@@ -86,11 +86,13 @@ __all__ = [
     "me",
     "mpe",
     "mse",
+    "owa",
     "r_squared",
     "rae",
     "rmse",
     "rmsse",
     "score_forecast",
+    "seasonal_naive",
     "smape",
 ]
 
@@ -384,6 +386,108 @@ def r_squared(y_true: FloatArray, y_pred: FloatArray) -> float:
     if ss_total == 0.0:
         raise ValueError("r_squared is undefined: y_true is constant")
     return float(1.0 - np.sum((actual - forecast) ** 2) / ss_total)
+
+
+# ---------------------------------------------------------------------------
+# Composite metrics -- overall weighted average (M4 / Sekitani & Murakami)
+# ---------------------------------------------------------------------------
+
+
+def seasonal_naive(
+    y_train: FloatArray,
+    horizon: int,
+    seasonality: int = 1,
+) -> FloatArray:
+    """The Naive-2 benchmark: a random walk on the seasonally adjusted series.
+
+    Reproduces the M4 benchmark as written in the competition's own
+    ``Benchmarks and Evaluation.R``::
+
+        des_input <- decompose(input, type="multiplicative")$seasonal ...
+        f3 <- naive(des_input, h=fh)$mean * SIout
+
+    Seasonally adjusted, forecast flat from the last adjusted observation, then
+    re-coloured with the seasonal indices. Fit on ``y_train`` alone -- the
+    benchmark must never see the evaluation window, or it would be scored on
+    information no submitted forecast had.
+
+    Additive rather than multiplicative adjustment is used here because PSAP
+    hourly volume can legitimately be zero, which makes a multiplicative index
+    undefined; sktime's reference implementation makes the same choice. With
+    ``seasonality=1`` there is no seasonal structure and the last training
+    observation is repeated across the horizon.
+    """
+    train = np.asarray(y_train, dtype=np.float64)
+    m = int(seasonality)
+    h = int(horizon)
+    if m < 1:
+        raise ValueError(f"seasonality must be >= 1, got {m}")
+    if h < 1:
+        raise ValueError(f"horizon must be >= 1, got {h}")
+    if train.size < 2 * m:
+        raise ValueError(
+            f"y_train needs at least 2 * seasonality={m} points to estimate a "
+            f"seasonal index, got {train.size}"
+        )
+    if m == 1:
+        return np.full(h, train[-1], dtype=np.float64)
+
+    # Mean additive seasonal deviation per season, estimated from the training
+    # window only, then de-meaned so the adjustment does not shift the level.
+    positions = np.arange(train.size) % m
+    index = np.array([train[positions == j].mean() for j in range(m)])
+    index -= index.mean()
+    last_adjusted = train[-1] - index[positions[-1]]
+    return np.array(
+        [last_adjusted + index[(positions[-1] + i + 1) % m] for i in range(h)],
+        dtype=np.float64,
+    )
+
+
+def owa(
+    y_true: FloatArray,
+    y_pred: FloatArray,
+    y_train: FloatArray,
+    seasonality: int = 1,
+) -> float:
+    """Overall Weighted Average, the M4 competition's ranking criterion.
+
+    ``0.5 * (MASE_model / MASE_naive2 + sMAPE_model / sMAPE_naive2)`` — each
+    loss normalized by the same loss of the Naive-2 benchmark before the two
+    are averaged with equal weight. **Lower is better**, and the benchmark
+    itself scores exactly ``1.0`` by construction, so the number reads directly
+    as "fraction of the benchmark's error": ``0.9`` means 10% more accurate than
+    Naive-2.
+
+    Aggregate-then-ratio, never ratio-then-aggregate: the metric is computed
+    over the whole horizon first, then divided. Dividing per step and averaging
+    the ratios explodes when the benchmark happens to be exact at one step,
+    which is why the reference implementations assert this ordering explicitly.
+
+    Definition per Makridakis, Spiliotis & Assimakopoulos (2020), "The M4
+    Competition: 100,000 time series and 61 forecasting methods", IJF 36(1),
+    54-74, following Sekitani & Murakami (2008). Worked check from the M4
+    paper: a method with MASE 1.6 and sMAPE 12.5 against Naive-2's 1.9 and 13.7
+    scores ``0.5 * (1.6/1.9 + 12.5/13.7) = 0.877``.
+
+    Note this is the two-loss specialization the competition used. R² is
+    deliberately absent: it is a ratio of aggregate sums, may be negative, and
+    cannot be normalized per observation, so it has no place in this average.
+    """
+    actual, forecast = _as_pair(y_true, y_pred)
+    naive2 = seasonal_naive(y_train, actual.size, seasonality)
+
+    model_mase = mase(actual, forecast, y_train, seasonality)
+    naive2_mase = mase(actual, naive2, y_train, seasonality)
+    model_smape = smape(actual, forecast)
+    naive2_smape = smape(actual, naive2)
+
+    if naive2_mase == 0.0 or naive2_smape == 0.0:
+        raise ValueError(
+            "owa is undefined: the Naive-2 benchmark scores zero, so it cannot "
+            "serve as the normalizer"
+        )
+    return 0.5 * (model_mase / naive2_mase + model_smape / naive2_smape)
 
 
 # ---------------------------------------------------------------------------

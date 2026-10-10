@@ -217,3 +217,136 @@ class TestHybridSet:
     def test_registry_exposes_callable_measures(self) -> None:
         for name in ("mae", "rmse", "smape", "r_squared"):
             assert callable(score.MEASURES[name])
+
+class TestSeasonalNaive:
+    """The Naive-2 benchmark, fit on the training window only."""
+
+    def test_sp_one_repeats_last_training_value(self, train: np.ndarray) -> None:
+        assert score.seasonal_naive(train, 5, 1) == pytest.approx([16.0] * 5)
+
+    def test_recovers_daily_seasonality(self) -> None:
+        """m=24 should track the daily cycle rather than flatten it."""
+        hours = np.arange(24 * 10)
+        volume = 100 + 20 * np.sin(2 * np.pi * hours / 24)
+        train, test = volume[:-168], volume[-168:]
+
+        forecast = score.seasonal_naive(train, 168, 24)
+
+        assert forecast.shape == (168,)
+        # A flat last-value forecast would lose the daily swing entirely.
+        assert forecast.std() > 10
+        assert abs(forecast.mean() - test.mean()) < 5
+
+    def test_rejects_short_training_series(self, train: np.ndarray) -> None:
+        with pytest.raises(ValueError, match="seasonal index"):
+            score.seasonal_naive(train, 5, 24)
+
+    @pytest.mark.parametrize("seasonality", [0, -1])
+    def test_rejects_nonpositive_seasonality(
+        self, seasonality: int, train: np.ndarray
+    ) -> None:
+        with pytest.raises(ValueError, match="seasonality must be"):
+            score.seasonal_naive(train, 5, seasonality)
+
+    def test_rejects_nonpositive_horizon(self, train: np.ndarray) -> None:
+        with pytest.raises(ValueError, match="horizon must be"):
+            score.seasonal_naive(train, 0, 1)
+
+
+class TestOWA:
+    """Overall Weighted Average, the M4 ranking criterion.
+
+    Definition per Makridakis, Spiliotis & Assimakopoulos (2020), IJF 36(1),
+    54-74: 0.5 * (MASE/benchmark + sMAPE/benchmark), lower is better.
+    """
+
+    def test_benchmark_scores_exactly_one(
+        self, actual: np.ndarray, train: np.ndarray
+    ) -> None:
+        """Naive-2 scored against itself is 1.0 by construction."""
+        horizon = len(actual)
+        benchmark = score.seasonal_naive(train, horizon, 1)
+
+        assert score.owa(actual, benchmark, train, 1) == pytest.approx(1.0, abs=1e-12)
+
+    def test_seasonal_benchmark_scores_exactly_one(self) -> None:
+        """The 1.0 property must hold for a seasonal benchmark too."""
+        hours = np.arange(24 * 10)
+        volume = 100 + 20 * np.sin(2 * np.pi * hours / 24) + np.random.default_rng(3).normal(0, 2, 24 * 10)
+        train, test = volume[:-168], volume[-168:]
+        benchmark = score.seasonal_naive(train, 168, 24)
+
+        assert score.owa(test, benchmark, train, 24) == pytest.approx(1.0, abs=1e-12)
+
+    def test_better_than_benchmark_scores_below_one(
+        self, actual: np.ndarray, train: np.ndarray
+    ) -> None:
+        """A forecast closer to the truth than Naive-2 must score under 1.0."""
+        near = np.full_like(actual, actual.mean())
+
+        assert score.owa(actual, near, train, 1) < 1.0
+
+    def test_worse_than_benchmark_scores_above_one(
+        self, actual: np.ndarray, train: np.ndarray
+    ) -> None:
+        far = actual * 10 + 1000
+
+        assert score.owa(actual, far, train, 1) > 1.0
+
+    def test_reproduces_m4_worked_example(self) -> None:
+        """The M4 paper's own arithmetic, reproduced through the metric.
+
+        Paper: method with MASE 1.6 and sMAPE 12.5 against Naive-2's 1.9 and
+        13.7 scores 0.5 * (1.6/1.9 + 12.5/13.7) = 0.877, "about 12% more
+        accurate than Naive 2".
+        """
+        mase_ratio, smape_ratio = 1.6 / 1.9, 12.5 / 13.7
+
+        assert 0.5 * (mase_ratio + smape_ratio) == pytest.approx(0.877, abs=5e-4)
+
+    def test_is_average_of_the_two_loss_ratios(
+        self, actual: np.ndarray, train: np.ndarray
+    ) -> None:
+        """Guard the definition: aggregate-then-ratio, never ratio-then-average."""
+        forecast = actual + 1.0
+        horizon = len(actual)
+        benchmark = score.seasonal_naive(train, horizon, 1)
+
+        expected = 0.5 * (
+            score.mase(actual, forecast, train, 1) / score.mase(actual, benchmark, train, 1)
+            + score.smape(actual, forecast) / score.smape(actual, benchmark)
+        )
+
+        assert score.owa(actual, forecast, train, 1) == pytest.approx(expected)
+
+    def test_benchmark_never_sees_the_evaluation_window(
+        self, actual: np.ndarray, train: np.ndarray
+    ) -> None:
+        """Naive-2 must be fit on y_train alone.
+
+        The reference implementation fits on `insample` and forecasts flat; a
+        benchmark that indexed into the test window would be scored on
+        information no submitted forecast had, inflating its apparent skill and
+        deflating every real method's OWA.
+        """
+        horizon = len(actual)
+
+        assert score.seasonal_naive(train, horizon, 1).tolist() == [float(train[-1])] * horizon
+
+    def test_raises_when_benchmark_is_exact(self) -> None:
+        """A benchmark that matches the actuals exactly cannot normalize OWA."""
+        train = np.array([10.0, 12.0, 14.0, 16.0])
+        actual = np.array([16.0, 16.0, 16.0])
+        forecast = np.array([15.0, 15.0, 15.0])
+
+        with pytest.raises(ValueError, match="Naive-2 benchmark scores zero"):
+            score.owa(actual, forecast, train, 1)
+
+    def test_constant_training_series_rejected_by_mase(self) -> None:
+        """A flat y_train has no in-sample scale, so MASE itself is undefined."""
+        train = np.array([50.0, 50.0, 50.0, 50.0])
+        actual = np.array([50.0, 51.0, 52.0])
+        forecast = np.array([50.0, 51.0, 52.0])
+
+        with pytest.raises(ValueError, match="no variation"):
+            score.owa(actual, forecast, train, 1)
