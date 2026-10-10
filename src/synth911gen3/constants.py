@@ -49,8 +49,6 @@ DATA_SCHEMA_VERSION = "1.2"
 # When ``max_memory_bytes`` is unset, incident CSV/Parquet generation is
 # chunked once the estimated in-memory DataFrame would exceed this budget.
 DEFAULT_MAX_MEMORY_BYTES = 2 * 1024**3
-# Probe rows used to estimate per-row memory for the budget guard.
-MEMORY_PROBE_ROWS = 10_000
 
 # 911-only calls per 1,000 residents per year, tiered by service-area
 # population. Larger/urban centers run hotter per capita than rural ones;

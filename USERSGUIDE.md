@@ -1744,6 +1744,10 @@ frame in memory by **streaming records in chunks**. The per-chunk budget
 (`--max-memory-bytes`), TUI, or a params file. Only the *incidents* dataset is
 chunked; the hourly phone-metrics dataset is tiny and always built in one pass.
 
+- Chunk size is chosen from a statistical bytes-per-row estimate built from the
+  output column dtypes plus the mean string lengths of the address, personnel, and
+  registry pools, with a 10% safety margin. Sizing generates no sample rows, so it
+  never consumes the seeded generation stream.
 - When the estimated full frame fits in the budget, a single chunk is written and
   the file is byte-for-byte identical to a non-chunked run.
 - When it does not fit, chunks are written incrementally: CSV writes a header on

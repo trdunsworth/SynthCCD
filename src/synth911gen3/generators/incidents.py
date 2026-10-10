@@ -15,8 +15,10 @@ byte-identical output; large runs stream chunks via
 from __future__ import annotations
 
 import random as _random
+import sys
 import uuid as _uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
+from copy import copy
 from dataclasses import dataclass
 from typing import Any
 
@@ -30,7 +32,6 @@ from synth911gen3.constants import (
     DEFAULT_MAX_MEMORY_BYTES,
     DEFAULT_PROBLEM_PHONE_MULTIPLIER,
     DEFAULT_SEASONAL_MULTIPLIER,
-    MEMORY_PROBE_ROWS,
 )
 from synth911gen3.exceptions import ValidationError
 from synth911gen3.logging_conf import ProgressReporter, get_logger
@@ -65,6 +66,46 @@ _ADDRESS_FIELDS = (
     "commonplace_name",
     "unit_number",
 )
+
+# Per-row bytes pandas charges before an element's own payload: the 8-byte slot
+# a `str` column value occupies, and the 8-byte pointer an `object` column holds.
+# Measured on pandas 3.x: `str` columns report ``memory_usage(deep=True)`` as
+# 8 bytes + UTF-8 byte length per row.
+_ELEMENT_BASE_BYTES = 8
+# Chunk sizing multiplies the raw estimate by this factor so a chunk never
+# exceeds the budget when the statistical estimate lands slightly low.
+_BYTES_PER_ROW_SAFETY_FACTOR = 1.1
+# Address pools larger than this are stride-sampled when averaging field
+# lengths, so estimator cost stays flat as the pool grows.
+_ADDRESS_SAMPLE_CAP = 10_000
+# Fixed-width columns in the generated frame and their per-row byte cost
+# (int64 = 8, int32/uint32 = 4, datetime64[s] = 8).
+_FIXED_WIDTH_BYTES: dict[str, int] = {
+    "shift_group": 8,
+    "priority": 8,
+    "hour": 4,
+    "week_no": 4,
+    "call_start_time": 8,
+    "incident_start_time": 8,
+    "time_phone_pickup": 8,
+    "time_call_enters_queue": 8,
+    "time_first_unit_assigned": 8,
+    "time_unit_enroute": 8,
+    "time_unit_arrived": 8,
+    "time_last_unit_cleared": 8,
+    "time_call_closed": 8,
+    "time_phone_disconnect": 8,
+    "pickup_delay_seconds": 8,
+    "pre_cad_offset_seconds": 8,
+    "interview_seconds": 8,
+    "dispatch_queue_seconds": 8,
+    "turnout_seconds": 8,
+    "travel_seconds": 8,
+    "on_scene_seconds": 8,
+    "closeout_seconds": 8,
+    "phone_duration_seconds": 8,
+    "total_elapsed_seconds": 8,
+}
 
 logger = get_logger("incidents")
 
@@ -352,6 +393,175 @@ def _build_reference_numbers(
     return np.char.add(np.char.add(prefix, "-"), counter_str)
 
 
+def _utf8_len(value: Any) -> int:
+    """UTF-8 byte length pandas stores for ``value``; ``None`` stores nothing."""
+    if not value:
+        return 0
+    if isinstance(value, str):
+        return len(value.encode("utf-8"))
+    return len(str(value).encode("utf-8"))
+
+
+def _mean_utf8(values: Iterable[Any]) -> float:
+    """Mean UTF-8 length across ``values``; ``0.0`` when there are none."""
+    total = 0
+    count = 0
+    for value in values:
+        total += _utf8_len(value)
+        count += 1
+    return total / count if count else 0.0
+
+
+def _weighted_mean_utf8(pairs: Iterable[tuple[Any, float]]) -> float:
+    """Weighted mean UTF-8 length across ``(value, weight)`` pairs.
+
+    Falls back to the unweighted mean when every weight is non-positive, so
+    an unconfigured registry never reports zero-length values.
+    """
+    weighted = 0.0
+    total_weight = 0.0
+    unweighted = 0.0
+    count = 0
+    for value, weight in pairs:
+        length = _utf8_len(value)
+        unweighted += length
+        count += 1
+        if weight > 0:
+            weighted += weight * length
+            total_weight += weight
+    if total_weight <= 0:
+        return unweighted / count if count else 0.0
+    return weighted / total_weight
+
+
+def _mean_sizeof(values: Iterable[Any]) -> float:
+    """Mean ``sys.getsizeof`` across ``values``; ``0.0`` when there are none."""
+    total = 0
+    count = 0
+    for value in values:
+        total += sys.getsizeof(value)
+        count += 1
+    return total / count if count else 0.0
+
+
+def _sample_addresses(addresses: list) -> list:
+    """Evenly spaced subset of ``addresses`` capped at ``_ADDRESS_SAMPLE_CAP``."""
+    if len(addresses) <= _ADDRESS_SAMPLE_CAP:
+        return addresses
+    stride = -(-len(addresses) // _ADDRESS_SAMPLE_CAP)
+    return addresses[::stride]
+
+
+def _problem_nature_mean_bytes(realism: RealismConfig) -> float:
+    """Agency × priority × label-weighted mean length of problem natures."""
+    return _weighted_mean_utf8(
+        (
+            label,
+            realism.agency_weights.get(agency, 0.0)
+            * realism.priority_weights.get(agency, {}).get(priority, 0.0)
+            * weight,
+        )
+        for agency, priorities in realism.problem_profiles.items()
+        for priority, profile in priorities.items()
+        for label, weight in profile
+    )
+
+
+def _disposition_mean_bytes(realism: RealismConfig) -> float:
+    """Agency-weighted mean length of call-disposition labels."""
+    return _weighted_mean_utf8(
+        (label, realism.agency_weights.get(agency, 0.0) * weight)
+        for agency, profile in realism.disposition_profiles.items()
+        for label, weight in profile
+    )
+
+
+def _personnel_mean_bytes(pools: Iterable[list[str]]) -> float:
+    """Mean length of personnel names pooled across shifts."""
+    return _mean_utf8(name for pool in pools for name in pool)
+
+
+def _dispatcher_pools(shift_pools: dict[str, dict[str, Any]]) -> list[list[str]]:
+    """Dispatcher pools per shift, preferring discipline consoles when split."""
+    pools = []
+    for pool in shift_pools.values():
+        groups = pool.get("dispatchers_by_group")
+        if groups:
+            pools.extend(groups.values())
+        else:
+            pools.append(pool["dispatchers"])
+    return pools
+
+
+def _estimate_bytes_per_row_contributions(
+    request: GenerationRequest,
+    realism: RealismConfig,
+    shift_config: ShiftConfig,
+    shift_pools: dict[str, dict[str, Any]],
+    addresses: list,
+) -> dict[str, float]:
+    """Per-column bytes-per-row for the frame :meth:`_build_records` produces.
+
+    Prices columns the way ``DataFrame.memory_usage(deep=True)`` does: numeric
+    and datetime columns at their dtype width, ``str`` columns at
+    ``_ELEMENT_BASE_BYTES`` plus UTF-8 payload averaged over the pools the
+    values are drawn from, and ``object`` columns at a pointer plus
+    ``sys.getsizeof`` of the pooled values. No records are generated and no RNG
+    is consumed, so this is cheap and leaves the seeded stream untouched.
+    """
+    sample = _sample_addresses(addresses)
+    contributions: dict[str, float] = {
+        column: float(width) for column, width in _FIXED_WIDTH_BYTES.items()
+    }
+    contributions["id_number"] = (
+        float(_ELEMENT_BASE_BYTES + 36)
+        if request.id_format is IdFormat.GUID
+        else 8.0
+    )
+
+    address_payloads = {
+        field: _mean_utf8(getattr(address, field) for address in sample)
+        for field in _ADDRESS_FIELDS
+        if field not in ("latitude", "longitude")
+    }
+    agency_mean = _weighted_mean_utf8(realism.agency_weights.items())
+    str_payloads = {
+        # Reference numbers look like ``LAW-260-00001``: agency plus ten more chars.
+        "internal_reference_number": agency_mean + 10.0,
+        "agency": agency_mean,
+        "shift": _mean_utf8(shift.name for shift in shift_config.shifts),
+        "shift_label": _mean_utf8(shift.label for shift in shift_config.shifts),
+        "problem_nature": _problem_nature_mean_bytes(realism),
+        "dow": _mean_utf8(_DAY_ABBREVIATIONS),
+        "method_of_call_reception": _weighted_mean_utf8(
+            realism.call_reception_weights.items()
+        ),
+        "call_disposition": _disposition_mean_bytes(realism),
+        "calltaker": _personnel_mean_bytes(
+            pool["calltakers"] for pool in shift_pools.values()
+        ),
+        "dispatcher": _personnel_mean_bytes(_dispatcher_pools(shift_pools)),
+        # ``location`` is "street_address, city, state" — two ", " separators.
+        "location": (
+            address_payloads["street_address"]
+            + address_payloads["city"]
+            + address_payloads["state"]
+            + 4.0
+        ),
+    }
+
+    for column, payload in address_payloads.items():
+        contributions[column] = _ELEMENT_BASE_BYTES + payload
+    for column, payload in str_payloads.items():
+        contributions[column] = _ELEMENT_BASE_BYTES + payload
+    for field in ("latitude", "longitude"):
+        contributions[field] = _ELEMENT_BASE_BYTES + _mean_sizeof(
+            getattr(address, field) for address in sample
+        )
+
+    return contributions
+
+
 class IncidentGenerator:
     """Vectorized, seed-deterministic CAD incident dataset generator."""
 
@@ -382,8 +592,6 @@ class IncidentGenerator:
             if total > 0:
                 filtered = {k: v / total for k, v in filtered.items()}
             # Replace agency_weights on a copy so the original config is untouched
-            from copy import copy
-
             realism = copy(realism)
             realism.agency_weights = filtered
             logger.info("PSAP agency filter '%s': agencies=%s", request.psap_agency, list(filtered))
@@ -450,10 +658,10 @@ class IncidentGenerator:
         """Row count per chunk that keeps a chunk's DataFrame under the memory budget.
 
         Prepares addresses and personnel pools on demand, so callers that only
-        need the plan (e.g. sizing checks) can call it standalone. Uses an
-        independent probe run (separate RNG) so the estimate does not consume
-        the seeded generation stream. Returns ``request.rows`` when the whole
-        dataset fits in one chunk.
+        need the plan (e.g. sizing checks) can call it standalone. Sizes the
+        chunk from a statistical bytes-per-row estimate, so no sample records
+        are generated and the seeded generation stream stays untouched. Returns
+        ``request.rows`` when the whole dataset fits in one chunk.
 
         .. note::
 
@@ -469,7 +677,7 @@ class IncidentGenerator:
     ) -> tuple[int, PreparedState]:
         """Like :meth:`resolve_chunk_rows` but also returns the :class:`PreparedState`.
 
-        Callers that probe the chunk size *and* then generate can pass the
+        Callers that size the chunks *and* then generate can pass the
         returned state into :meth:`generate_chunks`, eliminating the
         duplicate address-fetch + personnel-build.
         """
@@ -494,7 +702,7 @@ class IncidentGenerator:
         shift_pools: dict[str, dict[str, Any]],
         addresses: list,
     ) -> int:
-        """Chunk size that keeps one chunk under the memory budget (probe-measured)."""
+        """Chunk size that keeps one chunk under the memory budget (estimated)."""
         budget = (
             request.max_memory_bytes
             if request.max_memory_bytes is not None
@@ -502,20 +710,10 @@ class IncidentGenerator:
         )
         if budget <= 0:
             return request.rows
-        probe_rng = np.random.default_rng(request.seed + 1001)
-        probe_guid = _random.Random(request.seed + 1001)
-        probe_n = min(request.rows, MEMORY_PROBE_ROWS)
-        records = self._build_records(
-            request,
-            realism,
-            shift_config,
-            shift_pools,
-            addresses,
-            probe_rng,
-            n=probe_n,
-            guid_rng=probe_guid,
+        contributions = _estimate_bytes_per_row_contributions(
+            request, realism, shift_config, shift_pools, addresses
         )
-        bytes_per_row = pd.DataFrame(records).memory_usage(deep=True).sum() / probe_n
+        bytes_per_row = sum(contributions.values()) * _BYTES_PER_ROW_SAFETY_FACTOR
         chunk_rows = max(1, int(budget / max(bytes_per_row, 1.0)))
         return min(request.rows, chunk_rows)
 

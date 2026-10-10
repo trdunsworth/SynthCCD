@@ -8,7 +8,11 @@ from synth911gen3.addresses import StaticAddressProvider
 from synth911gen3.app import Synth911Application
 from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
 from synth911gen3.domain import Address
-from synth911gen3.generators.incidents import IncidentGenerator
+from synth911gen3.generators.incidents import (
+    _BYTES_PER_ROW_SAFETY_FACTOR,
+    IncidentGenerator,
+    _estimate_bytes_per_row_contributions,
+)
 
 
 def _provider() -> StaticAddressProvider:
@@ -43,6 +47,19 @@ def _request(
     if max_memory_bytes is not None:
         request.max_memory_bytes = max_memory_bytes
     return request
+
+
+def _contributions(
+    gen: IncidentGenerator, request: GenerationRequest
+) -> dict[str, float]:
+    _chunk_rows, state = gen.resolve_chunk_rows_with_state(request)
+    return _estimate_bytes_per_row_contributions(
+        request,
+        state.realism,
+        state.shift_config,
+        state.shift_pools,
+        state.addresses,
+    )
 
 
 def test_generate_chunks_single_chunk_equals_generate() -> None:
@@ -146,6 +163,47 @@ def test_resolve_chunk_rows_returns_rows_without_budget() -> None:
     chunk_rows = gen.resolve_chunk_rows(request)
 
     assert chunk_rows == 200
+
+
+def test_bytes_per_row_contributions_cover_every_column() -> None:
+    """Every generated column must be priced, so schema drift cannot go unnoticed."""
+    provider = _provider()
+    request = _request(rows=50)
+    gen = IncidentGenerator(provider)
+
+    contributions = _contributions(gen, request)
+
+    assert set(contributions) == set(gen.generate(request).columns)
+
+
+@pytest.mark.parametrize("id_format", [IdFormat.INTEGER, IdFormat.GUID])
+def test_bytes_per_row_estimate_accuracy(id_format: IdFormat) -> None:
+    """The estimate must track real deep memory closely enough to size chunks."""
+    provider = _provider()
+    request = _request(rows=2_000, id_format=id_format)
+    gen = IncidentGenerator(provider)
+
+    frame = gen.generate(request)
+    actual = frame.memory_usage(index=False, deep=True).sum() / len(frame)
+    raw = sum(_contributions(gen, request).values())
+
+    assert 0.85 * actual <= raw <= 1.15 * actual
+    assert raw * _BYTES_PER_ROW_SAFETY_FACTOR >= actual
+
+
+def test_resolve_chunk_rows_does_not_generate_records(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Sizing must be statistical: it may not build probe records."""
+
+    def _fail(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("resolve_chunk_rows must not generate records")
+
+    monkeypatch.setattr(IncidentGenerator, "_build_records", _fail)
+
+    chunk_rows = IncidentGenerator(_provider()).resolve_chunk_rows(
+        _request(rows=100_000, max_memory_bytes=64 * 1024)
+    )
+
+    assert 0 < chunk_rows < 100_000
 
 
 def test_app_streams_csv_when_budget_exceeded(tmp_path: Path) -> None:
