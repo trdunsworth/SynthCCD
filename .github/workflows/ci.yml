@@ -135,6 +135,7 @@ jobs:
       - name: Run 10K and 100K throughput benchmarks
         run: |
           uv run pytest tests/test_benchmarks.py \
+            -m benchmark \
             --benchmark-only \
             -k "10k or 100k" \
             --benchmark-json=/tmp/benchmark.json \
