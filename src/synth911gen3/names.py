@@ -273,12 +273,15 @@ class PersonnelNameGenerator:
     family name is written first to match the native script convention. Names
     are never repeated within the lifetime of the generator (mirrors Faker's
     ``unique`` behavior across the whole shift pool).
+
+    Faker instances are lazily initialized on first draw to avoid unnecessary
+    object creation when the generator is created but not immediately used.
     """
 
     _MAX_UNIQUE_ATTEMPTS = 5_000
 
     def __init__(self, locales: list[tuple[str, float]], seed: int) -> None:
-        """Initialize one seeded Faker instance per locale plus a shared RNG.
+        """Initialize the name generator with locale weights and master seed.
 
         Args:
             locales: ``(locale, weight)`` pairs; weights are normalized at
@@ -292,22 +295,46 @@ class PersonnelNameGenerator:
         """
         if not locales:
             raise ValidationError("At least one name locale is required.")
+        self._locales = locales
         self._rng = _random.Random(seed)
-        self._fakers: list[Faker] = []
+        self._weights: list[float] = []
         self._cjk_flags: list[bool] = []
-        for index, (locale, _weight) in enumerate(locales):
+        self._fakers: list[Faker] | None = None
+        self._used: set[str] = set()
+        # Validate locales and collect weights
+        for locale, weight in locales:
             if not is_valid_faker_locale(locale):
                 raise ValidationError(f"Unknown Faker locale for name generation: {locale!r}")
-            faker = Faker(locale)
-            faker.seed_instance(seed + 1 + index)
-            self._fakers.append(faker)
-            self._cjk_flags.append(locale.split("_", 1)[0] in _CJK_LANGUAGES)
-        self._weights = [float(weight) for _locale, weight in locales]
-        self._used: set[str] = set()
+            self._weights.append(float(weight))
+        # Determine CJK flags
+        cjk_set: set[str] = set()
+        for locale, _weight in locales:
+            prefix = locale.split("_", 1)[0]
+            if prefix in _CJK_LANGUAGES:
+                cjk_set.add(locale)
+        for locale, _weight in locales:
+            self._cjk_flags.append(locale in cjk_set)
         # Fallback Faker for locales that strip to empty after ASCII normalization
         # (e.g. CJK or Devanagari supplied via realism config overrides).
+        self._fallback: Faker | None = None
+        self._fallback_seed: int = seed + 9999
+
+    @property
+    def _fakers_list(self) -> list[Faker]:
+        """Lazily create and return the Faker instances for each locale."""
+        if self._fakers is not None:
+            return self._fakers
+        fakers: list[Faker] = []
+        for index, (locale, _weight) in enumerate(self._locales):
+            faker = Faker(locale)
+            faker.seed_instance(self._rng.randint(0, 2**31 - 1))
+            fakers.append(faker)
+        # Set a deterministic seed for the fallback Faker
+        fallback_rng = _random.Random(self._fallback_seed)
         self._fallback = Faker(DEFAULT_LOCALE)
-        self._fallback.seed_instance(seed + 9999)
+        self._fallback.seed_instance(fallback_rng.randint(0, 2**31 - 1))
+        self._fakers = fakers
+        return self._fakers
 
     def _draw(self) -> str:
         """Draw one raw name from a locale picked by the shared weighted RNG.
@@ -317,8 +344,10 @@ class PersonnelNameGenerator:
         (CJK, Devanagari, etc.), a fallback name is drawn from the default
         locale.
         """
-        index = self._rng.choices(range(len(self._fakers)), weights=self._weights, k=1)[0]
-        faker = self._fakers[index]
+        # Ensure Fakers are initialized on first draw
+        fakers = self._fakers_list
+        index = self._rng.choices(range(len(fakers)), weights=self._weights, k=1)[0]
+        faker = fakers[index]
         first = str(faker.first_name())
         last = str(faker.last_name())
         if not first and not last:
