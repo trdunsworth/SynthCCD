@@ -75,7 +75,13 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov --cov-report=term-missing"
+# `benchmark` is deselected by default: the 1M/10M load tiers take many minutes
+# (the memory tiers generate under `tracemalloc`, which adds heavy per-allocation
+# overhead). Override with `pytest -m benchmark` to run them.
+addopts = "--cov --cov-report=term-missing -m 'not benchmark'"
+markers = [
+    "benchmark: load-testing throughput/memory probes; excluded from the default run",
+]
 
 [tool.coverage.run]
 source = ["synth911gen3"]

@@ -1,22 +1,19 @@
 """Load-testing benchmarks for the generation pipeline.
 
-Measures throughput (rows/sec) and latency at four scale tiers:
-10K, 100K, 1M, and 10M rows.  Run with::
+Measures throughput (rows/sec) and peak memory at four scale tiers:
+10K, 100K, 1M, and 10M rows.
 
-    uv run pytest tests/test_benchmarks.py -v --benchmark-only
+These are performance probes rather than correctness tests, and the upper
+tiers are expensive: the memory tiers generate under ``tracemalloc``, whose
+per-allocation tracing overhead dominates at 1M and 10M rows. The whole module
+carries the ``benchmark`` marker and is deselected by ``addopts``, so run it
+explicitly with::
 
-To compare against a saved baseline::
+    uv run pytest tests/test_benchmarks.py -m benchmark -v
 
-    uv run pytest tests/test_benchmarks.py --benchmark-compare=0001
+Narrow to one tier with ``-k``::
 
-To save a new baseline after intentional performance improvements::
-
-    uv run pytest tests/test_benchmarks.py --benchmark-save=baseline
-
-The 10M tier is excluded by default (slow); run explicitly with
-``--benchmark-enable`` or by selecting the tier directly::
-
-    uv run pytest tests/test_benchmarks.py -k "10m" --benchmark-only
+    uv run pytest tests/test_benchmarks.py -m benchmark -k "10k" -v
 """
 
 from __future__ import annotations
@@ -29,6 +26,8 @@ from synth911gen3.addresses import StaticAddressProvider
 from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat, OutputFormat
 from synth911gen3.domain import Address
 from synth911gen3.generators import IncidentGenerator
+
+pytestmark = pytest.mark.benchmark
 
 # ---------------------------------------------------------------------------
 # Helpers
