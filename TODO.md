@@ -220,6 +220,33 @@ recommendation docs in `docs/`, and direct code review.
       theme, `autodoc` + `napoleon` + `viewcode`); `scripts/build_docs.py` builds the site
       into `output/docs/` (`--clean`/`--strict` flags). `docs/` remains read-only v2-era
       material. Build is warning-free under `--strict`.
+- [ ] **P2 — Fix the flake risk in `test_incident_timing_means_track_profiles`.**
+      Pre-existing, not a regression from any recent change (verified by stashing the
+      SMS/RTT work and re-running: 0/6 failures on a cleared hypothesis database both
+      with and without those changes, and `incidents.py` is untouched). The test is the
+      only one in `tests/test_properties.py` that does **not** use the file's own
+      documented `_ALPHA = 0.9995` / chi-squared convention (line 193 uses a hard-coded
+      `max(0.35 * target, 10.0)` band), so it is the lone outlier against the standard
+      that comment claims keeps the suite flake-free.
+
+      Measured over 40 fresh seeds (~90 agency×priority cells each, ~3,600 assertions):
+      0 failures, but the per-seed *worst* deviation was p50 0.268 / p90 0.291 /
+      p99 0.320 / max 0.329 against the 0.35 tolerance — a smallest observed margin of
+      0.021. A real failure has been seen at 0.42 (FIRE priority 4
+      `dispatch_queue_seconds`, mean 241.2 s vs configured 170.0 s), because
+      `dispatch_queue_seconds` is drawn with `sigma=0.85` (heavy right tail) and cells
+      can be as small as 62 rows. Because the assertion is a **max** over ~90 cells per
+      seed, the tail compounds: hypothesis records the offending example in
+      `.hypothesis/`, after which every later run deterministically replays that
+      counterexample and fails until the database is cleared.
+
+      Fix options (not yet chosen — needs a call on which failure mode matters more):
+      (a) replace the fixed band with the same chi-squared goodness-of-fit statistic the
+      rest of the file uses, sizing the bin count from the cell's own variance;
+      (b) keep the mean check but scale tolerance to cell size and the field's sigma;
+      (c) raise `max_examples` / drop the tightest cells. Any change must still catch a
+      genuine distributional regression, so verify by mutating a `TIME_PROFILES` mean
+      and confirming the test fails.
 
 ---
 
