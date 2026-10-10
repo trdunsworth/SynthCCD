@@ -220,33 +220,57 @@ recommendation docs in `docs/`, and direct code review.
       theme, `autodoc` + `napoleon` + `viewcode`); `scripts/build_docs.py` builds the site
       into `output/docs/` (`--clean`/`--strict` flags). `docs/` remains read-only v2-era
       material. Build is warning-free under `--strict`.
-- [ ] **P2 — Fix the flake risk in `test_incident_timing_means_track_profiles`.**
+- [x] **P2 — Fix the flake risk in `test_incident_timing_means_track_profiles`.**
       Pre-existing, not a regression from any recent change (verified by stashing the
       SMS/RTT work and re-running: 0/6 failures on a cleared hypothesis database both
-      with and without those changes, and `incidents.py` is untouched). The test is the
-      only one in `tests/test_properties.py` that does **not** use the file's own
-      documented `_ALPHA = 0.9995` / chi-squared convention (line 193 uses a hard-coded
-      `max(0.35 * target, 10.0)` band), so it is the lone outlier against the standard
-      that comment claims keeps the suite flake-free.
+      with and without those changes, and `incidents.py` is untouched).
 
-      Measured over 40 fresh seeds (~90 agency×priority cells each, ~3,600 assertions):
-      0 failures, but the per-seed *worst* deviation was p50 0.268 / p90 0.291 /
-      p99 0.320 / max 0.329 against the 0.35 tolerance — a smallest observed margin of
-      0.021. A real failure has been seen at 0.42 (FIRE priority 4
-      `dispatch_queue_seconds`, mean 241.2 s vs configured 170.0 s), because
-      `dispatch_queue_seconds` is drawn with `sigma=0.85` (heavy right tail) and cells
-      can be as small as 62 rows. Because the assertion is a **max** over ~90 cells per
-      seed, the tail compounds: hypothesis records the offending example in
-      `.hypothesis/`, after which every later run deterministically replays that
-      counterexample and fails until the database is cleared.
+      **Resolved with option (b)**: tolerance now scales to the cell's own sample size
+      and the field's lognormal sigma instead of a fixed `max(0.35 * target, 10.0)`.
+      Three separate defects were in play:
 
-      Fix options (not yet chosen — needs a call on which failure mode matters more):
-      (a) replace the fixed band with the same chi-squared goodness-of-fit statistic the
-      rest of the file uses, sizing the bin count from the cell's own variance;
-      (b) keep the mean check but scale tolerance to cell size and the field's sigma;
-      (c) raise `max_examples` / drop the tightest cells. Any change must still catch a
-      genuine distributional regression, so verify by mutating a `TIME_PROFILES` mean
-      and confirming the test fails.
+      1. *Fixed band gave wildly unequal power.* `0.35 * target` is a constant 35%, but
+         the sampling SE of a lognormal mean shrinks with cell size — 2.7 SE of headroom
+         on a 62-row cell versus 7.6 on a 500-row one. Flaky where sparse, near-blind
+         where dense.
+      2. *The band hid a systematic bias.* `travel_seconds` is deliberately post-scaled
+         by the zone travel multipliers applied to each sampled address. The test now
+         scales that field's target by `mean(zone_multiplier)`; under the old 35% band
+         the 0.8 urban factor was entirely invisible, so the column was not really being
+         checked at all.
+      3. *Small cells could not resolve what was asserted.* Cells below
+         `_TIMING_MIN_CELL = 150` are now skipped outright.
+
+      **Tolerance chosen empirically, not derived.** A Gaussian multiple-comparison
+      estimate suggested ~3.7 SD for 90 cells at a 1% seed-failure budget, and 4.0 SD
+      was tried first — that was wrong. The sampling distribution of a lognormal mean
+      is *right-skewed*, so its upper tail is heavier than the Gaussian assumption
+      predicts. Measured over 150 seeds / 7,518 cells the worst deviation was
+      p50 2.73 / p90 3.50 / **max 4.30** SD, so a 4.0 SD threshold sat *inside* the
+      observed range and failed 1 seed in 40. The shipped value is
+      `_TIMING_TOLERANCE_SD = 6.0` — ~40% above the worst observed deviation.
+
+      **The mutation check had to be redesigned; the obvious one proves nothing.**
+      Mutating a `TIME_PROFILES` mean cannot test this property: the generator draws
+      from that table *and* the assertion compares against it, so both sides move
+      together and the deviation stays near zero. Sweeping `interview_mean` from 12 to
+      20 (+67%) passed under both the old and new bands — the test was verifying nothing
+      at all. The correct mutation biases the *drawn values* (what a real regression
+      looks like), which shows the assertion catches a ≥30% `interview_seconds` bias and
+      misses ≤20% at 3,000 rows. That power limit is inherent to the sample size, not
+      introduced here; the old band caught ≥35%, so this is comparable.
+
+      `test_timing_mean_assertion_has_power_to_detect_bias` now guards the guard, so a
+      future tolerance or floor change cannot silently blind the assertion again.
+
+      **Verification**: 0/30 false failures across isolated fresh-seed runs (which was
+      the original flake — hypothesis replays a stored counterexample until
+      `.hypothesis/` is cleared, so a single recorded failure poisons every later run);
+      937 passed / 8 deselected; `ruff check` clean; `ty check src` unchanged at its
+      37-diagnostic baseline and `test_properties.py` type-neutral at 35 before and
+      after. `incidents.py` changed only to hoist the sigma literals into
+      `_TIMING_SIGMAS` so the draws and the test's SE calculation share one source —
+      confirmed behavior-neutral by byte-identical output hashes for a fixed seed.
 
 ---
 

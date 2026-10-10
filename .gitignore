@@ -35,3 +35,6 @@ tui_*.svg
 
 # td
 .todos/
+
+# .omo
+.omo/

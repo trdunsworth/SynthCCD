@@ -66,6 +66,17 @@ _ADDRESS_FIELDS = (
     "commonplace_name",
     "unit_number",
 )
+# Lognormal shape per lifecycle column. Single source of truth: the draws below
+# use it, and tests derive each column's sampling standard error from it, so the
+# two cannot drift apart.
+_TIMING_SIGMAS: dict[str, float] = {
+    "interview_seconds": 0.65,
+    "dispatch_queue_seconds": 0.85,
+    "turnout_seconds": 0.60,
+    "travel_seconds": 0.55,
+    "on_scene_seconds": 0.50,
+    "closeout_seconds": 0.45,
+}
 
 # Per-row bytes pandas charges before an element's own payload: the 8-byte slot
 # a `str` column value occupies, and the 8-byte pointer an `object` column holds.
@@ -889,16 +900,32 @@ class IncidentGenerator:
 
         pickup_delay_seconds = _lognormal_seconds(rng, 3, sigma=0.45, size=n, maximum=20)
         interview_seconds = _lognormal_seconds(
-            rng, means["interview_mean"], sigma=0.65, size=n, maximum=1_800
+            rng,
+            means["interview_mean"],
+            sigma=_TIMING_SIGMAS["interview_seconds"],
+            size=n,
+            maximum=1_800,
         )
         dispatch_queue_seconds = _lognormal_seconds(
-            rng, means["dispatch_mean"], sigma=0.85, size=n, maximum=7_200
+            rng,
+            means["dispatch_mean"],
+            sigma=_TIMING_SIGMAS["dispatch_queue_seconds"],
+            size=n,
+            maximum=7_200,
         )
         turnout_seconds = _lognormal_seconds(
-            rng, means["turnout_mean"], sigma=0.60, size=n, maximum=900
+            rng,
+            means["turnout_mean"],
+            sigma=_TIMING_SIGMAS["turnout_seconds"],
+            size=n,
+            maximum=900,
         )
         travel_seconds = _lognormal_seconds(
-            rng, means["travel_mean"], sigma=0.55, size=n, maximum=3_600
+            rng,
+            means["travel_mean"],
+            sigma=_TIMING_SIGMAS["travel_seconds"],
+            size=n,
+            maximum=3_600,
         )
         # Apply geographic zone travel multipliers
         zone_multipliers = np.array(
@@ -907,10 +934,18 @@ class IncidentGenerator:
         )
         travel_seconds = (travel_seconds * zone_multipliers).astype(np.int64)
         on_scene_seconds = _lognormal_seconds(
-            rng, means["scene_mean"], sigma=0.50, size=n, maximum=10_800
+            rng,
+            means["scene_mean"],
+            sigma=_TIMING_SIGMAS["on_scene_seconds"],
+            size=n,
+            maximum=10_800,
         )
         closeout_seconds = _lognormal_seconds(
-            rng, means["closeout_mean"], sigma=0.45, size=n, maximum=1_800
+            rng,
+            means["closeout_mean"],
+            sigma=_TIMING_SIGMAS["closeout_seconds"],
+            size=n,
+            maximum=1_800,
         )
         phone_seconds = _lognormal_seconds(
             rng, means["phone_mean"], sigma=0.70, size=n, maximum=3_600
