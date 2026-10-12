@@ -737,7 +737,7 @@ Staffing comes **only** from the caller-supplied `--calltaker-pool-size` /
 `--dispatcher-pool-size`. It is never inferred from call volume: doing so would
 make staffing collinear with the volume being generated, so an experiment that
 holds volume fixed and varies staffing could not be run. Both models are
-verified against the scalar references in `staff_models/`.
+verified against the scalar references vendored in `tests/reference/`.
 
 **Why it defaults to off.** The tuned values the queue would act on are already
 end-to-end figures: `nine_one_one_answer_time_mean` is a NENA 020.1-2020 fit of

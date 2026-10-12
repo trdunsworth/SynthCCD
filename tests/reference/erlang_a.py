@@ -1,5 +1,14 @@
 """Erlang A model (M/M/c+M delay system with abandonment).
 
+VENDORED REFERENCE -- do not edit. This is a frozen copy of the scalar
+``staff_models/erlang_a.py`` that lived in this repository before the staffing
+and forecasting components moved to the SynthCCD analysis project. It is kept
+here so ``tests/test_queueing.py`` retains an independent oracle for the
+vectorized implementation in ``synth911gen3.generators.queueing``: the two were
+written separately and the vectorized model is checked against this one rather
+than against its own output. Update this file only by copying a fresh reference
+from the analysis project.
+
 Adds customer impatience to the Erlang C model: each waiting caller abandons
 after an exponentially distributed patience time with mean ``1 / theta``.
 

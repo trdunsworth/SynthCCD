@@ -18,9 +18,9 @@ Erlang A has no closed form — it is a truncated birth–death sum — and a
 per-interval Python loop over 8,760 hours per dataset would dominate runtime at
 scale.
 
-Scalar reference implementations live in ``staff_models/erlang_c.py`` and
-``staff_models/erlang_a.py``; ``tests/test_queueing.py`` cross-checks this
-vectorized core against them.
+A scalar reference implementation of each model is vendored under
+``tests/reference/``; ``tests/test_queueing.py`` cross-checks this vectorized
+core against those, so the two implementations cannot silently diverge.
 
 References:
     A. K. Erlang, "Probability and Telephone Conversations," 1909.

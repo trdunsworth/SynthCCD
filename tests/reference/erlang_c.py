@@ -1,5 +1,14 @@
 """Erlang C model (M/M/c delay system).
 
+VENDORED REFERENCE -- do not edit. This is a frozen copy of the scalar
+``staff_models/erlang_c.py`` that lived in this repository before the staffing
+and forecasting components moved to the SynthCCD analysis project. It is kept
+here so ``tests/test_queueing.py`` retains an independent oracle for the
+vectorized implementation in ``synth911gen3.generators.queueing``: the two were
+written separately, from the queueing-theory literature, and the vectorized
+model is checked against this one rather than against its own output. Update
+this file only by copying a fresh reference from the analysis project.
+
 The Erlang C formula gives the probability that an arriving call must wait
 for a server in a system with:
 

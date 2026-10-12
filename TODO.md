@@ -995,7 +995,25 @@ to `SynthCCD license install`. Valid but expired licenses continue to work durin
 
 ---
 
-## Staffing Model Evaluation Pipeline (staff_models)
+> **Moved to [psap-staffing-lab](https://github.com/trdunsworth/psap-staffing-lab).**
+> The staffing models, forecast scoring, and their experiments now live in a
+> separate analysis repository that consumes SynthCCD output rather than sitting
+> inside it. The split is deliberate: keeping analysis out of the generator makes
+> it structurally impossible for analysis logic to feed back into the data it
+> analyses — which is how the auto-staffing helper came to pin peak-hour
+> utilisation near 85% regardless of requested volume, and quietly void any
+> experiment that varied staffing at fixed volume.
+>
+> Items below are retained as the history of that work and the next steps for it.
+> Paths now refer to the analysis repo. SynthCCD keeps one queueing component on
+> purpose: `generators/queueing.py`, which treats staffing as a caller-supplied
+> input to generation, and is opt-in (`queue_model_enabled`, default off).
+> A scalar Erlang reference pair is vendored at `tests/reference/` so the
+> generator's tests keep an independent oracle.
+
+---
+
+## Staffing Model Evaluation Pipeline (psap-staffing-lab)
 
 Goal: generate realistic call volumes, derive staffing recommendations from each
 model, and re-run the generator with those recommendations to measure how the
@@ -1018,8 +1036,8 @@ outputs differ.
   the load-dependent share of callers who queue then hang up, both from the arrival
   rate and the agents on duty that hour. The queue wait feeds `pickup_delay_seconds`
   (incidents) and `answered_{t}s_pct` (phone metrics) from one shared computation.
-  Both models are cross-checked against the scalar references in `staff_models/`
-  (agreement ~1e-14); `tests/test_queueing.py` holds 100 tests.
+  Both models are cross-checked against the scalar references vendored in
+  `tests/reference/` (agreement ~1e-14); `tests/test_queueing.py` holds 100 tests.
   - **Per-agency staffing scope (decided):** model per-agency headcount on the
     *dispatcher* side only, with a **single cross-trained calltaker pool**. Real PSAP
     calltakers answer the 911 call regardless of discipline, so modelling separate
@@ -1048,7 +1066,7 @@ outputs differ.
   sum is exact). Pool totals are also an independent variable again: with the queue
   model off, staffing no longer perturbs the phone-metrics dataset.
 - [ ] **P1 — Volume generator driver from population & staffing.** Build a small
-  driver (script in `staff_models/`) that calls the SynthCCD call-volume
+  driver (in `psap-staffing-lab`) that calls the SynthCCD call-volume
   generation with parameters keyed off population and on-hand staff per agency,
   producing hourly volumes per queue type (911, non-emergency, SMS/RTT).
   Unblocked by the two items above: SMS/RTT now exists as a queue type, and the
@@ -1094,7 +1112,7 @@ occupancy-only sizing to diverge most.
   topologies mixing dedicated, overflow, and shared pools (EFPA with
   Wilkinson/equivalent-random-method corrections). Document the assumptions,
   stability conditions, and known limitations per model.
-- [ ] **P2 — Prototype the novel models in `staff_models/`.** One script per
+- [ ] **P2 — Prototype the novel models in `psap-staffing-lab`.** One script per
   variant, following the existing docstring + demo conventions, registered in
   `runner.py` so they appear in the TUI.
 - [ ] **P1 — Skills-based centre-configuration evaluator agent.** Define an
@@ -1109,7 +1127,7 @@ occupancy-only sizing to diverge most.
   priorities), seeded volume generation for reproducibility, and a written
   recommendation with rationale per centre configuration.
 
-- [P1 — Incorporate `staff_models/queueing_theory_guide.md` into the evaluator.] The
+- [P1 — Incorporate the queueing theory guide into the evaluator.] The
   centre-configuration evaluator agent should use that guide's checklist and the
   Robbins safeguards (report Erlang C/A spread, sensitivity to arrival-rate error,
   balking parameter, per-pool/per-route SL fairness) when evaluating a
@@ -1155,14 +1173,14 @@ with academic rigor.
   independence, EFPA decoupling error, and synthetic-to-real transfer limits.
 - [ ] **P2 — Optional real-data validation sample** to bound transfer error.
 
-## Forecasting Challenge (forecasting/)
+## Forecasting Challenge (psap-staffing-lab)
 
 Hypothesis: the company's proprietary 168-hour point forecasts are not more
 accurate than a linear forecast over the same horizon. See
-`forecasting/forecasting_experiment.md`.
+`psap-staffing-lab/src/psap_staffing/forecasting/forecasting_experiment.md`.
 
 - [x] **P1 — Implement `score.py` (forecast accuracy metrics + OWA).** Twelve measures
-  grouped by Botchkarev's taxonomy (`forecasting/score.py`): MAE, MSE, RMSE, MdAE, ME,
+  grouped by Botchkarev's taxonomy (`psap_staffing.forecasting.score`): MAE, MSE, RMSE, MdAE, ME,
   RAE (primary absolute/squared); MAPE, MPE, sMAPE, MdAPE (primary percentage); MASE,
   RMSSE (composite — he classes these as a primary measure divided by an in-sample
   naive error, so they take `y_train`); R² (fit statistic, explicitly *not* an error
@@ -1181,7 +1199,7 @@ accurate than a linear forecast over the same horizon. See
   `insample` alone — a benchmark that saw the test window would be scored on information
   no submitted forecast had). Additive rather than multiplicative seasonal adjustment
   because volume can be zero. 69 tests in `tests/test_forecasting_score.py`.
-  **Corrected `forecasting/forecasting_experiment.md`** → "Scoring matrix": the previous
+  **Corrected the forecasting experiment notes** → "Scoring matrix": the previous
   draft proposed averaging RMSE, MAPE and R² with a priori weights, which is not the
   authors' construction — it aggregates incommensurable quantities, and R² (a ratio of
   aggregate sums, possibly negative) cannot be normalized per observation and so cannot
@@ -1192,9 +1210,9 @@ accurate than a linear forecast over the same horizon. See
 - [ ] **P1 — Integrate the proprietary model** via a wrapper once the company's
   algorithm/API is available.
 - [ ] **P2 — Staffing-impact analysis** mapping each forecast to hourly staffing
-  via `staff_models/runner.py` (PSA/Erlang A), reporting over/under-staffing cost.
+  via `psap_staffing.queueing.runner` (PSA/Erlang A), reporting over/under-staffing cost.
 - [ ] **P2 — Report export** (markdown + Carve) with verdict and scenario charts.
 - [ ] **P0 — Linux migration for forecasting deps.** `uv.lock` is stale on
   purpose (added via `--frozen`); on macOS/x86_64 numba/llvmlite have no wheels.
   In the Linux env: `uv lock && uv sync`, then full pytest/ruff/ty. See
-  `forecasting/forecasting_experiment.md` → "Migration note".
+  `psap_staffing/forecasting/forecasting_experiment.md` → "Migration note".

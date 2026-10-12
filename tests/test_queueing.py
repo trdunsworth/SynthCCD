@@ -1,9 +1,9 @@
 """Tests for the vectorized Erlang-C and Erlang-A queueing models.
 
-The scalar implementations in ``staff_models/`` are the independent reference:
-they were written first, in plain Python, from the queueing-theory literature.
-Every vectorized result here is checked against them rather than against a
-hard-coded table, so the two implementations cannot silently diverge.
+The scalar implementations vendored in ``tests/reference/`` are the independent
+reference: they were written first, in plain Python, from the queueing-theory
+literature. Every vectorized result here is checked against them rather than
+against a hard-coded table, so the two implementations cannot silently diverge.
 """
 
 from __future__ import annotations
@@ -31,12 +31,12 @@ from synth911gen3.generators.queueing import (
 )
 from synth911gen3.realism_config import RealismConfig
 
-_REPO_ROOT = Path(__file__).resolve().parents[1]
+_REFERENCE_DIR = Path(__file__).resolve().parent / "reference"
 
 
 def _load_reference(module_name: str):
-    """Import a scalar reference module from ``staff_models/`` by file path."""
-    path = _REPO_ROOT / "staff_models" / f"{module_name}.py"
+    """Import a scalar reference module from ``tests/reference/`` by file path."""
+    path = _REFERENCE_DIR / f"{module_name}.py"
     spec = importlib.util.spec_from_file_location(f"_ref_{module_name}", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
