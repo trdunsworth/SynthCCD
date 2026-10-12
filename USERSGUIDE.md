@@ -561,8 +561,8 @@ uv run SynthCCD generate [OPTIONS]
 | `--start-date` | | `Jan 1 current year` | Inclusive start date (YYYY-MM-DD) |
 | `--end-date` | | `Dec 31 current year` | Inclusive end date (YYYY-MM-DD) |
 | `--seed` | | `911` | Random seed for reproducible output |
-| `--calltaker-pool-size` | | `12` | Number of unique calltaker names |
-| `--dispatcher-pool-size` | | `10` | Number of unique dispatcher names |
+| `--calltaker-pool-size` | | `12` | Total calltaker posts across all shifts. Each shift's declared staffing acts as a weight, so the structure is scaled to this total |
+| `--dispatcher-pool-size` | | `10` | Total dispatcher posts across all shifts, scaled the same way |
 | `--shift-preset` | | *(realism config)* | Shift structure preset: `2x12h-4shift-14day`, `2x12h-2shift`, `3x8h-3shift`, or `4x10h-4shift` |
 | `--max-memory-bytes` | | `2147483648` | Approximate in-memory budget per incident chunk in bytes; CSV/Parquet exports stream in chunks to stay under it |
 | `--population` | | *(auto-resolved)* | Population of the service area. When omitted, automatically resolved from the Nominatim `extratags.population` field during area geocoding (no extra HTTP request). Derives incident rows (when `--rows` is omitted) and phone-metrics volume via the tiered `population_rates` realism section. With `--rows` also given, rows win for incidents while population still drives phone volume. Explicit `--population` always wins over the auto-resolved value. The resolved population and its source (`"explicit"`, `"nominatim"`, or `""`) are recorded in the manifest |
@@ -999,11 +999,20 @@ uv run SynthCCD generate --shift-preset 3x8h-3shift
 GenerationRequest(rows=10000, shift_preset="4x10h-4shift")
 ```
 
-Each shift also carries its own staffing (calltakers/dispatchers). Shifts that
-omit staffing fall back to splitting the global `calltaker_pool_size` /
-`dispatcher_pool_size` totals. Custom structures — arbitrary shift hours,
-overnight shifts, rotation patterns, and per-shift staffing — are defined in the
-realism config's `shift_config` section; see the [Realism Guide](REALISMGUIDE.md).
+Each shift also carries its own staffing (calltakers/dispatchers). Those declared
+counts act as **weights**: the whole structure is scaled to the global
+`calltaker_pool_size` / `dispatcher_pool_size` totals, so the pool flags really do
+size the roster (the default 4-shift structure declares 3 calltakers each, giving
+3/3/3/3 against the default pool of 12 and 12/12/12/12 against 48). A shift that
+omits a count carries the mean of those that declare one.
+
+Staffing is always an input you supply. It is never inferred from call volume —
+doing so would make staffing collinear with the volume being generated, so you
+could not hold volume fixed and vary headcount.
+
+Custom structures — arbitrary shift hours, overnight shifts, rotation patterns,
+and per-shift staffing — are defined in the realism config's `shift_config`
+section; see the [Realism Guide](REALISMGUIDE.md).
 
 For medium and large centres, dispatcher positions can be split by agency
 discipline (LAW vs FIRE/EMS, or LAW / FIRE / EMS) once a shift staffs four or
@@ -1744,6 +1753,10 @@ frame in memory by **streaming records in chunks**. The per-chunk budget
 (`--max-memory-bytes`), TUI, or a params file. Only the *incidents* dataset is
 chunked; the hourly phone-metrics dataset is tiny and always built in one pass.
 
+- Chunk size is chosen from a statistical bytes-per-row estimate built from the
+  output column dtypes plus the mean string lengths of the address, personnel, and
+  registry pools, with a 10% safety margin. Sizing generates no sample rows, so it
+  never consumes the seeded generation stream.
 - When the estimated full frame fits in the budget, a single chunk is written and
   the file is byte-for-byte identical to a non-chunked run.
 - When it does not fit, chunks are written incrementally: CSV writes a header on
@@ -1835,6 +1848,8 @@ column set is:
 | `nine_one_one_calls_abandoned` | int | 9-1-1 calls abandoned |
 | `non_emergency_calls_received` | int | Non-emergency calls received |
 | `non_emergency_calls_abandoned` | int | Non-emergency calls abandoned |
+| `sms_rtt_calls_received` | int | SMS/RTT (text-to-911) sessions received |
+| `sms_rtt_calls_abandoned` | int | SMS/RTT sessions abandoned |
 | `outbound_calls_placed` | int | Outbound calls placed |
 | `nine_one_one_answered_10s_pct` | float | % of 9-1-1 calls answered within 10 seconds |
 | `nine_one_one_answered_15s_pct` | float | % of 9-1-1 calls answered within 15 seconds |
@@ -1844,20 +1859,52 @@ column set is:
 | `non_emergency_answered_15s_pct` | float | % of non-emergency calls answered within 15 seconds |
 | `non_emergency_answered_20s_pct` | float | % of non-emergency calls answered within 20 seconds |
 | `non_emergency_answered_40s_pct` | float | % of non-emergency calls answered within 40 seconds |
+| `sms_rtt_answered_60s_pct` | float | % of SMS/RTT sessions answered within 60 seconds |
+| `sms_rtt_answered_120s_pct` | float | % of SMS/RTT sessions answered within 120 seconds |
+| `sms_rtt_answered_300s_pct` | float | % of SMS/RTT sessions answered within 300 seconds |
+| `sms_rtt_answered_600s_pct` | float | % of SMS/RTT sessions answered within 600 seconds |
 | `nine_one_one_mean_duration` | float | Mean phone duration (seconds) of 9-1-1 calls answered that hour |
 | `non_emergency_mean_duration` | float | Mean phone duration (seconds) of non-emergency calls answered that hour |
+| `sms_rtt_mean_duration` | float | Mean phone duration (seconds) of SMS/RTT sessions answered that hour |
 | `outbound_mean_duration` | float | Mean phone duration (seconds) of outbound calls placed that hour |
-| `call_mean_duration` | float | Volume-weighted mean of the three duration means across all calls |
-| `total_emergency_calls` | int | Total emergency calls received across all emergency numbers |
+| `call_mean_duration` | float | Volume-weighted mean of the four channel duration means across all calls |
+| `total_emergency_calls` | int | Total emergency calls received across all emergency numbers (voice only) |
 | `total_nonemergency_calls` | int | Total non-emergency calls received (with floor constraint applied) |
-| `total_calls` | int | Sum of all received + outbound calls |
+| `total_calls` | int | Sum of emergency + non-emergency + outbound + SMS/RTT |
 
 `911` keeps the legacy `nine_one_one` column prefix for schema stability; every
 other number uses an `emergency_<digits>` prefix. For example, `--country GB`
 produces `emergency_999_calls_received`, `emergency_999_calls_abandoned`,
 `emergency_999_answered_15s_pct`, `emergency_999_mean_duration`, and the same
-set for `emergency_112`. The non-emergency line and the outbound counter are
-always present regardless of country.
+set for `emergency_112`. The non-emergency line, the SMS/RTT line, and the
+outbound counter are always present regardless of country.
+
+### SMS/RTT (text-to-911)
+
+SMS/RTT text sessions are modelled as their own line rather than as a share of
+the voice 9-1-1 queue, because centres log text contacts as discrete sessions
+and report them separately, and because a text interaction happens inside and
+between calls rather than as a voice answer-time distribution. Columns:
+
+`sms_rtt_calls_received`, `sms_rtt_calls_abandoned`, `sms_rtt_mean_duration`,
+and four engagement columns — `sms_rtt_answered_60s_pct`,
+`sms_rtt_answered_120s_pct`, `sms_rtt_answered_300s_pct`,
+`sms_rtt_answered_600s_pct`.
+
+Three things to know when reading them:
+
+- **Thresholds are minute-scale.** A text reply is not a voice answer time, so
+  the voice 10/15/20/40 s thresholds do not apply. Override with
+  `sms_rtt_answer_time_thresholds`.
+- **SMS/RTT is excluded from `total_emergency_calls`.** Text is not a voice
+  emergency call; counting it there would inflate reported 9-1-1 volume and
+  distort the non-emergency floor, which is computed against voice emergency
+  volume. It *is* included in `total_calls`.
+- **Engagement percentages are bounded by `answered / received`**, the same
+  convention as the voice lines. With the default 18% abandonment rate no
+  `sms_rtt_answered_*` column can exceed ~82%, so read the absolute values
+  rather than expecting them to approach 100%. Lower
+  `sms_rtt_abandonment_rate` to raise that ceiling.
 
 The `answered_Ns_pct` columns are simulated from the hour's per-call answer
 times (see `REALISMGUIDE.md` → Answer Time Percentages), so they are always

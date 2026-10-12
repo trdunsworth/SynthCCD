@@ -6,19 +6,20 @@ range, seed, personnel pools, realism overrides, and database-export
 options. Every entry point (CLI, TUI, params files, REST API) builds one
 of these and hands it to :class:`synth911gen3.app.Synth911Application`.
 
-The enums here are the canonical string values used across the CLI flags,
-params files, and REST payloads; the parallel enums in
-:mod:`synth911gen3.schema` are the pydantic validation layer over the
-same vocabulary.
+The enums used across the CLI flags, params files, and REST payloads live
+in :mod:`synth911gen3.constants`; the shared validation rules (output
+paths, PSAP agency, date ranges, database options) live in
+:mod:`synth911gen3.validation` and are applied by both this runtime layer
+and the pydantic public contract in :mod:`synth911gen3.schema`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import date
-from enum import StrEnum
 from pathlib import Path
 
+from . import validation
 from .constants import (
     DEFAULT_AREA_QUERY,
     DEFAULT_COUNTRY,
@@ -26,70 +27,15 @@ from .constants import (
     DEFAULT_OUTPUT_STEM,
     DEFAULT_PSAP_AGENCY,
     DEFAULT_ROWS,
+    DatabaseDialect,
+    DatasetKind,
+    IdFormat,
+    OutputFormat,
 )
 from .emergency_numbers import EmergencyNumber, resolve_emergency_numbers
 from .exceptions import ValidationError
 from .realism_config import RealismConfig
 from .shifts import SHIFT_PRESETS
-
-_WINDOWS_RESERVED_NAMES = frozenset(
-    {
-        "CON",
-        "PRN",
-        "AUX",
-        "NUL",
-        *(f"COM{i}" for i in range(1, 10)),
-        *(f"LPT{i}" for i in range(1, 10)),
-    }
-)
-
-
-class OutputFormat(StrEnum):
-    """Supported export targets for generated datasets.
-
-    File formats (csv, parquet, json, yaml, geojson, shapefile), in-memory
-    formats (pandas, polars), and direct database targets (postgresql,
-    sqlserver, mariadb, duckdb, sqlite).
-    """
-
-    CSV = "csv"
-    PARQUET = "parquet"
-    JSON = "json"
-    YAML = "yaml"
-    PANDAS = "pandas"
-    POLARS = "polars"
-    GEOJSON = "geojson"
-    SHAPEFILE = "shapefile"
-    POSTGRESQL = "postgresql"
-    SQLSERVER = "sqlserver"
-    MARIADB = "mariadb"
-    DUCKDB = "duckdb"
-    SQLITE = "sqlite"
-
-
-class DatabaseDialect(StrEnum):
-    """SQL dialects supported by the database exporter."""
-
-    POSTGRESQL = "postgresql"
-    SQLSERVER = "sqlserver"
-    MARIADB = "mariadb"
-    DUCKDB = "duckdb"
-    SQLITE = "sqlite"
-
-
-class DatasetKind(StrEnum):
-    """Which datasets a run generates: incidents, phone, or both."""
-
-    INCIDENTS = "incidents"
-    PHONE = "phone"
-    ALL = "all"
-
-
-class IdFormat(StrEnum):
-    """How incident ``id_number`` values are produced: sequential ints or UUIDs."""
-
-    INTEGER = "integer"
-    GUID = "guid"
 
 
 @dataclass(slots=True)
@@ -242,7 +188,10 @@ class GenerationRequest:
 
         Checks row counts, output paths, personnel pools, date ordering,
         shift-preset names, emergency-number overrides, realism config,
-        and database options (for database formats).
+        and database options (for database formats). The shared rules for
+        output paths, PSAP agency, dates, and database options come from
+        :mod:`synth911gen3.validation`, which the pydantic models in
+        :mod:`synth911gen3.schema` also apply.
         """
         if self.population is not None and self.population <= 0:
             raise ValidationError("population must be greater than zero when set.")
@@ -252,109 +201,40 @@ class GenerationRequest:
             raise ValidationError("rows must be greater than zero.")
         if not self.area_query.strip():
             raise ValidationError("area_query must not be empty.")
-        self._validate_output_path()
         if self.calltaker_pool_size <= 0:
             raise ValidationError("calltaker_pool_size must be greater than zero.")
         if self.dispatcher_pool_size <= 0:
             raise ValidationError("dispatcher_pool_size must be greater than zero.")
         if self.max_memory_bytes is not None and self.max_memory_bytes <= 0:
             raise ValidationError("max_memory_bytes must be greater than zero when set.")
-        from .constants import PSAP_AGENCY_FILTERS
-
-        psap_normalized = self.psap_agency.strip().lower()
-        if psap_normalized not in PSAP_AGENCY_FILTERS:
-            raise ValidationError(
-                f"Unknown psap_agency {self.psap_agency!r}. "
-                f"Valid values: {', '.join(sorted(PSAP_AGENCY_FILTERS))}."
-            )
-        if self.resolved_start_date() > self.resolved_end_date():
-            raise ValidationError("start_date must be on or before end_date.")
         if self.shift_preset is not None and self.shift_preset not in SHIFT_PRESETS:
             raise ValidationError(
                 f"Unknown shift_preset {self.shift_preset!r}. Available presets: "
                 f"{', '.join(sorted(SHIFT_PRESETS))}."
             )
         try:
+            validation.validate_output_stem(self.output_stem)
+            validation.validate_output_dir(self.output_dir)
+            # Check-only: the raw value is kept so downstream consumers keep
+            # normalizing at use (params files already lowercase the filter).
+            validation.normalize_psap_agency(self.psap_agency)
+            validation.validate_date_range(
+                self.resolved_start_date(), self.resolved_end_date()
+            )
             self.resolved_emergency_numbers()
+            # Validate realism config if provided
+            self.get_realism_config()
+            for key, value in validation.resolve_database_options(
+                output_format=self.output_format,
+                db_dialect=self.db_dialect,
+                output_stem=self.output_stem,
+                db_name=self.db_name,
+                db_host=self.db_host,
+                db_port=self.db_port,
+                db_user=self.db_user,
+                db_if_exists=self.db_if_exists,
+                db_batch_size=self.db_batch_size,
+            ).items():
+                setattr(self, key, value)
         except ValueError as exc:
             raise ValidationError(str(exc)) from exc
-        # Validate realism config if provided
-        self.get_realism_config()
-
-        # Validate database options if using database output format
-        if self.output_format in (
-            OutputFormat.POSTGRESQL,
-            OutputFormat.SQLSERVER,
-            OutputFormat.MARIADB,
-            OutputFormat.DUCKDB,
-            OutputFormat.SQLITE,
-        ):
-            self._validate_database_options()
-
-    def _validate_database_options(self) -> None:
-        """Validate DB options and fill defaults (file names, ports) for the dialect.
-
-        File-based dialects (duckdb, sqlite) only require a file name
-        (resolved against ``output_dir``); server dialects require
-        host/name/user and default their port.
-        """
-        # Determine dialect from output_format if not explicitly set
-        dialect_map = {
-            OutputFormat.POSTGRESQL: DatabaseDialect.POSTGRESQL,
-            OutputFormat.SQLSERVER: DatabaseDialect.SQLSERVER,
-            OutputFormat.MARIADB: DatabaseDialect.MARIADB,
-            OutputFormat.DUCKDB: DatabaseDialect.DUCKDB,
-            OutputFormat.SQLITE: DatabaseDialect.SQLITE,
-        }
-        dialect = self.db_dialect or dialect_map.get(self.output_format)
-
-        if dialect is None:
-            raise ValidationError(
-                f"Unknown database dialect for output format: {self.output_format}"
-            )
-
-        # Common option validation applies to every dialect
-        if self.db_if_exists not in ("append", "replace", "fail"):
-            raise ValidationError("db_if_exists must be 'append', 'replace', or 'fail'.")
-        if self.db_batch_size <= 0:
-            raise ValidationError("db_batch_size must be greater than zero.")
-
-        if dialect in (DatabaseDialect.DUCKDB, DatabaseDialect.SQLITE):
-            # File-based databases only need a file path (resolved against output_dir)
-            if not self.db_name:
-                suffix = ".duckdb" if dialect == DatabaseDialect.DUCKDB else ".sqlite3"
-                self.db_name = f"{self.output_stem}{suffix}"
-            return
-
-        # For other databases, validate connection parameters
-        if not self.db_host:
-            raise ValidationError("db_host is required for database exports.")
-        if not self.db_name:
-            raise ValidationError("db_name is required for database exports.")
-        if not self.db_user:
-            raise ValidationError("db_user is required for database exports.")
-        if self.db_port is None:
-            # Set default ports per dialect
-            defaults: dict[DatabaseDialect, int] = {
-                DatabaseDialect.POSTGRESQL: 5432,
-                DatabaseDialect.SQLSERVER: 1433,
-                DatabaseDialect.MARIADB: 3306,
-            }
-            self.db_port = defaults[dialect]
-
-    def _validate_output_path(self) -> None:
-        """Reject empty, reserved, or path-traversing output stem/directory values."""
-        if not self.output_stem.strip():
-            raise ValidationError("output_stem must not be empty.")
-        if self.output_stem in (".", ".."):
-            raise ValidationError("output_stem must not be '.' or '..'.")
-        if any(char in self.output_stem for char in ("/", "\\", "\x00")):
-            raise ValidationError("output_stem must not contain path separators or null bytes.")
-        stem_root = self.output_stem.split(".", 1)[0].upper()
-        if stem_root in _WINDOWS_RESERVED_NAMES:
-            raise ValidationError(f"output_stem must not be a reserved device name: {stem_root}.")
-
-        if "\x00" in str(self.output_dir):
-            raise ValidationError("output_dir must not contain null bytes.")
-        if any(part == ".." for part in self.output_dir.parts):
-            raise ValidationError("output_dir must not contain '..' path segments.")

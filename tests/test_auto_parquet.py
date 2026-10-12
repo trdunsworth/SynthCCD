@@ -1,6 +1,5 @@
 """Tests for auto-parquet threshold functionality."""
 
-import pytest
 
 from synth911gen3.config import GenerationRequest, OutputFormat
 

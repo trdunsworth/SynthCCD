@@ -18,6 +18,7 @@ every valid seed / parameter combination:
   configured targets.
 """
 
+import math
 import re
 import tempfile
 from datetime import date
@@ -36,6 +37,7 @@ from synth911gen3.config import DatasetKind, GenerationRequest, IdFormat, Output
 from synth911gen3.domain import Address
 from synth911gen3.generators.incidents import (
     _DAY_ABBREVIATIONS,
+    _TIMING_SIGMAS,
     _distribute,
     _lognormal_seconds,
     _zipf_weights,
@@ -56,6 +58,18 @@ _PROVIDER = StaticAddressProvider(_ADDRESSES)
 # type-1 error per example, which keeps the whole suite flake-free while still
 # catching distributional regressions.
 _ALPHA = 0.9995
+
+# Tolerance for the timing-mean property, in standard errors of the cell's own
+# sample mean. Six SD sits ~40% above the worst deviation measured across 150
+# seeds (4.3 SD over 7,518 cells), which matters because the sampling
+# distribution of a lognormal mean is right-skewed and so has a heavier upper
+# tail than the Gaussian max that a naive multiple-comparison estimate assumes.
+_TIMING_TOLERANCE_SD = 6.0
+# Cells smaller than this cannot resolve the mean shift being asserted: at 150
+# rows the sampling SD of the mean is still ~7% of the target. The old floor of
+# 40 left cells with as little as 2.7 SD of headroom, which is what made the
+# test flaky.
+_TIMING_MIN_CELL = 150
 
 _SECOND_COLUMNS = (
     "pickup_delay_seconds",
@@ -175,26 +189,82 @@ def test_incident_elapsed_columns_are_non_negative(seed, rows):
     assert (frame["time_call_closed"] >= frame["call_start_time"]).all()
 
 
-@given(seed=st.integers(min_value=0, max_value=2**31 - 1))
-@settings(max_examples=3, deadline=None)
-def test_incident_timing_means_track_profiles(seed):
-    config = RealismConfig()
-    frame = _incidents(seed, rows=3_000, realism_config=config)
+def _timing_violation(frame: pd.DataFrame, config: RealismConfig) -> tuple[float, str]:
+    """Worst per-cell deviation across the timing profile grid, in sampling SD."""
+    # travel_seconds is post-scaled by the zone multipliers applied to each
+    # sampled address, so its realised mean is travel_mean * mean(zone factor).
+    # The old fixed 35% band was wide enough to hide that 0.8 factor entirely,
+    # so the column was never really being checked.
+    zone_factor = float(
+        np.mean([config.zone_travel_multipliers.get(a.zone, 1.0) for a in _ADDRESSES])
+    )
+    worst = 0.0
+    worst_where = ""
     for field, profile_key in _TIMING_FIELD_MAP.items():
+        sigma = _TIMING_SIGMAS[field]
+        adjustment = zone_factor if field == "travel_seconds" else 1.0
         for agency, priorities in config.time_profiles.items():
             for priority, profile in priorities.items():
                 subset = frame.loc[
                     (frame["agency"] == agency) & (frame["priority"] == priority), field
                 ]
-                if len(subset) < 40:
+                if len(subset) < _TIMING_MIN_CELL:
                     continue
-                target = float(profile[profile_key])
-                estimate = float(subset.mean())
-                tolerance = max(0.35 * target, 10.0)
-                assert abs(estimate - target) <= tolerance, (
-                    f"{agency} priority {priority} {field}: mean {estimate:.1f}s "
-                    f"vs configured {target}s"
-                )
+                target = float(profile[profile_key]) * adjustment
+                # Sampling SD of a lognormal mean, as a fraction of its mean.
+                se = target * math.sqrt((math.exp(sigma**2) - 1.0) / len(subset))
+                deviation = abs(float(subset.mean()) - target) / max(se, 1e-9)
+                if deviation > worst:
+                    worst, worst_where = deviation, f"{agency} priority {priority} {field}"
+    return worst, worst_where
+
+
+@given(seed=st.integers(min_value=0, max_value=2**31 - 1))
+@settings(max_examples=3, deadline=None)
+def test_incident_timing_means_track_profiles(seed):
+    """Each cell's mean must track its configured mean within sampling error.
+
+    The tolerance is ``z * SE`` of the cell's own sample mean rather than a
+    fixed fraction of the target. A fixed band gave wildly unequal power --
+    2.7 standard errors on a 62-row cell but 7.6 on a 500-row one -- so it was
+    simultaneously flaky where samples were sparse and near-blind where they
+    were dense. Cells below ``_TIMING_MIN_CELL`` are skipped outright: with
+    that few rows the test cannot resolve the difference it is asserting.
+    """
+    config = RealismConfig()
+    frame = _incidents(seed, rows=3_000, realism_config=config)
+    worst, where = _timing_violation(frame, config)
+    assert worst <= _TIMING_TOLERANCE_SD, f"timing means drifted at {where}: {worst:.2f} SD"
+
+
+def test_timing_mean_assertion_has_power_to_detect_bias(monkeypatch):
+    """Guard the guard: biasing the generator must trip the timing assertion.
+
+    Editing a ``TIME_PROFILES`` mean cannot test this -- the generator draws
+    from that same table and the assertion compares against it, so both sides
+    move together and the deviation stays near zero. Biasing the drawn values
+    is what an actual regression looks like: the generator silently stops
+    tracking its own configured profile.
+    """
+    config = RealismConfig()
+    clean, _ = _timing_violation(_incidents(0, rows=3_000, realism_config=config), config)
+    assert clean <= _TIMING_TOLERANCE_SD, "unbiased generator should not trip the assertion"
+
+    original = _lognormal_seconds
+
+    def biased(rng, mean_seconds, sigma, size, minimum=0, maximum=None):
+        drawn = original(rng, mean_seconds, sigma, size, minimum, maximum)
+        if sigma == _TIMING_SIGMAS["interview_seconds"]:
+            drawn = (drawn.astype(float) * 1.5).astype(drawn.dtype)
+        return drawn
+
+    monkeypatch.setattr("synth911gen3.generators.incidents._lognormal_seconds", biased)
+    skewed, where = _timing_violation(_incidents(0, rows=3_000, realism_config=config), config)
+    assert skewed > _TIMING_TOLERANCE_SD, (
+        f"a 50% interview_seconds bias went undetected at {where} "
+        f"(worst {skewed:.2f} SD); the tolerance or cell floor is too loose "
+        "to catch real regressions"
+    )
 
 
 # ---------------------------------------------------------------------------

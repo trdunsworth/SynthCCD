@@ -72,7 +72,25 @@ def test_application_generates_incidents_and_hourly_counts() -> None:
         "call_disposition",
         "total_elapsed_seconds",
     }.issubset(result.incidents.columns)
-    assert len(result.hourly_call_counts.columns) == 22
+    assert {
+        "hour_start",
+        "hour_of_day",
+        "nine_one_one_calls_received",
+        "non_emergency_calls_received",
+        "sms_rtt_calls_received",
+        "outbound_calls_placed",
+        "nine_one_one_calls_abandoned",
+        "non_emergency_calls_abandoned",
+        "sms_rtt_calls_abandoned",
+        "nine_one_one_mean_duration",
+        "non_emergency_mean_duration",
+        "sms_rtt_mean_duration",
+        "outbound_mean_duration",
+        "call_mean_duration",
+        "total_emergency_calls",
+        "total_nonemergency_calls",
+        "total_calls",
+    }.issubset(result.hourly_call_counts.columns)
 
 
 def test_application_sqlite_export_persists_both_tables(tmp_path) -> None:
@@ -772,6 +790,7 @@ def test_application_phone_duration_mean_columns() -> None:
     for col in (
         "nine_one_one_mean_duration",
         "non_emergency_mean_duration",
+        "sms_rtt_mean_duration",
         "outbound_mean_duration",
         "call_mean_duration",
     ):
@@ -784,6 +803,9 @@ def test_application_phone_duration_mean_columns() -> None:
         "non_emergency": (
             frame["non_emergency_calls_received"] - frame["non_emergency_calls_abandoned"]
         ).to_numpy(),
+        "sms_rtt": (
+            frame["sms_rtt_calls_received"] - frame["sms_rtt_calls_abandoned"]
+        ).to_numpy(),
         "outbound": frame["outbound_calls_placed"].to_numpy(),
     }
     # Pooled sample mean across the run converges to e^(mu + sigma^2 / 2).
@@ -793,7 +815,7 @@ def test_application_phone_duration_mean_columns() -> None:
         target = math.exp(float(pm[f"{label}_phone_duration_mu"]) + float(pm[f"{label}_phone_duration_sigma"]) ** 2 / 2)
         assert abs(pooled - target) < 0.08 * target, (label, pooled, target)
 
-    # call_mean_duration is the volume-weighted mean of the three category means.
+    # call_mean_duration is the volume-weighted mean of the four channel means.
     weights = {label: count.astype(float) for label, count in counts.items()}
     total = sum(weights.values())
     expected = sum(
@@ -811,6 +833,7 @@ def test_application_phone_duration_zero_with_no_answered_calls() -> None:
     realism = RealismConfig()
     realism.phone_metrics["nine_one_one_abandonment_rate"] = 1.0
     realism.phone_metrics["non_emergency_abandonment_rate"] = 1.0
+    realism.phone_metrics["sms_rtt_abandonment_rate"] = 1.0
     realism.phone_metrics["night_abandonment_increment"] = 0.0
     realism.phone_metrics["max_abandonment_rate"] = 1.0
 
@@ -827,10 +850,11 @@ def test_application_phone_duration_zero_with_no_answered_calls() -> None:
 
     assert (frame["nine_one_one_mean_duration"] == 0.0).all()
     assert (frame["non_emergency_mean_duration"] == 0.0).all()
+    assert (frame["sms_rtt_mean_duration"] == 0.0).all()
     # Outbound calls have no abandonment, so their duration mean is positive.
     assert (frame["outbound_mean_duration"] > 0).any()
-    # With 9-1-1 and non-emergency contributing zero calls, the overall mean
-    # collapses to the outbound mean.
+    # With every inbound channel contributing zero answered calls, the overall
+    # mean collapses to the outbound mean.
     np.testing.assert_allclose(
         frame["call_mean_duration"], frame["outbound_mean_duration"], rtol=1e-9, atol=1e-9
     )

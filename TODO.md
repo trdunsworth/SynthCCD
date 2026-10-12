@@ -220,6 +220,57 @@ recommendation docs in `docs/`, and direct code review.
       theme, `autodoc` + `napoleon` + `viewcode`); `scripts/build_docs.py` builds the site
       into `output/docs/` (`--clean`/`--strict` flags). `docs/` remains read-only v2-era
       material. Build is warning-free under `--strict`.
+- [x] **P2 — Fix the flake risk in `test_incident_timing_means_track_profiles`.**
+      Pre-existing, not a regression from any recent change (verified by stashing the
+      SMS/RTT work and re-running: 0/6 failures on a cleared hypothesis database both
+      with and without those changes, and `incidents.py` is untouched).
+
+      **Resolved with option (b)**: tolerance now scales to the cell's own sample size
+      and the field's lognormal sigma instead of a fixed `max(0.35 * target, 10.0)`.
+      Three separate defects were in play:
+
+      1. *Fixed band gave wildly unequal power.* `0.35 * target` is a constant 35%, but
+         the sampling SE of a lognormal mean shrinks with cell size — 2.7 SE of headroom
+         on a 62-row cell versus 7.6 on a 500-row one. Flaky where sparse, near-blind
+         where dense.
+      2. *The band hid a systematic bias.* `travel_seconds` is deliberately post-scaled
+         by the zone travel multipliers applied to each sampled address. The test now
+         scales that field's target by `mean(zone_multiplier)`; under the old 35% band
+         the 0.8 urban factor was entirely invisible, so the column was not really being
+         checked at all.
+      3. *Small cells could not resolve what was asserted.* Cells below
+         `_TIMING_MIN_CELL = 150` are now skipped outright.
+
+      **Tolerance chosen empirically, not derived.** A Gaussian multiple-comparison
+      estimate suggested ~3.7 SD for 90 cells at a 1% seed-failure budget, and 4.0 SD
+      was tried first — that was wrong. The sampling distribution of a lognormal mean
+      is *right-skewed*, so its upper tail is heavier than the Gaussian assumption
+      predicts. Measured over 150 seeds / 7,518 cells the worst deviation was
+      p50 2.73 / p90 3.50 / **max 4.30** SD, so a 4.0 SD threshold sat *inside* the
+      observed range and failed 1 seed in 40. The shipped value is
+      `_TIMING_TOLERANCE_SD = 6.0` — ~40% above the worst observed deviation.
+
+      **The mutation check had to be redesigned; the obvious one proves nothing.**
+      Mutating a `TIME_PROFILES` mean cannot test this property: the generator draws
+      from that table *and* the assertion compares against it, so both sides move
+      together and the deviation stays near zero. Sweeping `interview_mean` from 12 to
+      20 (+67%) passed under both the old and new bands — the test was verifying nothing
+      at all. The correct mutation biases the *drawn values* (what a real regression
+      looks like), which shows the assertion catches a ≥30% `interview_seconds` bias and
+      misses ≤20% at 3,000 rows. That power limit is inherent to the sample size, not
+      introduced here; the old band caught ≥35%, so this is comparable.
+
+      `test_timing_mean_assertion_has_power_to_detect_bias` now guards the guard, so a
+      future tolerance or floor change cannot silently blind the assertion again.
+
+      **Verification**: 0/30 false failures across isolated fresh-seed runs (which was
+      the original flake — hypothesis replays a stored counterexample until
+      `.hypothesis/` is cleared, so a single recorded failure poisons every later run);
+      937 passed / 8 deselected; `ruff check` clean; `ty check src` unchanged at its
+      37-diagnostic baseline and `test_properties.py` type-neutral at 35 before and
+      after. `incidents.py` changed only to hoist the sigma literals into
+      `_TIMING_SIGMAS` so the draws and the test's SE calculation share one source —
+      confirmed behavior-neutral by byte-identical output hashes for a fixed seed.
 
 ---
 
@@ -813,32 +864,43 @@ the specific problem, and the fix direction.
 
 ### Code Quality (P2)
 
-- [ ] **P2 — Consolidate duplicate enums.**
+- [x] **P2 — Consolidate duplicate enums.**
   `config.py:47-67` and `schema.py:30-45` define `OutputFormat`,
   `DatasetKind`, `IdFormat`, and `DatabaseDialect` independently. Fix:
   define them once in `constants.py` (or a dedicated `_enums.py`) and
   import everywhere.
 
-- [ ] **P2 — Consolidate duplicate validation.**
-  `config.py:171-221` and `schema.py:221-272` both validate output paths,
-  PSAP agency, dates, and database options. Fix: pydantic validators in
-  `schema.py` are the more maintainable layer; have `config.py` delegate
-  to the schema model and remove the redundant checks.
+- [x] **P2 — Consolidate duplicate validation.**
+  `config.py` and `schema.py` both validated output paths, PSAP agency,
+  dates, and database options. Rather than the originally suggested
+  delegation to the pydantic layer (which would put pydantic on the runtime
+  path, contradicting ADR-0002's "no runtime path passes through pydantic"),
+  the rules now live once as pure functions in a new
+  `synth911gen3/validation.py` module. Both
+  `config.GenerationRequest.validate()` (wrapping `ValueError` in
+  `ValidationError`) and the pydantic validators in `schema.py` call the
+  same helpers, so each layer keeps its error surface and the runtime stays
+  dataclass-only. The `db_name`/`db_port` default-filling for database
+  formats is preserved on the runtime path. Covered by
+  `tests/test_validation.py` plus the existing config/schema/db-exporter
+  suites.
 
-- [ ] **P2 — Move `from copy import copy` and `PSAP_AGENCY_FILTERS` to top-level.**
+- [x] **P2 — Move `from copy import copy` and `PSAP_AGENCY_FILTERS` to top-level.**
   `incidents.py:257,268` import inside `_prepare()`. Python caches modules,
   but the pattern is inconsistent with the rest of the file. Fix: move
   to top-of-file imports.
 
-- [ ] **P2 — Lazily init Faker instances in `PersonnelNameGenerator`.**
+- [x] **P2 — Lazily init Faker instances in `PersonnelNameGenerator`.**
   `names.py:296-310` creates ~13 Faker instances at init time (one per
   locale in the blend). Fix: cache by `(locale, seed)` in a class-level
   dict, or lazy-init on first `_draw()`.
 
-- [ ] **P2 — Estimate bytes-per-row without a probe run.**
-  `incidents.py:336-367` generates real records just to measure memory, then
-  discards them. Fix: compute a statistical estimate from column dtypes
-  and `n`, or cache the per-row size across calls.
+- [x] **P2 — Estimate bytes-per-row without a probe run.** Replaced the
+  10,000-row probe with `_estimate_bytes_per_row_contributions()`, pricing every
+  output column from its dtype width plus pool-weighted mean string lengths
+  (address, registry, and personnel pools), behind a 1.1× safety factor.
+  Measured against real frames it lands within 0.1% of
+  `memory_usage(deep=True)` for both id formats, and `MEMORY_PROBE_ROWS` is gone.
 
 ---
 
@@ -932,3 +994,225 @@ to `SynthCCD license install`. Valid but expired licenses continue to work durin
   passthrough).
 
 ---
+
+> **Moved to [psap-staffing-lab](https://github.com/trdunsworth/psap-staffing-lab).**
+> The staffing models, forecast scoring, and their experiments now live in a
+> separate analysis repository that consumes SynthCCD output rather than sitting
+> inside it. The split is deliberate: keeping analysis out of the generator makes
+> it structurally impossible for analysis logic to feed back into the data it
+> analyses — which is how the auto-staffing helper came to pin peak-hour
+> utilisation near 85% regardless of requested volume, and quietly void any
+> experiment that varied staffing at fixed volume.
+>
+> Items below are retained as the history of that work and the next steps for it.
+> Paths now refer to the analysis repo. SynthCCD keeps one queueing component on
+> purpose: `generators/queueing.py`, which treats staffing as a caller-supplied
+> input to generation, and is opt-in (`queue_model_enabled`, default off).
+> A scalar Erlang reference pair is vendored at `tests/reference/` so the
+> generator's tests keep an independent oracle.
+
+---
+
+## Staffing Model Evaluation Pipeline (psap-staffing-lab)
+
+Goal: generate realistic call volumes, derive staffing recommendations from each
+model, and re-run the generator with those recommendations to measure how the
+outputs differ.
+
+- [x] **P1 — SMS/RTT (text-to-911) queue in the phone-metrics generator.** Needed as
+  a real generator line before the driver below could be built honestly. Added as its
+  own **session-counted line** (not a share of the voice 9-1-1 queue), matching how
+  centres log text contacts separately; minute-scale engagement thresholds
+  (`sms_rtt_answered_{60,120,300,600}s_pct`) because a text reply is not a voice
+  answer time. Seven new columns plus `sms_rtt_*` realism keys; `total_emergency_calls`
+  stays voice-only so 9-1-1 volume and the non-emergency floor are undistorted, while
+  `total_calls` and the four-channel `call_mean_duration` include it. All SMS/RTT draws
+  are appended after existing voice draws, so prior datasets stay byte-identical
+  (regression baseline signatures unchanged). Schema 1.2 → 1.3. 17 tests in
+  `tests/test_sms_rtt.py`.
+- [x] **P1 — Staffing-driven queue model.** The link that makes personnel changes
+  measurable. `generators/queueing.py` provides vectorized Erlang-C (`M/M/c`) and
+  Erlang-A (`M/M/c+M`); Erlang-C shapes the answer-time curve and Erlang-A supplies
+  the load-dependent share of callers who queue then hang up, both from the arrival
+  rate and the agents on duty that hour. The queue wait feeds `pickup_delay_seconds`
+  (incidents) and `answered_{t}s_pct` (phone metrics) from one shared computation.
+  Both models are cross-checked against the scalar references vendored in
+  `tests/reference/` (agreement ~1e-14); `tests/test_queueing.py` holds 100 tests.
+  - **Per-agency staffing scope (decided):** model per-agency headcount on the
+    *dispatcher* side only, with a **single cross-trained calltaker pool**. Real PSAP
+    calltakers answer the 911 call regardless of discipline, so modelling separate
+    per-agency call-answer queues would invent a structure that doesn't exist; agency
+    mix drives dispatcher consoles (already partially modelled via
+    `dispatcher_disciplines`) and field/turnout capacity instead.
+  - **Shipped opt-in (`queue_model_enabled`, default `false`).** It is off because the
+    values it acts on are already end-to-end: `nine_one_one_answer_time_mean` is the
+    NENA 020.1-2020 fit of observed answer times and the `*_abandonment_rate` values
+    are observed totals that already contain queue hang-ups. Layering the queue on
+    top double-charges and drove the 15-second service level to ~0% at ordinary
+    staffing. Enabling it is a deliberate experimental treatment.
+  - **Staffing is exogenous (hard constraint).** Pools are caller-supplied and are
+    never inferred from call volume. An earlier auto-sizing implementation was
+    reverted: it made staffing collinear with the volume being generated, so
+    "hold volume fixed, vary staffing" was unrepresentable.
+  - **Queue wait lands in `pickup_delay_seconds`, not `interview_seconds`.** A caller
+    holding for an agent has not begun an interview; charging the wait to the
+    interview would push `time_call_enters_queue` later and imply that callers
+    queueing for an agent delay dispatch.
+- [x] **P1 — Honour the documented staffing pool sizes.** `--calltaker-pool-size` and
+  `--dispatcher-pool-size` were silently ignored: every built-in shift preset declares
+  per-shift staffing, and resolution preferred those values over the pool, so the
+  documented flags never resized the roster. Declared counts are now treated as
+  weights and the structure is scaled to the pool totals (largest-remainder, so the
+  sum is exact). Pool totals are also an independent variable again: with the queue
+  model off, staffing no longer perturbs the phone-metrics dataset.
+- [ ] **P1 — Volume generator driver from population & staffing.** Build a small
+  driver (in `psap-staffing-lab`) that calls the SynthCCD call-volume
+  generation with parameters keyed off population and on-hand staff per agency,
+  producing hourly volumes per queue type (911, non-emergency, SMS/RTT).
+  Unblocked by the two items above: SMS/RTT now exists as a queue type, and the
+  per-agency staffing question is settled (dispatcher-side; total calltaker pool).
+  Should emit offered load in erlangs so `runner.py` can consume it directly.
+- [ ] **P1 — Model recommendation harness.** For each generated volume profile,
+  run every registered model via `runner.py` and capture its recommended staffing
+  (agents/trunks/capacity) into a comparison table.
+- [ ] **P1 — Re-run generation with recommended staffing.** Feed the
+  model-recommended staffing counts back into the SynthCCD generator's staffing
+  parameters so the synthetic incident lifecycle timestamps reflect them.
+- [ ] **P1 — Diff analysis across models.** Compare the resulting datasets
+  (queue wait distributions, abandonment, occupancy, disposition mix) between
+  baseline and each model's staffing to visualize the effect of each model's
+  recommendation.
+- [ ] **P2 — Metrics report export.** Emit a comparison report (markdown + Carve)
+  summarizing per-model deltas and a recommendation on which model best matches
+  observed volumes.
+- [ ] **P2 — Tests.** Add pytest coverage for the driver, harness, and diff
+  computation (unit-level; deterministic with seeded volumes).
+
+### Viability assessment
+
+Feasible because the SynthCCD generator already supports population-driven
+volume, per-shift staffing rosters, and priority-weighted time distributions —
+recommended headcounts map directly onto its staffing config. The main
+caveats: (1) model recommendations must respect shift boundaries (models
+output point staffing; SynthCCD wants per-shift rosters), so a
+rounding/bridging step is needed; (2) Erlang models assume Poisson arrivals,
+so volumes with bursts (radio, redials) will favor Engset/Erlang-R results;
+(3) diffing synthetic datasets is only meaningful with fixed seeds per
+scenario. Expect Erlang A / square-root / PSA to cluster together and
+occupancy-only sizing to diverge most.
+
+## Novel Staffing Models & Skills-Based Evaluator
+
+- [ ] **P1 — Outline the math for novel centre-configuration models.** Extend the
+  model family beyond Erlang/EFPA to cover: (a) common pools where servers have
+  *variable priorities* for different queue/skill types (priority-weighted M/G/c
+  variants, e.g. cμ(1−ρ)-scaled priority classes à la Cobham non-preemptive
+  priority queues); (b) *discrete non-overlapping pools* where each skill has its
+  own closed queue with no cross-overflow (pure M/M/c/K per pool); (c) hybrid
+  topologies mixing dedicated, overflow, and shared pools (EFPA with
+  Wilkinson/equivalent-random-method corrections). Document the assumptions,
+  stability conditions, and known limitations per model.
+- [ ] **P2 — Prototype the novel models in `psap-staffing-lab`.** One script per
+  variant, following the existing docstring + demo conventions, registered in
+  `runner.py` so they appear in the TUI.
+- [ ] **P1 — Skills-based centre-configuration evaluator agent.** Define an
+  opencode agent (skill or subagent) whose job is to evaluate a centre
+  configuration: parse the pool/route/priority structure, pick the applicable
+  models, run them, and report the staffing deltas between configurations
+  (common pool with priority weights vs discrete pools vs hybrids). It should
+  produce structured parameters, call `runner.py`, and render results in
+  markdown and Carve.
+- [ ] **P2 — Evaluation criteria for the agent's comparisons.** Standard metrics
+  (per-skill SL, abandonment, occupancy, pool blocking, fairness across
+  priorities), seeded volume generation for reproducibility, and a written
+  recommendation with rationale per centre configuration.
+
+- [P1 — Incorporate the queueing theory guide into the evaluator.] The
+  centre-configuration evaluator agent should use that guide's checklist and the
+  Robbins safeguards (report Erlang C/A spread, sensitivity to arrival-rate error,
+  balking parameter, per-pool/per-route SL fairness) when evaluating a
+  configuration.
+  _(Todo added to the Novel Staffing Models section checklist.)_
+
+## Research Project: Synthetic-Data Evaluation of Staffing Models
+
+Goal: run the full pipeline — volume generation → model recommendations →
+regeneration with recommended staffing → comparative analysis — at scale,
+with academic rigor.
+
+### Data & ground truth
+- [ ] **P1 — Calibration targets.** Document per-queue-type distributions for AHT
+  (by priority), patience (Weibull), abandonment, arrival-rate uncertainty, and
+  balking rates, sourced from literature/docs guidance files where possible.
+- [ ] **P1 — Reproducibility.** Seeded generation, versioned scenario configs, and
+  config hashes in dataset manifests for every run.
+- [ ] **P1 — Lineage manifest fields.** Record which volumes/params produced each
+  dataset and which model recommendation fed regeneration.
+
+### Modeling rigor
+- [ ] **P1 — Stationarity documentation.** Record steady-state vs transient
+  assumptions per model; add warm-up/transient handling notes to the evaluator.
+- [ ] **P1 — Sensitivity analysis harness.** Sweep arrival-rate forecast error,
+  service-time SCV, and patience shape; report SL/ASA/abandonment deltas.
+- [ ] **P1 — Replication & statistics.** Multi-seed runs with CIs and simple
+  significance checks on predicted-vs-realized differences between models.
+
+### Evaluation infrastructure
+- [ ] **P1 — Ground-truth scoring harness.** Score each model's recommended
+  staffing against the simulated center's realized SL, ASA, occupancy, and
+  abandonment.
+- [ ] **P1 — Comparative report export.** Markdown + Carve reports with a rubric
+  for "which model wins under which conditions."
+- [ ] **P2 — Scale path.** Subprocess/batch generation to millions of rows,
+  parquet outputs, DuckDB/Polars aggregation.
+
+### Process
+- [ ] **P1 — Pre-registered analysis plan.** Hypotheses, metrics, and thresholds
+  written before running the suite.
+- [ ] **P1 — Threats to validity.** Document Poisson assumption, pool
+  independence, EFPA decoupling error, and synthetic-to-real transfer limits.
+- [ ] **P2 — Optional real-data validation sample** to bound transfer error.
+
+## Forecasting Challenge (psap-staffing-lab)
+
+Hypothesis: the company's proprietary 168-hour point forecasts are not more
+accurate than a linear forecast over the same horizon. See
+`psap-staffing-lab/src/psap_staffing/forecasting/forecasting_experiment.md`.
+
+- [x] **P1 — Implement `score.py` (forecast accuracy metrics + OWA).** Twelve measures
+  grouped by Botchkarev's taxonomy (`psap_staffing.forecasting.score`): MAE, MSE, RMSE, MdAE, ME,
+  RAE (primary absolute/squared); MAPE, MPE, sMAPE, MdAPE (primary percentage); MASE,
+  RMSSE (composite — he classes these as a primary measure divided by an in-sample
+  naive error, so they take `y_train`); R² (fit statistic, explicitly *not* an error
+  measure). `score_forecast()` returns a hybrid set rather than one scalar, per
+  Botchkarev's argument. Percentage measures raise on zero actuals instead of returning
+  infinity — PSAP volumes hit zero legitimately.
+  **Sekitani & Murakami OWA** added as `owa()` + `seasonal_naive()`:
+  `0.5 * (MASE/Naive2 + sMAPE/Naive2)`, lower better, benchmark scores exactly 1.0.
+  Formula verified against four independent sources (M4 competition paper IJF 36(1)
+  54–74; NeurIPS/N-BEATS supplement; Castle/Doornik/Hendry; sktime's implementation)
+  plus both published worked examples (M4: 0.877 vs published 0.88; NeurIPS: 0.893 vs
+  published 0.89). Two load-bearing constraints encoded and tested: **aggregate-then-
+  ratio** (never ratio-then-average — per-step ratios explode when the benchmark is exact
+  at one step) and a **training-window-only** Naive-2 (an earlier draft indexed into
+  `y_true`; caught against the M4 `Benchmarks and Evaluation.R` source, which fits on
+  `insample` alone — a benchmark that saw the test window would be scored on information
+  no submitted forecast had). Additive rather than multiplicative seasonal adjustment
+  because volume can be zero. 69 tests in `tests/test_forecasting_score.py`.
+  **Corrected the forecasting experiment notes** → "Scoring matrix": the previous
+  draft proposed averaging RMSE, MAPE and R² with a priori weights, which is not the
+  authors' construction — it aggregates incommensurable quantities, and R² (a ratio of
+  aggregate sums, possibly negative) cannot be normalized per observation and so cannot
+  participate at all.
+- [ ] **P1 — Implement `linear_forecast.py` and `run_experiment.py`** with seeded
+  synthetic volumes, paired error stats (Wilcoxon + bootstrap CIs), and
+  per-hour-of-day breakdowns.
+- [ ] **P1 — Integrate the proprietary model** via a wrapper once the company's
+  algorithm/API is available.
+- [ ] **P2 — Staffing-impact analysis** mapping each forecast to hourly staffing
+  via `psap_staffing.queueing.runner` (PSA/Erlang A), reporting over/under-staffing cost.
+- [ ] **P2 — Report export** (markdown + Carve) with verdict and scenario charts.
+- [ ] **P0 — Linux migration for forecasting deps.** `uv.lock` is stale on
+  purpose (added via `--frozen`); on macOS/x86_64 numba/llvmlite have no wheels.
+  In the Linux env: `uv lock && uv sync`, then full pytest/ruff/ty. See
+  `psap_staffing/forecasting/forecasting_experiment.md` → "Migration note".

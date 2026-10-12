@@ -1,5 +1,6 @@
 """Tests for shift presets, staffing resolution, and worker-name selection."""
-from datetime import datetime
+
+from datetime import date, datetime, timedelta
 
 import numpy as np
 import pytest
@@ -234,8 +235,9 @@ def test_distribute_splits_totals() -> None:
 
 
 def test_resolve_staffing_uses_explicit_counts() -> None:
+    """A preset declaring 3 calltakers per shift, given its matching pool."""
     config = get_default_shift_config()
-    plan = _resolve_shift_staffing(config, GenerationRequest())
+    plan = _resolve_shift_staffing(config, 12, 8)
     assert {name: (ct, dsp) for name, ct, dsp in plan} == {
         "A": (3, 2),
         "B": (3, 2),
@@ -244,17 +246,60 @@ def test_resolve_staffing_uses_explicit_counts() -> None:
     }
 
 
+def test_resolve_staffing_scales_explicit_counts_to_the_pool() -> None:
+    """The pool must resize the roster, not be ignored by presets."""
+    config = get_default_shift_config()
+    assert _resolve_shift_staffing(config, 48, 32) == [
+        ("A", 12, 8),
+        ("B", 12, 8),
+        ("C", 12, 8),
+        ("D", 12, 8),
+    ]
+    # A pool that does not divide evenly still sums exactly.
+    plan = _resolve_shift_staffing(config, 13, 8)
+    assert sum(item[1] for item in plan) == 13
+    assert all(ct >= 1 for _, ct, _ in plan)
+
+
 def test_resolve_staffing_falls_back_to_global_split() -> None:
     config = ShiftConfig(
         name="custom",
         rotation=[1],
         shifts=[Shift(name, rotation=1) for name in ("A", "B", "C")],
     )
-    request = GenerationRequest(calltaker_pool_size=12, dispatcher_pool_size=9)
-    plan = _resolve_shift_staffing(config, request)
+    plan = _resolve_shift_staffing(config, 12, 9)
     assert sum(item[1] for item in plan) == 12
     assert sum(item[2] for item in plan) == 9
     assert all(ct >= 1 and dsp >= 1 for _, ct, dsp in plan)
+
+
+def test_staffing_is_not_derived_from_call_volume() -> None:
+    """Staffing is an experimental input and must not be computed from volume.
+
+    The generator must never infer staffing from the call volume it is about to
+    produce. Doing so feeds the output back in as an input, makes staffing
+    collinear with volume by construction, and silently re-staffs any scenario
+    the researcher sets up -- so an experiment like "hold volume fixed, cut
+    staffing" becomes unrepresentable.
+    """
+    config = get_default_shift_config()
+    resolved = set()
+    for rows in (10_000, 200_000, 500_000):
+        for days in (1, 30, 365):
+            request = GenerationRequest(
+                rows=rows,
+                start_date=date(2026, 1, 1),
+                end_date=date(2026, 1, 1) + timedelta(days=days - 1),
+            )
+            # Same supplied staffing, wildly different volumes.
+            plan = _resolve_shift_staffing(
+                config, request.calltaker_pool_size, request.dispatcher_pool_size
+            )
+            resolved.add(tuple(plan))
+
+    assert len(resolved) == 1, (
+        "staffing changed with call volume; it must be caller-controlled only"
+    )
 
 
 def test_zipf_pick_returns_only_pool_names() -> None:
@@ -334,9 +379,10 @@ def test_build_shift_pools_partition_rosters_by_discipline() -> None:
     pools = _build_shift_pools(name_gen, staffing, groups)
     roster = pools["A"]["dispatchers"]
     assert len(roster) == 5
-    law, fire_ems = pools["A"]["dispatchers_by_group"]["law"], pools["A"][
-        "dispatchers_by_group"
-    ]["fire_ems"]
+    law, fire_ems = (
+        pools["A"]["dispatchers_by_group"]["law"],
+        pools["A"]["dispatchers_by_group"]["fire_ems"],
+    )
     assert law + fire_ems == roster
     assert set(law).isdisjoint(fire_ems)
     # Combined shifts carry no sub-pool key.
@@ -392,19 +438,40 @@ def test_application_shift_preset_selects_three_shift() -> None:
 
 
 def test_application_calltakers_fit_per_shift_pool_size() -> None:
+    # A pool deliberately unlike the preset's declared 3/2, so honouring the
+    # caller and honouring the preset cannot produce the same roster.
     request = GenerationRequest(
         rows=400,
         dataset=DatasetKind.INCIDENTS,
         output_format=OutputFormat.PANDAS,
         seed=6,
+        calltaker_pool_size=20,
+        dispatcher_pool_size=14,
     )
     frame = Synth911Application(address_provider=_one()).generate(request).incidents
     assert frame is not None
-    # Default preset staffs each shift with 3 calltakers and 2 dispatchers, so
-    # a shift's output must never show more distinct names than its pool holds.
-    for shift_name, group in frame.groupby("shift"):
-        assert group["calltaker"].nunique() <= 3, shift_name
-        assert group["dispatcher"].nunique() <= 2, shift_name
+
+    shift_count = len(apply_shift_preset(get_default_shift_config(), None).shifts)
+    # Expected split computed here from first principles, NOT by calling the
+    # resolver: deriving the expectation from the code under test would make
+    # the assertion circular, and it would still pass if the resolver ignored
+    # the pool entirely.
+    base, extra = divmod(request.calltaker_pool_size, shift_count)
+    expected_calltakers = [base + (1 if i < extra else 0) for i in range(shift_count)]
+    base, extra = divmod(request.dispatcher_pool_size, shift_count)
+    expected_dispatchers = [base + (1 if i < extra else 0) for i in range(shift_count)]
+
+    observed = sorted(frame["shift"].unique())
+    assert observed == sorted(shift.name for shift in get_default_shift_config().shifts)
+    for index, shift_name in enumerate(sorted(observed)):
+        group = frame[frame["shift"] == shift_name]
+        assert group["calltaker"].nunique() == expected_calltakers[index], shift_name
+        assert group["dispatcher"].nunique() == expected_dispatchers[index], shift_name
+
+    # Names are drawn uniquely across the whole centre, so the union across
+    # shifts has to account for every post in the pool.
+    assert frame["calltaker"].nunique() == request.calltaker_pool_size
+    assert frame["dispatcher"].nunique() == request.dispatcher_pool_size
 
 
 def test_application_dispatchers_split_by_agency_discipline() -> None:
@@ -451,9 +518,7 @@ def test_application_four_dispatcher_shift_splits_two_way() -> None:
     assert frame is not None
     for shift_name, group in frame.groupby("shift"):
         law_names = set(group.loc[group["agency"] == "LAW", "dispatcher"])
-        fire_ems_names = set(
-            group.loc[group["agency"].isin(["FIRE", "EMS"]), "dispatcher"]
-        )
+        fire_ems_names = set(group.loc[group["agency"].isin(["FIRE", "EMS"]), "dispatcher"])
         assert len(law_names) <= 2, shift_name
         assert len(fire_ems_names) <= 2, shift_name
         assert law_names.isdisjoint(fire_ems_names), shift_name

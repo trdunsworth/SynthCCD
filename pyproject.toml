@@ -6,7 +6,7 @@ readme = "README.md"
 authors = [
     { name = "Tony Dunsworth", email = "tony.dunsworth@gmail.com" }
 ]
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "click>=8.3.3",
     "faker>=40.13.0",
@@ -38,6 +38,13 @@ dependencies = [
     "sphinx>=9.1.0",
     "prometheus-client>=0.26.0",
     "zipcodes>=3.0.0",
+    "statsforecast",
+    "mlforecast",
+    "numba",
+    "llvmlite",
+    "timecopilot",
+    "neuralforecast",
+    "darts",
 ]
 
 [project.scripts]
@@ -68,7 +75,13 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--cov --cov-report=term-missing"
+# `benchmark` is deselected by default: the 1M/10M load tiers take many minutes
+# (the memory tiers generate under `tracemalloc`, which adds heavy per-allocation
+# overhead). Override with `pytest -m benchmark` to run them.
+addopts = "--cov --cov-report=term-missing -m 'not benchmark'"
+markers = [
+    "benchmark: load-testing throughput/memory probes; excluded from the default run",
+]
 
 [tool.coverage.run]
 source = ["synth911gen3"]
