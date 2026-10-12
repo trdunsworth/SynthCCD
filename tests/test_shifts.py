@@ -438,24 +438,40 @@ def test_application_shift_preset_selects_three_shift() -> None:
 
 
 def test_application_calltakers_fit_per_shift_pool_size() -> None:
+    # A pool deliberately unlike the preset's declared 3/2, so honouring the
+    # caller and honouring the preset cannot produce the same roster.
     request = GenerationRequest(
         rows=400,
         dataset=DatasetKind.INCIDENTS,
         output_format=OutputFormat.PANDAS,
         seed=6,
+        calltaker_pool_size=20,
+        dispatcher_pool_size=14,
     )
     frame = Synth911Application(address_provider=_one()).generate(request).incidents
     assert frame is not None
-    # The supplied pool is split across the shifts, so no shift can show more
-    # distinct names than its share of the pool. The ceiling is ceil(pool/shifts),
-    # not the shift preset's declared count: the preset supplies proportions and
-    # the caller's pool supplies the total.
+
     shift_count = len(apply_shift_preset(get_default_shift_config(), None).shifts)
-    calltaker_cap = -(-request.calltaker_pool_size // shift_count)
-    dispatcher_cap = -(-request.dispatcher_pool_size // shift_count)
-    for shift_name, group in frame.groupby("shift"):
-        assert group["calltaker"].nunique() <= calltaker_cap, shift_name
-        assert group["dispatcher"].nunique() <= dispatcher_cap, shift_name
+    # Expected split computed here from first principles, NOT by calling the
+    # resolver: deriving the expectation from the code under test would make
+    # the assertion circular, and it would still pass if the resolver ignored
+    # the pool entirely.
+    base, extra = divmod(request.calltaker_pool_size, shift_count)
+    expected_calltakers = [base + (1 if i < extra else 0) for i in range(shift_count)]
+    base, extra = divmod(request.dispatcher_pool_size, shift_count)
+    expected_dispatchers = [base + (1 if i < extra else 0) for i in range(shift_count)]
+
+    observed = sorted(frame["shift"].unique())
+    assert observed == sorted(shift.name for shift in get_default_shift_config().shifts)
+    for index, shift_name in enumerate(sorted(observed)):
+        group = frame[frame["shift"] == shift_name]
+        assert group["calltaker"].nunique() == expected_calltakers[index], shift_name
+        assert group["dispatcher"].nunique() == expected_dispatchers[index], shift_name
+
+    # Names are drawn uniquely across the whole centre, so the union across
+    # shifts has to account for every post in the pool.
+    assert frame["calltaker"].nunique() == request.calltaker_pool_size
+    assert frame["dispatcher"].nunique() == request.dispatcher_pool_size
 
 
 def test_application_dispatchers_split_by_agency_discipline() -> None:
