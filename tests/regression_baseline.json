@@ -242,12 +242,12 @@
   },
   "meta": {
     "end_date": "2026-12-31",
-    "generated_at": "2026-10-10T03:50:48+00:00",
+    "generated_at": "2026-10-12T01:46:55+00:00",
     "incident_rows": 20000,
     "package_version": "0.9.5",
     "phone_days": 28,
     "phone_rows": 100000,
-    "realism_config_hash": "655b14a4fdbea35a",
+    "realism_config_hash": "67954afda81ffb60",
     "schema_version": "1.3",
     "seed": 4242,
     "start_date": "2026-01-01"

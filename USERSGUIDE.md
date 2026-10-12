@@ -561,8 +561,8 @@ uv run SynthCCD generate [OPTIONS]
 | `--start-date` | | `Jan 1 current year` | Inclusive start date (YYYY-MM-DD) |
 | `--end-date` | | `Dec 31 current year` | Inclusive end date (YYYY-MM-DD) |
 | `--seed` | | `911` | Random seed for reproducible output |
-| `--calltaker-pool-size` | | `12` | Number of unique calltaker names |
-| `--dispatcher-pool-size` | | `10` | Number of unique dispatcher names |
+| `--calltaker-pool-size` | | `12` | Total calltaker posts across all shifts. Each shift's declared staffing acts as a weight, so the structure is scaled to this total |
+| `--dispatcher-pool-size` | | `10` | Total dispatcher posts across all shifts, scaled the same way |
 | `--shift-preset` | | *(realism config)* | Shift structure preset: `2x12h-4shift-14day`, `2x12h-2shift`, `3x8h-3shift`, or `4x10h-4shift` |
 | `--max-memory-bytes` | | `2147483648` | Approximate in-memory budget per incident chunk in bytes; CSV/Parquet exports stream in chunks to stay under it |
 | `--population` | | *(auto-resolved)* | Population of the service area. When omitted, automatically resolved from the Nominatim `extratags.population` field during area geocoding (no extra HTTP request). Derives incident rows (when `--rows` is omitted) and phone-metrics volume via the tiered `population_rates` realism section. With `--rows` also given, rows win for incidents while population still drives phone volume. Explicit `--population` always wins over the auto-resolved value. The resolved population and its source (`"explicit"`, `"nominatim"`, or `""`) are recorded in the manifest |
@@ -999,11 +999,20 @@ uv run SynthCCD generate --shift-preset 3x8h-3shift
 GenerationRequest(rows=10000, shift_preset="4x10h-4shift")
 ```
 
-Each shift also carries its own staffing (calltakers/dispatchers). Shifts that
-omit staffing fall back to splitting the global `calltaker_pool_size` /
-`dispatcher_pool_size` totals. Custom structures — arbitrary shift hours,
-overnight shifts, rotation patterns, and per-shift staffing — are defined in the
-realism config's `shift_config` section; see the [Realism Guide](REALISMGUIDE.md).
+Each shift also carries its own staffing (calltakers/dispatchers). Those declared
+counts act as **weights**: the whole structure is scaled to the global
+`calltaker_pool_size` / `dispatcher_pool_size` totals, so the pool flags really do
+size the roster (the default 4-shift structure declares 3 calltakers each, giving
+3/3/3/3 against the default pool of 12 and 12/12/12/12 against 48). A shift that
+omits a count carries the mean of those that declare one.
+
+Staffing is always an input you supply. It is never inferred from call volume —
+doing so would make staffing collinear with the volume being generated, so you
+could not hold volume fixed and vary headcount.
+
+Custom structures — arbitrary shift hours, overnight shifts, rotation patterns,
+and per-shift staffing — are defined in the realism config's `shift_config`
+section; see the [Realism Guide](REALISMGUIDE.md).
 
 For medium and large centres, dispatcher positions can be split by agency
 discipline (LAW vs FIRE/EMS, or LAW / FIRE / EMS) once a shift staffs four or

@@ -196,8 +196,11 @@ hourly_weights:
 # rotation: one crew-group id per calendar day, repeating. Day 1 is the weekday
 #   given by cycle_start_weekday (0 = Monday).
 # shifts: each entry lists a shift name, a human label, its on-duty hours, its
-#   crew rotation group, and staffing. Omit calltakers/dispatchers to fall back
-#   to the global --calltaker-pool-size / --dispatcher-pool-size split.
+#   crew rotation group, and staffing. Declared calltakers/dispatchers act as
+#   weights: the structure is scaled to the global --calltaker-pool-size /
+#   --dispatcher-pool-size totals, so a 4-shift structure declaring 3 each
+#   resolves to 3/3/3/3 against a pool of 12 and 12/12/12/12 against 48.
+#   Omit a count to have that shift carry the mean of those that declare one.
 shift_config:
   name: "2x12h-4shift-14day"
   cycle_start_weekday: 0
@@ -713,7 +716,40 @@ independent per-line Poisson means, not shares of a fixed total:
 | `non_emergency_answer_time_mean` | 18.0 | Population **mean** answer time in seconds for non-emergency lines (slower than 9-1-1; not staffed to the emergency standard) |
 | `non_emergency_answer_time_sigma` | 0.90 | Lognormal σ (shape) for non-emergency answer time |
 | `answer_time_thresholds` | [10, 15, 20, 40] | Seconds thresholds for % answered columns |
-| `answer_time_load_sensitivity` | 0.25 | How strongly the answer-time lognormal μ shifts with hourly load (busy hours answer slower) |
+| `answer_time_load_sensitivity` | 0.25 | How strongly the answer-time lognormal μ shifts with hourly load (busy hours answer slower). Only used when `queue_model_enabled` is off |
+| `queue_model_enabled` | `false` | **Off by default.** When enabled, staffing drives the answer-time curve (Erlang-C) and the abandoned-call counts (Erlang-A) instead of the tuned rates. See "Queue modelling" below |
+| `queue_patience_seconds` | 75.0 | Mean caller patience for Erlang-A. Callers who have waited this long give up |
+
+### Queue modelling (opt-in)
+
+`queue_model_enabled` is **off by default**, and turning it on is a deliberate
+experimental treatment rather than a realism switch.
+
+When enabled, the queue mechanics in `generators/queueing.py` make staffing an
+input that drives outcomes:
+
+- **Erlang-C** (`M/M/c`, infinite patience) shapes the answer-time curve from
+  the agents actually on duty each hour and the arrival rate that hour.
+- **Erlang-A** (`M/M/c+M`, exponential patience) supplies the load-dependent
+  share of callers who queue and then hang up, added to the configured rate.
+
+Staffing comes **only** from the caller-supplied `--calltaker-pool-size` /
+`--dispatcher-pool-size`. It is never inferred from call volume: doing so would
+make staffing collinear with the volume being generated, so an experiment that
+holds volume fixed and varies staffing could not be run. Both models are
+verified against the scalar references in `staff_models/`.
+
+**Why it defaults to off.** The tuned values the queue would act on are already
+end-to-end figures: `nine_one_one_answer_time_mean` is a NENA 020.1-2020 fit of
+observed answer times, and the `*_abandonment_rate` values are observed totals
+that already contain queue hang-ups. Applying the queue on top charges the same
+wait twice and drives the 15-second service level to near zero at ordinary
+staffing. Enable it when you want staffing to drive the queue explicitly, and
+treat the queue as superseding the tuned rates rather than augmenting them.
+
+Only inbound **voice** lines contend for the calltaker pool. SMS/RTT is staffed
+separately and outbound calls place no load on it, so neither is queued here.
+With the model off — the default — staffing does not affect this dataset at all.
 | `answer_time_mu_noise_sd` | 0.05 | Std-dev of per-hour random noise applied to lognormal μ, so answer-time percentages vary hour-to-hour |
 | `nine_one_one_phone_duration_mu` | 5.10 | Lognormal μ for 9-1-1 phone duration (mean ≈ 210 s) |
 | `nine_one_one_phone_duration_sigma` | 0.70 | Lognormal σ for 9-1-1 phone duration |

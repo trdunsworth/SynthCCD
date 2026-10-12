@@ -1012,20 +1012,41 @@ outputs differ.
   are appended after existing voice draws, so prior datasets stay byte-identical
   (regression baseline signatures unchanged). Schema 1.2 → 1.3. 17 tests in
   `tests/test_sms_rtt.py`.
-- [ ] **P1 — Staffing-driven queue model.** The link that makes personnel changes
-  measurable. Today `interview_seconds` is a pure lognormal draw from
-  `TIME_PROFILES[agency][priority]["interview_mean"]` and the `answered_{t}s_pct`
-  columns come from a sequential-binomial allocation — neither reads staffing, so no
-  score currently responds to headcount. Plan: per-hour per-channel λ → offered load →
-  queue wait solved from actual staffing → feed `interview_seconds` (incidents) **and**
-  `answered_{t}s_pct` (phone metrics) from one shared computation so the two generators
-  agree about the same hour.
+- [x] **P1 — Staffing-driven queue model.** The link that makes personnel changes
+  measurable. `generators/queueing.py` provides vectorized Erlang-C (`M/M/c`) and
+  Erlang-A (`M/M/c+M`); Erlang-C shapes the answer-time curve and Erlang-A supplies
+  the load-dependent share of callers who queue then hang up, both from the arrival
+  rate and the agents on duty that hour. The queue wait feeds `pickup_delay_seconds`
+  (incidents) and `answered_{t}s_pct` (phone metrics) from one shared computation.
+  Both models are cross-checked against the scalar references in `staff_models/`
+  (agreement ~1e-14); `tests/test_queueing.py` holds 100 tests.
   - **Per-agency staffing scope (decided):** model per-agency headcount on the
     *dispatcher* side only, with a **single cross-trained calltaker pool**. Real PSAP
     calltakers answer the 911 call regardless of discipline, so modelling separate
     per-agency call-answer queues would invent a structure that doesn't exist; agency
     mix drives dispatcher consoles (already partially modelled via
     `dispatcher_disciplines`) and field/turnout capacity instead.
+  - **Shipped opt-in (`queue_model_enabled`, default `false`).** It is off because the
+    values it acts on are already end-to-end: `nine_one_one_answer_time_mean` is the
+    NENA 020.1-2020 fit of observed answer times and the `*_abandonment_rate` values
+    are observed totals that already contain queue hang-ups. Layering the queue on
+    top double-charges and drove the 15-second service level to ~0% at ordinary
+    staffing. Enabling it is a deliberate experimental treatment.
+  - **Staffing is exogenous (hard constraint).** Pools are caller-supplied and are
+    never inferred from call volume. An earlier auto-sizing implementation was
+    reverted: it made staffing collinear with the volume being generated, so
+    "hold volume fixed, vary staffing" was unrepresentable.
+  - **Queue wait lands in `pickup_delay_seconds`, not `interview_seconds`.** A caller
+    holding for an agent has not begun an interview; charging the wait to the
+    interview would push `time_call_enters_queue` later and imply that callers
+    queueing for an agent delay dispatch.
+- [x] **P1 — Honour the documented staffing pool sizes.** `--calltaker-pool-size` and
+  `--dispatcher-pool-size` were silently ignored: every built-in shift preset declares
+  per-shift staffing, and resolution preferred those values over the pool, so the
+  documented flags never resized the roster. Declared counts are now treated as
+  weights and the structure is scaled to the pool totals (largest-remainder, so the
+  sum is exact). Pool totals are also an independent variable again: with the queue
+  model off, staffing no longer perturbs the phone-metrics dataset.
 - [ ] **P1 — Volume generator driver from population & staffing.** Build a small
   driver (script in `staff_models/`) that calls the SynthCCD call-volume
   generation with parameters keyed off population and on-hand staff per agency,

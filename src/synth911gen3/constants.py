@@ -390,6 +390,24 @@ PHONE_METRICS: dict[str, float | list[float]] = {
     "answer_time_thresholds": [10.0, 15.0, 20.0, 40.0],
     "answer_time_load_sensitivity": 0.25,
     "answer_time_mu_noise_sd": 0.05,
+    # Queue modelling is opt-in: enable it to let staffing drive the answer-time
+    # curve and the abandoned-call counts through Erlang-C / Erlang-A.
+    #
+    # It is OFF by default because the tuned values it would layer onto are
+    # already end-to-end figures: nine_one_one_answer_time_mean is a NENA
+    # 020.1-2020 fit of observed answer times, and the *_abandonment_rate values
+    # are observed totals that already contain queue hang-ups. Applying the queue
+    # on top charges the same wait twice and collapses the service level to
+    # near zero at ordinary staffing. Turning it on is therefore a deliberate
+    # experimental treatment, not a realism default: enable it and the queue
+    # model supersedes the tuned rates rather than augmenting them.
+    #
+    # Staffing is never inferred from volume -- the pools stay caller-supplied.
+    "queue_model_enabled": False,
+    # Mean caller patience for Erlang-A: callers who have waited this long give
+    # up. ~75 s matches 9-1-1 practice, where roughly 6 in 10 abandoned calls
+    # hang up inside two minutes of the call being queued.
+    "queue_patience_seconds": 75.0,
     # Lognormal phone-duration parameters (log-scale mu, shape sigma) used for
     # the per-hour mean-duration columns. Means: 9-1-1 ~210 s, non-emergency
     # ~120 s, outbound ~60 s (e^(mu + sigma^2/2)).

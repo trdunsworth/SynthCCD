@@ -34,6 +34,7 @@ from synth911gen3.constants import (
     DEFAULT_SEASONAL_MULTIPLIER,
 )
 from synth911gen3.exceptions import ValidationError
+from synth911gen3.generators.queueing import erlang_c_wait_probability
 from synth911gen3.logging_conf import ProgressReporter, get_logger
 from synth911gen3.names import PersonnelNameGenerator, resolve_name_locales
 from synth911gen3.realism_config import RealismConfig
@@ -155,30 +156,64 @@ def _distribute(amount: int, slots: int) -> list[int]:
     return [base + (1 if index < extra else 0) for index in range(slots)]
 
 
+def _scale_to_total(weights: list[float], target: int) -> list[int]:
+    """Scale ``weights`` proportionally so the rounded parts sum to exactly ``target``.
+
+    Floors every share, then hands the leftover units to the largest fractional
+    parts (ties broken by position) so the total is preserved exactly rather
+    than drifting by a unit or two the way naive rounding would.
+    """
+    if not weights:
+        return []
+    total_weight = sum(weights)
+    if total_weight <= 0:
+        return _distribute(target, len(weights))
+    exact = [max(target, 1) * w / total_weight for w in weights]
+    parts = [int(value) for value in exact]
+    leftover = max(target, 1) - sum(parts)
+    order = sorted(range(len(weights)), key=lambda i: (-(exact[i] - parts[i]), i))
+    for index in order[: max(leftover, 0)]:
+        parts[index] += 1
+    return [max(1, part) for part in parts]
+
+
+def _staffing_weights(values: list[int | None]) -> list[float]:
+    """Nominal weight per shift for scaling: declared counts, else the declared mean.
+
+    Shifts that declare no staffing inherit the mean of those that do, which
+    keeps a fully-unnamed structure reducing to a plain even split.
+    """
+    declared = [value for value in values if value is not None]
+    fallback = (sum(declared) / len(declared)) if declared else 1.0
+    return [float(value) if value is not None else fallback for value in values]
+
+
 def _resolve_shift_staffing(
-    shift_config: ShiftConfig, request: GenerationRequest
+    shift_config: ShiftConfig, calltaker_pool: int, dispatcher_pool: int
 ) -> list[tuple[str, int, int]]:
     """Per-shift (name, calltakers, dispatchers) staffing.
 
-    Uses each shift's explicit staffing when present; shifts that omit staffing
-    fall back to an even split of the request's global pool totals.
+    Each shift's declared staffing acts as a weight and the whole structure is
+    scaled to the given pool totals, so the caller's pool sizes genuinely size
+    the roster. Scaling rather than substituting keeps a preset's proportions:
+    a 4-shift structure declaring 3 calltakers each resolves to 3/3/3/3 against
+    a pool of 12 and to 12/12/12/12 against a pool of 48.
+
+    The pools are inputs and are never derived from call volume. Inferring them
+    would make staffing collinear with the volume being generated, so an
+    experiment that holds volume fixed and varies staffing could not be run.
     """
-    unnamed_ct = [shift for shift in shift_config.shifts if shift.calltakers is None]
-    unnamed_dsp = [shift for shift in shift_config.shifts if shift.dispatchers is None]
-    ct_split = _distribute(request.calltaker_pool_size, len(unnamed_ct))
-    dsp_split = _distribute(request.dispatcher_pool_size, len(unnamed_dsp))
-    ct_index = 0
-    dsp_index = 0
-    plan: list[tuple[str, int, int]] = []
-    for shift in shift_config.shifts:
-        calltakers = shift.calltakers if shift.calltakers is not None else ct_split[ct_index]
-        if shift.calltakers is None:
-            ct_index += 1
-        dispatchers = shift.dispatchers if shift.dispatchers is not None else dsp_split[dsp_index]
-        if shift.dispatchers is None:
-            dsp_index += 1
-        plan.append((shift.name, max(1, calltakers), max(1, dispatchers)))
-    return plan
+    shifts = shift_config.shifts
+    calltakers = _scale_to_total(
+        _staffing_weights([shift.calltakers for shift in shifts]), calltaker_pool
+    )
+    dispatchers = _scale_to_total(
+        _staffing_weights([shift.dispatchers for shift in shifts]), dispatcher_pool
+    )
+    return [
+        (shift.name, calltakers[index], dispatchers[index])
+        for index, shift in enumerate(shifts)
+    ]
 
 
 def _build_shift_pools(
@@ -631,7 +666,9 @@ class IncidentGenerator:
             ", ".join(locale for locale, _ in name_locales),
         )
         name_gen = PersonnelNameGenerator(name_locales, seed=request.seed)
-        staffing = _resolve_shift_staffing(shift_config, request)
+        staffing = _resolve_shift_staffing(
+            shift_config, request.calltaker_pool_size, request.dispatcher_pool_size
+        )
         active_agencies = frozenset(realism.agency_weights) & allowed_agencies
         dispatcher_groups = _resolve_dispatcher_groups(staffing, realism, active_agencies)
         if dispatcher_groups:
@@ -807,6 +844,10 @@ class IncidentGenerator:
         ``start_counts`` carries reference-number counters across chunks.
         """
         n = request.rows if n is None else n
+        if n is None:
+            # ``n`` feeds every batched draw below, so it has to be a real count
+            # rather than the optional request field.
+            n = request.resolved_rows()
 
         start = np.datetime64(request.resolved_start_date().isoformat()).astype("datetime64[s]")
         event_offsets = _event_time_offsets(rng, request, realism, n)
@@ -898,7 +939,45 @@ class IncidentGenerator:
         # Apply multipliers to phone_mean
         means["phone_mean"] = means["phone_mean"] * problem_phone_multipliers
 
+        shift_index = _active_shift_index(shift_config, event_times)
+        queue_enabled = bool(realism.phone_metrics.get("queue_model_enabled", False))
         pickup_delay_seconds = _lognormal_seconds(rng, 3, sigma=0.45, size=n, maximum=20)
+        if queue_enabled:
+            # Realized arrival rate for the hour each call actually arrived in.
+            hour_of_first = start.astype("datetime64[h]")
+            hours_elapsed = (event_times.astype("datetime64[h]") - hour_of_first).astype(np.int64)
+            per_hour_calls = np.bincount(
+                hours_elapsed, minlength=int(hours_elapsed.max()) + 1
+            ).astype(float)
+            arrival_rate = per_hour_calls[hours_elapsed] / 3600.0
+            calltakers_per_shift = np.asarray(
+                [
+                    max(1, count)
+                    for _, count, _ in _resolve_shift_staffing(
+                        shift_config,
+                        request.calltaker_pool_size,
+                        request.dispatcher_pool_size,
+                    )
+                ],
+                dtype=float,
+            )
+            agents = calltakers_per_shift[shift_index]
+            service_rate = 1.0 / np.maximum(means["interview_mean"], 1.0)
+            offered_load = arrival_rate / service_rate
+            # Erlang-C against the caller-supplied staffing, with no invented
+            # reference level in between: staffing is an experimental input, so
+            # the wait has to track exactly what the caller specified.
+            actual_decay = service_rate * (agents - offered_load)
+            # Erlang-C delay is exponential at rate c*mu - lambda, so its mean is
+            # 1/decay. An hour with no spare capacity has decay <= 0 and an
+            # unbounded mean, so floor the rate to keep the draw finite; the
+            # caller still controls that floor through their staffing count.
+            safe_decay = np.maximum(actual_decay, 1e-6)
+            routed = rng.random(n) < erlang_c_wait_probability(offered_load, agents)
+            queue_wait = np.where(routed, rng.exponential(1.0 / safe_decay), 0.0)
+            pickup_delay_seconds = (
+                pickup_delay_seconds + np.minimum(queue_wait, 900.0).astype(np.int64)
+            )
         interview_seconds = _lognormal_seconds(
             rng,
             means["interview_mean"],
@@ -971,7 +1050,6 @@ class IncidentGenerator:
         time_phone_disconnect = time_phone_pickup + phone_duration_seconds.astype("timedelta64[s]")
         total_elapsed_seconds = (time_call_closed - event_times).astype(np.int64)
 
-        shift_index = _active_shift_index(shift_config, event_times)
         shift_names = np.asarray([shift.name for shift in shift_config.shifts], dtype=object)
         shift_labels = np.asarray([shift.label for shift in shift_config.shifts], dtype=object)
         shift_groups = np.asarray([shift.rotation for shift in shift_config.shifts], dtype=np.int64)

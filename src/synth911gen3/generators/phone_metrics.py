@@ -11,6 +11,7 @@ rates, and load-sensitive lognormal answer-time service levels.
 
 from __future__ import annotations
 
+import math
 from datetime import datetime, time
 
 import numpy as np
@@ -23,12 +24,37 @@ from synth911gen3.constants import (
     PHONE_METRICS as DEFAULT_PHONE_METRICS,
 )
 from synth911gen3.emergency_numbers import EmergencyNumber, column_prefix
+from synth911gen3.generators.incidents import _active_shift_index, _resolve_shift_staffing
+from synth911gen3.generators.queueing import erlang_a_analysis, erlang_c_wait_probability
 from synth911gen3.logging_conf import get_logger
 from synth911gen3.realism_config import RealismConfig
+from synth911gen3.shifts import apply_shift_preset
 
 logger = get_logger("phone_metrics")
 
 _DEFAULT_THRESHOLDS = (10.0, 15.0, 20.0, 40.0)
+
+
+def _queue_service_level(
+    thresholds: list[float],
+    p_wait: np.ndarray,
+    decay: np.ndarray,
+) -> np.ndarray:
+    """Erlang-C ``P(answered <= T)`` multiplier for the answer-time curve.
+
+    Returns a ``(len(thresholds), n_hours)`` array. Erlang-C conditional delay is
+    exponential at rate ``c*mu - lambda``, so the share of arrivals answered
+    within ``T`` seconds is ``1 - P(wait) * exp(-decay * T)``. Both arguments are
+    per-hour quantities derived from the caller-supplied staffing.
+
+    Kept module-level and side-effect free so the service level can be tested
+    directly rather than inferred from generated output.
+    """
+    horizons = np.asarray(thresholds, dtype=float)[:, None]
+    with np.errstate(over="ignore"):
+        return np.clip(
+            1.0 - p_wait * np.exp(-np.maximum(decay, 0.0) * horizons), 0.0, 1.0
+        )
 
 
 def _thresholds(realism: RealismConfig) -> list[float]:
@@ -228,6 +254,58 @@ class HourlyCallCountGenerator:
             non_emergency_calls_received, floor
         )
 
+        # Queue model. With the agents the caller put on duty this hour and the actual
+        # arrival rate known, Erlang-A gives the share of callers who queue and
+        # then hang up, and Erlang-C the share who queue and are delayed. Only
+        # inbound voice lines contend for the calltaker pool: text sessions are
+        # staffed separately, and outbound calls place no load on it.
+        voice_received = total_emergency_received + non_emergency_calls_received
+        queue_enabled = bool(pm.get("queue_model_enabled", False))
+        if queue_enabled:
+            shift_config = apply_shift_preset(realism.shift_config, request.shift_preset)
+            staffing = _resolve_shift_staffing(
+                shift_config, request.calltaker_pool_size, request.dispatcher_pool_size
+            )
+            active = _active_shift_index(
+                shift_config, hours.to_numpy().astype("datetime64[s]")
+            )
+            on_duty = np.asarray([max(1, staffing[i][1]) for i in range(len(staffing))], dtype=float)
+            agents = on_duty[active]
+            # Volume-weighted mean handle time across the voice lines, since
+            # Erlang-C assumes one common service rate for the pooled stream.
+            aht_911 = math.exp(
+                _f("nine_one_one_phone_duration_mu")
+                + _f("nine_one_one_phone_duration_sigma") ** 2 / 2
+            )
+            aht_ne = math.exp(
+                _f("non_emergency_phone_duration_mu")
+                + _f("non_emergency_phone_duration_sigma") ** 2 / 2
+            )
+            pooled = np.maximum(voice_received, 1).astype(float)
+            mean_handle = np.where(
+                pooled > 0,
+                (total_emergency_received * aht_911 + non_emergency_calls_received * aht_ne)
+                / pooled,
+                aht_911,
+            )
+            arrival_rate = pooled / 3600.0
+            service_rate = 1.0 / np.maximum(mean_handle, 1.0)
+            patience = max(float(pm.get("queue_patience_seconds", 75.0)), 1.0)
+            queue_abandonment = erlang_a_analysis(
+                arrival_rate, service_rate, agents, 1.0 / patience
+            ).abandonment_probability
+            offered_load = arrival_rate / service_rate
+            # Erlang-C against the staffing the caller actually supplied. There
+            # is deliberately no reference-utilization fudge here: staffing is
+            # an experimental input, so the service level has to move when the
+            # caller moves it, with no invented target utilisation in between.
+            decay_actual = service_rate * (agents - offered_load)
+            p_wait_actual = erlang_c_wait_probability(offered_load, agents)
+        else:
+            queue_abandonment = np.zeros(len(hours))
+            p_wait_actual = np.zeros(len(hours))
+            decay_actual = np.ones(len(hours))
+
         # Abandoned counts — same per-number then fixed-line draw order.
         abandoned: dict[str, np.ndarray] = {}
         for num in numbers:
@@ -237,6 +315,7 @@ class HourlyCallCountGenerator:
                 over.get("night_abandonment_increment", _f("night_abandonment_increment"))
             )
             rate_array = rate + np.where((hour_of_day >= 0) & (hour_of_day <= 5), night, 0.0)
+            rate_array = rate_array + queue_abandonment
             abandoned[num.number] = rng.binomial(
                 received[num.number],
                 np.minimum(rate_array, _f("max_abandonment_rate")),
@@ -263,6 +342,7 @@ class HourlyCallCountGenerator:
             mean: float,
             sigma: float,
             thresholds: list[float],
+            apply_queue: bool = True,
         ) -> dict[str, np.ndarray]:
             """Per-threshold % of calls answered within T seconds, per hour.
 
@@ -272,13 +352,26 @@ class HourlyCallCountGenerator:
             requested mean (matching the incident generator's
             :func:`_lognormal_seconds` convention). ``thresholds`` is per-line
             because the SMS/RTT channel answers in minutes, not seconds.
+
+            When ``apply_queue`` is set, the Erlang-C service level for the
+            caller-supplied staffing multiplies the base curve, so the answer
+            time responds to staffing rather than to a time-of-day proxy.
             """
             answered = np.maximum(received - abandoned, 0)
             mu_log = np.log(max(mean, 1e-6)) - (sigma**2) / 2
-            mu_adj = mu_log * (1.0 + load_sensitivity * (busy_factor - 1.0))
+            # The busy-factor inflation and the Erlang-C delay are two models of
+            # the same effect. Applying both charges the load twice, so when the
+            # queue model is on it alone carries the load sensitivity.
+            mu_adj = (
+                mu_log
+                if apply_queue
+                else mu_log * (1.0 + load_sensitivity * (busy_factor - 1.0))
+            )
             mu_noise = rng.normal(0.0, mu_noise_sd, size=len(hours))
             scale = np.exp(mu_adj + mu_noise)
             probs = np.asarray([lognorm.cdf(t, s=sigma, scale=scale) for t in thresholds])
+            if apply_queue:
+                probs = probs * _queue_service_level(thresholds, p_wait_actual, decay_actual)
 
             cumulative = np.zeros(len(hours), dtype=np.int64)
             remaining = answered.copy()
@@ -305,7 +398,7 @@ class HourlyCallCountGenerator:
             sigma = float(over.get("answer_time_sigma", _f("nine_one_one_answer_time_sigma")))
             prefix = column_prefix(num.number)
             for key, values in _answered_pct(
-                received[num.number], abandoned[num.number], mean, sigma, thresholds
+                received[num.number], abandoned[num.number], mean, sigma, thresholds, queue_enabled
             ).items():
                 emergency_answered[f"{prefix}_{key}_pct"] = values
 
@@ -317,6 +410,7 @@ class HourlyCallCountGenerator:
             ne_mean,
             ne_sigma,
             thresholds,
+            queue_enabled,
         ).items():
             non_emergency_answered[f"non_emergency_{key}_pct"] = values
 
@@ -405,6 +499,7 @@ class HourlyCallCountGenerator:
             _f("sms_rtt_answer_time_mean", _pm_default("sms_rtt_answer_time_mean")),
             _f("sms_rtt_answer_time_sigma", _pm_default("sms_rtt_answer_time_sigma")),
             sms_rtt_thresholds,
+            apply_queue=False,
         ).items():
             sms_rtt_answered[f"sms_rtt_{key}_pct"] = values
 
