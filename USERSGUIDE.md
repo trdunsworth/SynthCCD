@@ -2134,6 +2134,14 @@ $env:SYNTHCCD_SYSTEM_TRUST = "1"   # PowerShell
 uv run SynthCCD generate
 ```
 
+If you wish to make this permanent in PowerShell `setx` can be used with the following syntax:
+
+```powershell
+setx SYNTHCCD_SYSTEM_TRUST 1
+```
+
+Now that there is no `=` in that command.
+
 The runtime flag is a no-op unless set, so production behavior is unchanged. The OS trust store
 is injected at most once per process (guarded internally), so calling it from the CLI and TUI
 entry points together is harmless. If the OS trust store does not trust the proxy's issuer,
