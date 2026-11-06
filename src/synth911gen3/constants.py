@@ -646,6 +646,19 @@ ZONE_TRAVEL_MULTIPLIERS = {
     "RURAL": 1.5,
 }
 
+# Per-zone share of caller-reported addresses that validate against the
+# authoritative addressing data (MSAG/civic address database). Modern CAD
+# systems only refresh cross streets and the hundred block once an address
+# validates, so these rates gate both fields. Urban/suburban addresses sit in
+# curated address databases and mostly validate; rural county-road addresses
+# often fall outside them. Configurable via ``address_validation.zone_rates``
+# in the realism YAML.
+ADDRESS_VALIDATION_RATES: dict[str, float] = {
+    "URBAN": 0.85,
+    "SUBURBAN": 0.70,
+    "RURAL": 0.45,
+}
+
 # Problem-type phone duration multipliers
 # Applied to base phone_mean from TIME_PROFILES based on problem nature
 # Values > 1.0 increase call duration, < 1.0 decrease call duration

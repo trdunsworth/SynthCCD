@@ -15,7 +15,7 @@ from typing import Any
 
 import pandas as pd
 
-_DIRECTIONS = frozenset(
+DIRECTIONS = frozenset(
     {
         "N",
         "S",
@@ -47,7 +47,7 @@ _DIRECTION_ABBREVIATIONS = {
     "SOUTHWEST": "SW",
 }
 
-_STREET_TYPES = frozenset(
+STREET_TYPES = frozenset(
     {
         "ST",
         "STREET",
@@ -144,15 +144,15 @@ def parse_address_parts(
         street_number = tokens.pop(0)
 
     postfix_directional = ""
-    if len(tokens) >= 2 and tokens[-1].upper() in _DIRECTIONS:
+    if len(tokens) >= 2 and tokens[-1].upper() in DIRECTIONS:
         postfix_directional = _normalize_direction(tokens.pop())
 
     street_type = ""
-    if tokens and tokens[-1].upper() in _STREET_TYPES:
+    if tokens and tokens[-1].upper() in STREET_TYPES:
         street_type = tokens.pop()
 
     prefix_directional = ""
-    if len(tokens) >= 2 and tokens[0].upper() in _DIRECTIONS:
+    if len(tokens) >= 2 and tokens[0].upper() in DIRECTIONS:
         prefix_directional = _normalize_direction(tokens.pop(0))
 
     street_name = " ".join(tokens)
@@ -193,6 +193,13 @@ class Address:
     ``"Suite 15"`` or ``"Unit C"`` from ``addr:flats`` / ``addr:unit`` /
     ``addr:suite`` / ``addr:door`` / ``addr:floor`` tags.
 
+    ``cross_street_1`` / ``cross_street_2`` hold the nearest real street
+    intersections along the address's own street, resolved from OpenStreetMap
+    way geometry by :mod:`synth911gen3.streets`. Both are empty when the
+    geography has no usable intersection nearby; the incident generator also
+    blanks them per row when the address fails validation (see
+    ``address_validation`` in the realism config).
+
     When only the free-form ``street_address`` is supplied, the
     components are derived automatically via :func:`parse_address_parts`.
     """
@@ -211,6 +218,8 @@ class Address:
     zone: str = "URBAN"
     commonplace_name: str = ""
     unit_number: str = ""
+    cross_street_1: str = ""
+    cross_street_2: str = ""
 
     def __post_init__(self) -> None:
         if not self.street_name:

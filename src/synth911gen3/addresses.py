@@ -4,9 +4,11 @@ The CAD generator needs a pool of real street addresses for the chosen
 geography. :class:`OpenStreetMapAddressProvider` geocodes an area query
 (place name or bounding box) via Nominatim, pulls addressed
 buildings/ways from the Overpass API, classifies each into a geographic
-zone (URBAN/SUBURBAN/RURAL), and caches the result as parquet plus a
-small JSON metadata file. :class:`StaticAddressProvider` wraps a fixed
-in-memory pool for tests and offline runs.
+zone (URBAN/SUBURBAN/RURAL), resolves each address's nearest cross
+streets from street way geometry (:mod:`synth911gen3.streets`), and
+caches the result as parquet plus a small JSON metadata file.
+:class:`StaticAddressProvider` wraps a fixed in-memory pool for tests and
+offline runs.
 
 Nominatim rate limits and retry/backoff are handled inside the provider;
 see the module constants for the request policy.
@@ -19,7 +21,7 @@ import json
 import ssl
 import time
 from collections.abc import Callable, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -33,6 +35,14 @@ from .emergency_numbers import normalize_country
 from .exceptions import AddressConnectionError, AddressLookupError
 from .logging_conf import get_logger
 from .postal import get_postal_lookup
+from .streets import (
+    StreetGrid,
+    StreetIntersection,
+    build_intersections,
+    build_street_geometry_query,
+    merge_intersections,
+    split_into_query_cells,
+)
 
 logger = get_logger("addresses")
 
@@ -101,6 +111,16 @@ _US_STATE_NAMES = {
 _LOCAL_HIGHWAY_PATTERN = (
     "^(residential|living_street|unclassified|service|tertiary|secondary|primary)$"
 )
+
+# Cache schema version, mixed into the cache key digest. Bump whenever the
+# cached columns or their fetch semantics change so existing parquet caches
+# refetch once instead of silently serving stale data (v3: cross_street_1 /
+# cross_street_2, and complete-only caching).
+_CACHE_VERSION = 3
+# Pause between cross-street geometry cells. The public Overpass API rate-limits
+# concurrent heavy queries (HTTP 429 / read timeouts), so cells run one at a
+# time with a short gap between them; a failing cell keeps blank cross streets.
+_GEOMETRY_QUERY_INTERVAL = 1.0
 
 
 class AddressProvider(Protocol):
@@ -319,6 +339,7 @@ class OpenStreetMapAddressProvider:
         self._resolved_population: int | None = None
         self._postal_lookup = None  # lazy-init for US areas
         self._discovered_cities: list[CityPlace] = []
+        self._cross_streets_incomplete = False
 
     def load_addresses(self, area_query: str) -> list[Address]:
         """Return the address pool for ``area_query``, using cache when possible."""
@@ -337,7 +358,10 @@ class OpenStreetMapAddressProvider:
         logger.info("Fetching addresses for '%s' (no cache at %s)", area_query, cache_path)
         addresses = self._fetch_addresses(area_query)
         logger.info("Fetched %d addresses", len(addresses))
-        self._write_cache(cache_path, addresses)
+        if not self._cross_streets_incomplete:
+            self._write_cache(cache_path, addresses)
+        else:
+            logger.info("Skipping address cache write: cross streets were incomplete")
         self._write_meta(
             meta_path,
             self._resolved_country,
@@ -355,8 +379,14 @@ class OpenStreetMapAddressProvider:
 
     @staticmethod
     def _digest(area_query: str) -> str:
-        """Stable short hex digest of an area query, used as the cache key."""
-        return hashlib.md5(area_query.strip().lower().encode("utf-8")).hexdigest()[:12]
+        """Stable short hex digest of an area query, used as the cache key.
+
+        The cache-schema version is part of the digest input, so bumping
+        ``_CACHE_VERSION`` invalidates older caches (they are re-fetched once
+        and rewritten in the new format).
+        """
+        key = f"v{_CACHE_VERSION}:{area_query.strip().lower()}"
+        return hashlib.md5(key.encode("utf-8")).hexdigest()[:12]
 
     def _cache_path(self, area_query: str) -> Path:
         """Path to the parquet cache file for an area query."""
@@ -421,6 +451,8 @@ class OpenStreetMapAddressProvider:
         unit_numbers = (
             frame["unit_number"] if "unit_number" in frame.columns else [""] * len(frame)
         )
+        cross_1 = frame["cross_street_1"] if "cross_street_1" in frame.columns else [""] * len(frame)
+        cross_2 = frame["cross_street_2"] if "cross_street_2" in frame.columns else [""] * len(frame)
         return [
             Address(
                 str(street),
@@ -432,8 +464,10 @@ class OpenStreetMapAddressProvider:
                 zone=str(zone) if pd.notna(zone) else "URBAN",
                 commonplace_name=str(poi) if pd.notna(poi) else "",
                 unit_number=str(unit) if pd.notna(unit) else "",
+                cross_street_1=str(first) if pd.notna(first) else "",
+                cross_street_2=str(second) if pd.notna(second) else "",
             )
-            for street, city, state, postal, lat, lon, zone, poi, unit in zip(
+            for street, city, state, postal, lat, lon, zone, poi, unit, first, second in zip(
                 frame["street_address"],
                 frame["city"],
                 frame["state"],
@@ -443,6 +477,8 @@ class OpenStreetMapAddressProvider:
                 zones,
                 commonplace_names,
                 unit_numbers,
+                cross_1,
+                cross_2,
             )
         ]
 
@@ -464,6 +500,8 @@ class OpenStreetMapAddressProvider:
                 "zone": [address.zone for address in addresses],
                 "commonplace_name": [address.commonplace_name for address in addresses],
                 "unit_number": [address.unit_number for address in addresses],
+                "cross_street_1": [address.cross_street_1 for address in addresses],
+                "cross_street_2": [address.cross_street_2 for address in addresses],
             }
         )
         self._cache_dir.mkdir(parents=True, exist_ok=True)
@@ -471,6 +509,7 @@ class OpenStreetMapAddressProvider:
 
     def _fetch_addresses(self, area_query: str) -> list[Address]:
         """Geocode the area, pull addressed elements, and fall back to named streets."""
+        self._cross_streets_incomplete = False
         bbox = _parse_bbox(area_query)
         if bbox is None:
             area = self._geocode_area(area_query)
@@ -514,7 +553,15 @@ class OpenStreetMapAddressProvider:
             raise AddressLookupError(
                 f"OpenStreetMap returned too few usable addresses for '{area_query}'."
             )
-        return addresses[: self._max_addresses]
+        addresses = addresses[: self._max_addresses]
+        if not self._attach_cross_streets(addresses, area):
+            logger.warning(
+                "Cross-street geometry was incomplete for '%s'; the address pool will be "
+                "refetched next run so cross streets can be resolved completely.",
+                area_query,
+            )
+            self._cross_streets_incomplete = True
+        return addresses
 
     def _nominatim_get(self, url: str, params: dict[str, Any]) -> Any:
         """GET a Nominatim endpoint honoring the 1 req/s usage policy with retry/backoff.
@@ -719,6 +766,91 @@ class OpenStreetMapAddressProvider:
             return "RURAL"
 
         return "URBAN"
+
+    def _attach_cross_streets(self, addresses: list[Address], area: _GeocodedArea) -> None:
+        """Resolve each address's nearest cross streets from street way geometry.
+
+        The address pool's bounding box is split into bounded query cells
+        (see :func:`split_into_query_cells`) and one Overpass geometry query
+        runs per cell, so a metro area costs a handful of small complete
+        queries rather than one huge, id-truncated one. Every address is then
+        matched against its own street's nearest crossings.
+
+        Failures (rate limits, timeouts, sparse coverage) are non-fatal: a
+        failed cell keeps whatever the other cells returned, and a total
+        failure leaves every address with blank cross streets. Mutates the
+        list in place.
+        """
+    def _attach_cross_streets(self, addresses: list[Address], area: _GeocodedArea) -> bool:
+        """Resolve each address's nearest cross streets from street way geometry.
+
+        The address pool's bounding box is split into bounded query cells
+        (see :func:`split_into_query_cells`) and one Overpass geometry query
+        runs per cell, so a metro area costs a handful of small complete
+        queries rather than one huge, id-truncated one. Every address is then
+        matched against its own street's nearest crossings.
+
+        Returns ``True`` only when every cell query succeeded, so a partially
+        resolved table is never cached as final. Failures (rate limits,
+        timeouts, sparse coverage) are non-fatal for the run: a failed cell
+        keeps whatever the other cells returned, and a total failure leaves
+        every address with blank cross streets. Mutates the list in place.
+        """
+        if not addresses:
+            return True
+        points = [(address.latitude, address.longitude) for address in addresses]
+        cells = split_into_query_cells(points) or [
+            (area.south, area.west, area.north, area.east)
+        ]
+        tables: list[list[StreetIntersection]] = []
+        failures = 0
+        for cell_index, (south, west, north, east) in enumerate(cells):
+            query = build_street_geometry_query(south, west, north, east)
+            try:
+                tables.append(build_intersections(self._query_runner(query)))
+            except (
+                AddressConnectionError,
+                AddressLookupError,
+                overpy.exception.OverPyException,
+            ) as exc:
+                failures += 1
+                logger.warning(
+                    "Cross-street geometry query failed for cell %d/%d (%s); continuing",
+                    cell_index + 1,
+                    len(cells),
+                    exc,
+                )
+                tables.append([])
+                continue
+            # Stay polite to the public Overpass API between cells: concurrent
+            # geometry queries get rate-limited (HTTP 429) or time out.
+            if cell_index < len(cells) - 1:
+                time.sleep(_GEOMETRY_QUERY_INTERVAL)
+
+        grid = StreetGrid(merge_intersections(tables))
+        if not len(grid):
+            logger.info("No street intersections found for cross streets in '%s'", area.city)
+            return failures == 0
+        resolved = 0
+        for index, address in enumerate(addresses):
+            names = grid.cross_streets_for(address.latitude, address.longitude, address.street_name)
+            if not names:
+                continue
+            resolved += 1
+            addresses[index] = replace(
+                address,
+                cross_street_1=names[0],
+                cross_street_2=names[1] if len(names) > 1 else "",
+            )
+        logger.info(
+            "Resolved cross streets for %d of %d addresses (%d cells, %d failed, %d intersections)",
+            resolved,
+            len(addresses),
+            len(cells),
+            failures,
+            len(grid),
+        )
+        return failures == 0
 
     def _query_named_streets(self, area: _GeocodedArea) -> list[Address]:
         """Fallback: synthesize addresses on named local streets when real ones are scarce."""

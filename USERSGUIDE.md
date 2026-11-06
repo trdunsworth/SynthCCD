@@ -1074,6 +1074,10 @@ Each address is emitted as individual components (`prefix_directional`, `street_
 
 Addresses that correspond to a business or landmark carry a `commonplace_name` (e.g. `"T-Mobile Center"`, `"Union Station"`) extracted from the OSM `name` tag on elements with `amenity`, `shop`, `tourism`, or `historic` tags, or on named apartment buildings. The field is empty for ordinary residential addresses. Sub-address components such as suite or apartment numbers are captured in `unit_number` (e.g. `"Suite 15"`, `"Unit C"`) from `addr:flats` / `addr:unit` / `addr:suite` / `addr:door` / `addr:floor` OSM tags.
 
+Cross streets come from the same OpenStreetMap source. Named street ways (plus their nodes) are fetched for the area, every node where two or more distinctly named ways meet becomes a crossing, and each address is matched to the nearest crossings of its own street — reported in `cross_street_1` and `cross_street_2`, nearest first, always excluding the address's own street. Only crossings within roughly 500 m are reported, so cul-de-sacs and unnamed segments stay blank. A second fetch per new area pulls this geometry (cached in the same parquet file as the addresses), and it runs as several small bounded cell queries rather than one large one; if any cell fails the run still generates, the affected addresses simply carry blank cross streets, and the cache is not written so the next run refetches.
+
+Whether any of that detail reaches the output depends on address validation. Each row draws `address_validated` from a per-zone rate (`address_validation.zone_rates`, see REALISMGUIDE.md): validated rows carry their cross streets and the MSAG hundred block (`hundred_block`: house number 4412 → 4400); unvalidated rows keep all three blank, exactly as a CAD leaves them when a caller-reported address does not resolve.
+
 Larger areas provide more address variety but take longer to fetch initially (addresses are cached locally after first query).
 
 **Examples (not an exhaustive list):**
@@ -1804,6 +1808,10 @@ uv run SynthCCD generate --rows 5000000 --format parquet --max-memory-bytes 1073
 | `zone` | str | Geographic zone classification: URBAN, SUBURBAN, or RURAL (OSM-based) |
 | `commonplace_name` | str | Business or landmark name from OSM (e.g. `"T-Mobile Center"`, `"Union Station"`); empty for residential addresses |
 | `unit_number` | str | Sub-address component from OSM `addr:flats`/`addr:unit`/`addr:suite`/`addr:door`/`addr:floor` tags (e.g. `"Suite 15"`, `"Unit C"`); empty when not present |
+| `cross_street_1` | str | Nearest real street crossing the address's own street (e.g. `"W 10th St"`), resolved from OSM way geometry; empty when the address has no crossing in range or did not validate |
+| `cross_street_2` | str | Second-nearest crossing, nearest-first; empty when only one crossing is in range or the address did not validate |
+| `address_validated` | bool | Whether the caller address validated against the authoritative address database (MSAG/civic data). Modern CAD refreshes `cross_street_*` and `hundred_block` only for validated addresses, so all three are blank/`NA` on unvalidated rows. Rate is per zone (see `address_validation` in REALISMGUIDE.md) |
+| `hundred_block` | Int64 (nullable) | Street-segment block per the MSAG convention (house number 4412 → `4400`); `NA` when the row is unvalidated, the house number is not an integer, or it is below 100 |
 | `location` | str | `street_address, city, state` |
 | `call_start_time` | datetime | Call received timestamp |
 | `hour` | int | Hour of day (0–23) of `call_start_time` |
@@ -2189,6 +2197,11 @@ OpenStreetMap addresses are cached in:
 The `.meta.json` sidecar stores the ISO country code of the geocoded area (used
 to select personnel name locales); it is written on fetch and read back on
 cache hits. Delete both files to force a re-fetch for updated area boundaries.
+
+The parquet cache also stores the cross-street columns resolved for the pool.
+The cache key mixes in a schema version, so a version that adds columns (such
+as the one that added cross streets) refetches each area once and rewrites the
+file rather than serving stale columns.
 
 ---
 

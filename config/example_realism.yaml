@@ -545,3 +545,16 @@ name_locales:
   # IE:
   #   en_IE: 0.7
   #   ga_IE: 0.3
+
+# Address validation: the share of caller-reported addresses that validate
+# against the authoritative address database, per OSM-derived zone. Modern CAD
+# refreshes cross streets and the hundred block only once an address validates,
+# so these rates gate the cross_street_1 / cross_street_2 / address_validated /
+# hundred_block output columns. Urban/suburban addresses sit in curated address
+# databases; rural county-road addresses often fall outside them. Lower the
+# rates to model a centre whose MSAG coverage is patchy.
+address_validation:
+  zone_rates:
+    URBAN: 0.85
+    SUBURBAN: 0.70
+    RURAL: 0.45

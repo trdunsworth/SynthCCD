@@ -271,6 +271,7 @@ dispatcher_disciplines:
 | `dispatcher_disciplines` | Agency-discipline breakdown of per-shift dispatcher consoles (LAW / FIRE / EMS) | `mode` in auto/combined/two_way/three_way; `min_dispatchers_for_split` >= 1 |
 | `name_locales` | Faker locale blend for personnel rosters, per country | Valid Faker locales, positive weights, uppercase ISO country keys |
 | `problem_phone_multipliers` | Per-problem-type phone duration multipliers | Positive floats; unlisted problems default to 1.0 |
+| `address_validation` | Per-zone probability a caller address validates against the address database; gates `cross_street_1`/`cross_street_2`/`hundred_block` | `zone_rates` is a non-empty mapping over URBAN/SUBURBAN/RURAL with each rate in [0, 1]; no other keys |
 
 The `psap_agency` field on `GenerationRequest` (not the realism config) filters which
 agencies appear in the output. Valid values: `all`, `law`, `fire`, `ems`, `fire_ems`.
@@ -455,6 +456,69 @@ dispatcher_disciplines:
   mode: three_way   # separate FIRE and EMS consoles; default auto gives this
                     # 4-position shift two LAW + two FIRE/EMS consoles instead
 ```
+
+### Address Validation and Cross Streets
+
+Modern CAD systems validate a caller-reported address against the
+authoritative address database (MSAG/civic address data) and, once it
+validates, refresh the location detail: the cross streets at the nearest
+intersections and the street-segment hundred block. Unvalidated rows keep
+those fields blank, which is exactly what dispatchers see when a caller gives
+an address that does not resolve. The `address_validation` section models the
+validation rate per geographic zone.
+
+```yaml
+address_validation:
+  zone_rates:
+    URBAN: 0.85
+    SUBURBAN: 0.70
+    RURAL: 0.45
+```
+
+| Key | Description |
+|-----|-------------|
+| `zone_rates` | Per-zone probability that a caller address validates, by the OSM-derived address `zone` (URBAN / SUBURBAN / RURAL). Every zone must be one of the three; values are in `[0, 1]` |
+
+**Why the rates fall by zone.** Urban and suburban addresses sit in curated
+address databases with complete address ranges, so they mostly validate.
+Rural county-road addresses frequently fall outside them — a house number on a
+segment the county never numbered — so those rows reject more often. This is
+the same gradient as real PSAP location-validation failure rates.
+
+**What validation gates.** A row where `address_validated` is `False` carries
+blank `cross_street_1`, blank `cross_street_2`, and an `NA` `hundred_block`,
+regardless of what the address pool knows about the location. Validated rows
+carry the resolved values.
+
+**Cross streets.** `cross_street_1` and `cross_street_2` are the two nearest
+real street crossings of the address's own street, nearest first — the
+intersections a dispatcher quotes when bouncing a caller to a corner. They are
+resolved from OpenStreetMap street way geometry: a node where two or more
+distinctly named ways meet is a crossing, and the reported streets are the
+*other* streets at that node, so the address's own street never appears.
+Street matching is tolerant of the spelling differences between postal and map
+data (`N Oak Trafficway`, `North Oak Trafficway`, and `Oak Trafficway` are the
+same street, as are `Main St` and `Main Street`). Cross streets are only
+reported within about 500 m of the address; beyond that the columns stay blank,
+which also covers genuine data gaps — cul-de-sacs, unnamed segments, and
+service roads have no crossing to quote.
+
+**Hundred block.** `hundred_block` follows the MSAG convention of naming a
+street segment by the first address number it contains: house number 4412 sits
+on the 4400 block. It is only filled once the address validates, and only for
+integer house numbers of 100 or more — `17A` and `85` do not sit in a numbered
+range, matching how a CAD leaves the field blank for those.
+
+**Fetch behaviour.** Cross streets require one extra OpenStreetMap fetch per
+area: named street ways (plus their nodes) are pulled in bounded cells covering
+the address pool's bounding box. Results are cached in the same per-area
+parquet cache as the addresses, so repeat runs are offline. Cells are queried
+one at a time with a short interval because the public Overpass API rate-limits
+concurrent heavy queries; a cell that fails is retried on the next run, and a
+run with any failed cell is not written to the cache at all, so a partial
+cross-street table never becomes the stored truth. Blank cross streets in the
+output therefore mean one of three things: the address did not validate, it has
+no crossing within range, or the geometry fetch was incomplete.
 
 ### Personnel Name Locales
 

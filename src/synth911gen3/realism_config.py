@@ -3,8 +3,8 @@
 Every distribution the generator uses — agency and priority weights,
 problem profiles, call-reception and disposition weights, time profiles,
 phone-metrics parameters, hourly weights, shift structure, seasonal and
-zone multipliers, and name locales — can be overridden per run via a
-realism YAML file. :class:`RealismConfig` holds the merged result: user
+zone multipliers, address-validation rates, and name locales — can be
+overridden per run via a realism YAML file. :class:`RealismConfig` holds the merged result: user
 values take precedence, untouched sections fall back to the defaults in
 :mod:`~synth911gen3.constants`. See REALISMGUIDE.md for the full schema
 and validation rules.
@@ -24,6 +24,9 @@ import numpy as np
 import yaml
 
 from .calibration import lognormal_cdf
+from .constants import (
+    ADDRESS_VALIDATION_RATES as DEFAULT_ADDRESS_VALIDATION_RATES,
+)
 from .constants import (
     AGENCY_WEIGHTS as DEFAULT_AGENCY_WEIGHTS,
 )
@@ -135,6 +138,11 @@ class RealismConfig:
     # means infinity); ``incidents_per_1000_yearly`` drives incident-row
     # derivation when ``rows`` is omitted and ``population`` is set.
     population_rates: dict[str, Any] = field(default_factory=dict)
+    # Per-zone share of caller-reported addresses that validate against the
+    # authoritative addressing data. Validation gates the ``cross_street_1`` /
+    # ``cross_street_2`` / ``hundred_block`` columns: modern CAD systems only
+    # populate them once the address validates. Section key: ``zone_rates``.
+    address_validation: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         """Fill any empty section with its constants-module default."""
@@ -182,6 +190,10 @@ class RealismConfig:
                     for bound, rate in DEFAULT_EMERGENCY_TIERS
                 ],
                 "incidents_per_1000_yearly": float(DEFAULT_INCIDENTS_PER_1000),
+            }
+        if not self.address_validation:
+            self.address_validation = {
+                "zone_rates": dict(DEFAULT_ADDRESS_VALIDATION_RATES),
             }
         if not self.shift_config.shifts and not self.shift_config.rotation:
             self.shift_config = get_default_shift_config()
@@ -382,6 +394,31 @@ class RealismConfig:
             # Merge over the __post_init__ defaults so partial sections
             # (tiers only, or rate only) keep the remaining defaults.
             config.population_rates.update(parsed_rates)
+
+        if "address_validation" in data:
+            section = data["address_validation"]
+            if not isinstance(section, dict):
+                raise ValidationError("address_validation must be a mapping")
+            unknown_keys = set(section) - {"zone_rates"}
+            if unknown_keys:
+                raise ValidationError(
+                    "address_validation has unknown key(s): "
+                    f"{', '.join(sorted(unknown_keys))}"
+                )
+            parsed_validation: dict[str, Any] = {}
+            if "zone_rates" in section:
+                rates_in = section["zone_rates"]
+                if not isinstance(rates_in, dict) or not rates_in:
+                    raise ValidationError(
+                        "address_validation.zone_rates must be a non-empty mapping "
+                        "of zone -> probability"
+                    )
+                parsed_validation["zone_rates"] = {
+                    str(zone): float(rate) for zone, rate in rates_in.items()
+                }
+            # Merge over the __post_init__ defaults so a partial section keeps
+            # the remaining default zones.
+            config.address_validation.update(parsed_validation)
 
         if "answer_time_targets" in data:
             raw = data["answer_time_targets"]
@@ -615,6 +652,31 @@ class RealismConfig:
                 "population_rates.incidents_per_1000_yearly must be positive"
             )
 
+        validation = self.address_validation
+        if not isinstance(validation, dict):
+            raise ValidationError("address_validation must be a mapping")
+        unknown_validation_keys = set(validation) - {"zone_rates"}
+        if unknown_validation_keys:
+            raise ValidationError(
+                "address_validation has unknown key(s): "
+                f"{', '.join(sorted(unknown_validation_keys))}"
+            )
+        zone_rates = validation.get("zone_rates") or dict(DEFAULT_ADDRESS_VALIDATION_RATES)
+        if not isinstance(zone_rates, dict) or not zone_rates:
+            raise ValidationError(
+                "address_validation.zone_rates must be a non-empty mapping of zone -> probability"
+            )
+        for zone, rate in zone_rates.items():
+            if zone not in DEFAULT_ADDRESS_VALIDATION_RATES:
+                raise ValidationError(
+                    f"address_validation.zone_rates has unknown zone {zone!r} "
+                    f"(expected one of {', '.join(sorted(DEFAULT_ADDRESS_VALIDATION_RATES))})"
+                )
+            if not 0.0 <= float(rate) <= 1.0:
+                raise ValidationError(
+                    f"address_validation.zone_rates[{zone}] must be between 0 and 1"
+                )
+
         for line, points in self.answer_time_targets.items():
             if line not in ("nine_one_one", "non_emergency"):
                 raise ValidationError(
@@ -709,6 +771,13 @@ class RealismConfig:
                 line: [[t, p] for t, p in points]
                 for line, points in self.answer_time_targets.items()
             },
+            "address_validation": {
+                "zone_rates": dict(
+                    self.address_validation.get(
+                        "zone_rates", DEFAULT_ADDRESS_VALIDATION_RATES
+                    )
+                ),
+            },
         }
         with path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(data, f, sort_keys=False, default_flow_style=None)
@@ -758,3 +827,17 @@ class RealismConfig:
                 "incidents_per_1000_yearly", DEFAULT_INCIDENTS_PER_1000
             )
         )
+
+    def validation_rate_for_zone(self, zone: str) -> float:
+        """Share of addresses in ``zone`` expected to validate against the MSAG.
+
+        Urban and suburban addresses sit in curated address databases and mostly
+        validate; rural county-road addresses frequently fall outside them.
+        Unknown zones fall back to the configured default rate for that zone,
+        then to 0.5, so an unrecognized zone never silently validates nothing
+        or everything.
+        """
+        zone_rates = self.address_validation.get("zone_rates") or DEFAULT_ADDRESS_VALIDATION_RATES
+        if zone in zone_rates:
+            return float(zone_rates[zone])
+        return float(DEFAULT_ADDRESS_VALIDATION_RATES.get(zone, 0.5))

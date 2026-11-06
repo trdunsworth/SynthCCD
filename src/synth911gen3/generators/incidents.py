@@ -6,9 +6,10 @@ lognormal lifecycle timings, geographic zone travel multipliers,
 shift-aware calltaker/dispatcher assignment (Zipf-weighted for workload
 realism, with dispatcher pools split into LAW / FIRE / EMS discipline
 consoles for medium/large centres), reception and disposition profiles,
-and reference numbers per agency/day. All draws flow through a single
-seeded NumPy RNG so a given seed plus realism config yields
-byte-identical output; large runs stream chunks via
+address validation (per-zone MSAG rates) gating the cross streets and
+hundred block, and reference numbers per agency/day. All draws flow
+through a single seeded NumPy RNG so a given seed plus realism config
+yields byte-identical output; large runs stream chunks via
 :meth:`IncidentGenerator.generate_chunks` under a memory budget.
 """
 
@@ -20,7 +21,7 @@ import uuid as _uuid
 from collections.abc import Callable, Iterable, Iterator
 from copy import copy
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import pandas as pd
@@ -66,6 +67,8 @@ _ADDRESS_FIELDS = (
     "zone",
     "commonplace_name",
     "unit_number",
+    "cross_street_1",
+    "cross_street_2",
 )
 # Lognormal shape per lifecycle column. Single source of truth: the draws below
 # use it, and tests derive each column's sampling standard error from it, so the
@@ -117,6 +120,10 @@ _FIXED_WIDTH_BYTES: dict[str, int] = {
     "closeout_seconds": 8,
     "phone_duration_seconds": 8,
     "total_elapsed_seconds": 8,
+    # Whether the caller address validated: bool (1 byte) and the derived
+    # hundred block, nullable int64 (8 bytes); both blank on unvalidated rows.
+    "address_validated": 1,
+    "hundred_block": 8,
 }
 
 logger = get_logger("incidents")
@@ -498,6 +505,23 @@ def _sample_addresses(addresses: list) -> list:
     return addresses[::stride]
 
 
+def _hundred_block_column(
+    street_numbers: np.ndarray, validated: np.ndarray
+) -> pd.arrays.IntegerArray:
+    """Hundred block per validated address; ``NA`` for anything else.
+
+    Follows the MSAG convention of naming a street segment by the first
+    address number it contains: house number 4412 sits on the 4400 block.
+    Modern CAD fills the field in only once the address validates, and
+    non-integer or sub-100 house numbers (``"17A"``, ``"85"``) do not sit in
+    a numbered range, so those rows — and every unvalidated row — carry NA.
+    """
+    numeric = pd.to_numeric(pd.Series(street_numbers), errors="coerce").to_numpy(dtype=float)
+    blocks = np.floor(numeric / 100.0) * 100.0
+    usable = np.isfinite(numeric) & (numeric >= 100) & validated
+    return cast(pd.arrays.IntegerArray, pd.array(np.where(usable, blocks, np.nan), dtype="Int64"))
+
+
 def _problem_nature_mean_bytes(realism: RealismConfig) -> float:
     """Agency × priority × label-weighted mean length of problem natures."""
     return _weighted_mean_utf8(
@@ -836,7 +860,7 @@ class IncidentGenerator:
         start_index: int = 0,
         guid_rng: _random.Random | None = None,
         start_counts: np.ndarray | None = None,
-    ) -> dict[str, np.ndarray]:
+    ) -> dict[str, np.ndarray | pd.arrays.IntegerArray]:
         """Draw one chunk of records as a dict of parallel NumPy columns.
 
         All random draws come from ``rng`` so the whole dataset is
@@ -1106,6 +1130,20 @@ class IncidentGenerator:
                 int(mask.sum()),
             )
 
+        # Address validation against the authoritative address database (MSAG):
+        # modern CAD refreshes cross streets and the hundred block only once a
+        # caller address validates, so both columns are blank on the rest of the
+        # rows. Drawn after every other RNG use so the existing seeded stream —
+        # and therefore the regression baseline — is unchanged.
+        zone_rates = np.asarray(
+            [realism.validation_rate_for_zone(zone) for zone in address_columns["zone"]],
+            dtype=float,
+        )
+        address_validated = rng.random(n) < zone_rates
+        cross_street_1 = np.where(address_validated, address_columns["cross_street_1"], "")
+        cross_street_2 = np.where(address_validated, address_columns["cross_street_2"], "")
+        hundred_block = _hundred_block_column(address_columns["street_number"], address_validated)
+
         if request.id_format is IdFormat.GUID:
             guid_rng = guid_rng if guid_rng is not None else _random.Random(request.seed)
             id_number: np.ndarray = np.asarray(
@@ -1152,6 +1190,10 @@ class IncidentGenerator:
             "zone": address_columns["zone"],
             "commonplace_name": address_columns["commonplace_name"],
             "unit_number": address_columns["unit_number"],
+            "cross_street_1": cross_street_1,
+            "cross_street_2": cross_street_2,
+            "address_validated": address_validated,
+            "hundred_block": hundred_block,
             "location": location,
             "call_start_time": event_times,
             "hour": hour,

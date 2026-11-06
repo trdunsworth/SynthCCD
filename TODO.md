@@ -557,6 +557,113 @@ recommendation docs in `docs/`, and direct code review.
    distributions from those open datasets per center (see `future_work/nena_pass_realism.yaml`).
 
 
+- [x] **P2 — Cross streets on generated addresses.** Add `cross_street_1` / `cross_street_2`
+      (**option 1: two columns**) populated from real OpenStreetMap intersections.
+      Implementation: one extra Overpass query for named-street way geometry (`out geom`)
+      within the area bbox; build an intersection table by grouping node coordinates across
+      distinct way names; match each `Address` to its nearest intersections with a KD-tree
+      over the lat/lon the provider already stores. Match the address's own street
+      tolerantly (normalize directional prefixes — `addr:street` "Oak Trafficway" vs way
+      name "N Oak Trafficway") and exclude it from the results. **Realism note:** most
+      modern CADs refresh cross streets once the caller address is validated, so population
+      is driven by a validation concept shared with the hundred-block item below — an
+      `address_validated` probability/flag in the realism YAML, zone-driven the way real
+      MSAG/E911 coverage is (urban/suburban addresses validate at high rates, rural
+      county-road addresses far less). Columns stay blank when validation fails.
+      Cache-version bump so warm address parquet caches refetch with intersections.
+   **Done:** New `src/synth911gen3/streets.py` module — `normalize_street_name`
+   (directional/street-type tolerant matching), `build_intersections` (nodes shared by
+   two or more distinctly named ways), and `StreetGrid` (KD-tree in local metre
+   coordinates, own street excluded, 500 m cutoff, two nearest crossings). The provider
+   (`_attach_cross_streets`) splits the address pool's bbox into bounded ~20 km query
+   cells (`split_into_query_cells`) and fetches each cell's way geometry sequentially
+   with a short interval — concurrent heavy Overpass queries get rate-limited
+   (HTTP 429/timeouts), so cells stay sequential; `merge_intersections` unions cell
+   tables across border repeats. A run with any failed cell is not cached, so a partial
+   cross-street table never becomes the stored truth. Cross streets ride the existing
+   parquet cache (`_CACHE_VERSION` bumped to 3, invalidating earlier pools' cross-street
+   columns and superseding the interim v2 that could cache a partial table) and the
+   generic `_ADDRESS_FIELDS` plumbing.
+- [x] **P2 — Hundred block for validated addresses.** Derive `hundred_block` from
+      `street_number` (e.g. 4412 → 4400; int64 nullable, entry in `_FIXED_WIDTH_BYTES`).
+      Populated only when the address validates (same flag/probability as cross streets);
+      blank for unvalidated rows, sub-100 house numbers, and alphanumeric house numbers
+      (e.g. "17A"). Pure arithmetic on data the generator already emits — no new data
+      source, no provider changes.
+   **Done:** `_hundred_block_column` in `generators/incidents.py` emits a nullable
+   `Int64` column (MSAG convention: segment named by first address number); NA for
+   unvalidated rows, non-integer and sub-100 house numbers. `address_validated` (bool)
+   is drawn from the new `address_validation.zone_rates` realism section (defaults
+   URBAN 0.85 / SUBURBAN 0.70 / RURAL 0.45 in `constants.py`) *after* every other draw so
+   the seeded stream — and therefore the regression baseline — is unchanged. Covered by
+   `tests/test_cross_streets.py` (geometry, matching, tiling, cache gating, config
+   validation, hundred-block math, determinism) plus updates to `tests/test_addresses.py`
+   and `tests/test_application.py`; documented in USERSGUIDE.md, REALISMGUIDE.md, and
+   `config/example_realism.yaml`.
+- [ ] **Follow-up — Paste the four new columns into the bundled data dictionary.**
+      `docs/incidents_data_dict.yaml` is read-only v2-era material (AGENTS.md forbids
+      editing `docs/`), but `exporters.export_data_dictionary` copies it into `output/`
+      alongside CSV/Parquet exports, so the shipped dictionary currently stops at
+      `unit_number` and does not document the new columns. When `docs/` is next
+      writable, insert these entries immediately after the `unit_number` entry:
+      ```yaml
+      - name: cross_street_1
+        label: First Cross Street
+        type: string
+        description: >
+          Nearest real street crossing the address's own street, resolved from
+          OpenStreetMap street geometry. Populated only when the address
+          validates against the authoritative address database (see
+          address_validated). Empty string when unvalidated or when no crossing
+          lies within about 500 m.
+        examples: ["W 10th St", "N Englewood Rd", ""]
+
+      - name: cross_street_2
+        label: Second Cross Street
+        type: string
+        description: >
+          Second-nearest real street crossing the address's own street,
+          nearest-first after cross_street_1. Same population rules as
+          cross_street_1; empty when only one crossing is in range.
+        examples: ["E 12th St", "NE 55th St", ""]
+
+      - name: address_validated
+        label: Address Validated
+        type: boolean
+        description: >
+          Whether the caller-reported address validated against the
+          authoritative address database. Modern CAD refreshes cross streets
+          and the hundred block only for validated addresses. Drawn per row
+          from the address_validation realism section's per-zone rates.
+        examples: [true, false]
+
+      - name: hundred_block
+        label: Hundred Block
+        type: integer
+        description: >
+          Street-segment block per the MSAG convention: a street segment is
+          named by the first address number it contains, so house number 4412
+          sits on the 4400 block. Populated only for validated addresses with
+          an integer house number of 100 or more; NA otherwise.
+        examples: [4400, 1200, null]
+      ```
+      If `docs/` stays read-only permanently, the longer-term fix is to move the
+      dictionary into `config/` (or generate it from the incident schema) so the
+      bundled copy is maintained alongside the code it describes.
+- [ ] **Follow-up — Re-validate the cross-street fetch live once Overpass recovers.**
+      The tiled geometry path was exercised end-to-end against the live API earlier
+      in development (single-bbox query: 893/954 addresses resolved), and the tiled
+      + sequential-fetch variant is unit-tested, but the final code never got a live
+      run: both public endpoints (`overpass-api.de`, `overpass.kumi.systems`) began
+      refusing connections from this machine (TCP-level `ECONNREFUSED` /
+      read timeouts) partway through validation. Re-run a cold-cache generation for
+      "Kansas City, MO" when the API is reachable and confirm: 9 cells are queried,
+      no cell-failure warnings appear, ~90%+ of the pool carries cross streets, and
+      the parquet cache is written (complete-only caching). Failure modes to watch
+      for are already covered: per-cell warnings, blank cross streets on the
+      affected addresses, and no cache write.
+
+
 ### Integration / Ecosystem
 - [x] **P2 — Parquet metadata embedding.** Embed generation metadata (seed, config hash, schema version) directly in Parquet file metadata for self-documenting files.
   Added `DATA_SCHEMA_VERSION` (constants.py), `Manifest.schema_version` + `Manifest.to_kv_metadata()`

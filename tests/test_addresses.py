@@ -257,7 +257,10 @@ def test_load_addresses_uses_real_addresses(tmp_path: Path) -> None:
     ]
 
     def runner(query: str) -> overpy.Result:
-        assert "addr:housenumber" in query
+        if "addr:housenumber" not in query:
+            # Second query of a fetch: cross-street way geometry. No geometry
+            # here, so the addresses keep blank cross streets.
+            return _result_from_xml("")
         elements = "".join(
             _way(i, **{"addr:housenumber": str(i * 10), "addr:street": f"Street {i}"})
             for i in range(1, 11)
@@ -347,7 +350,9 @@ def test_load_addresses_caches_results(tmp_path: Path) -> None:
     second = provider.load_addresses("Kansas City, MO")
 
     assert first == second
-    assert calls["count"] == 1
+    # One address query plus one cross-street geometry query on the first
+    # fetch; the second load is served entirely from cache.
+    assert calls["count"] == 2
 
 
 def _kansas_provider(tmp_path: Path, runner, query_runner_name: str = "query_runner", **kwargs):
@@ -452,7 +457,9 @@ def test_load_addresses_recovers_from_corrupt_cache(tmp_path: Path) -> None:
 
     addresses = provider.load_addresses("Kansas City, MO")
 
-    assert calls["count"] == 1
+    # One address query plus one cross-street geometry query after the corrupt
+    # cache forced a refetch.
+    assert calls["count"] == 2
     assert len(addresses) == 5
     frame = pd.read_parquet(cache_path)
     assert len(frame) == 5
@@ -470,7 +477,9 @@ def test_load_addresses_refetches_when_cached_frame_below_min(tmp_path: Path) ->
 
     addresses = provider.load_addresses("Kansas City, MO")
 
-    assert calls["count"] == 1
+    # One address query plus one cross-street geometry query after the
+    # too-small cache forced a refetch.
+    assert calls["count"] == 2
     assert len(addresses) == 5
 
 
@@ -943,6 +952,10 @@ class TestCacheBackwardCompatibility:
         assert addresses[0].unit_number == ""
         assert addresses[1].commonplace_name == ""
         assert addresses[1].unit_number == ""
+        assert addresses[0].cross_street_1 == ""
+        assert addresses[0].cross_street_2 == ""
+        assert addresses[1].cross_street_1 == ""
+        assert addresses[1].cross_street_2 == ""
 
     def test_write_cache_includes_new_columns(self, tmp_path: Path) -> None:
         """_write_cache should persist commonplace_name and unit_number."""
@@ -956,6 +969,8 @@ class TestCacheBackwardCompatibility:
                 "Missouri",
                 commonplace_name="T-Mobile Center",
                 unit_number="Suite 100",
+                cross_street_1="W 14th St",
+                cross_street_2="Grand Blvd",
             ),
             Address(
                 "527 S Evanston Ave",
@@ -968,8 +983,12 @@ class TestCacheBackwardCompatibility:
         frame = pd.read_parquet(path)
         assert "commonplace_name" in frame.columns
         assert "unit_number" in frame.columns
+        assert "cross_street_1" in frame.columns
+        assert "cross_street_2" in frame.columns
         assert frame["commonplace_name"].tolist() == ["T-Mobile Center", ""]
         assert frame["unit_number"].tolist() == ["Suite 100", ""]
+        assert frame["cross_street_1"].tolist() == ["W 14th St", ""]
+        assert frame["cross_street_2"].tolist() == ["Grand Blvd", ""]
 
 
 # ---------------------------------------------------------------------------
