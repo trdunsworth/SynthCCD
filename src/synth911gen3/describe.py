@@ -27,11 +27,11 @@ SCHEMA_ROWS = 1
 SAMPLE_ROWS = 5
 
 _STATIC_ADDRESSES = [
-    Address("101 N Main St", "Kansas City", "Missouri"),
-    Address("204 E 12th St", "Kansas City", "Missouri"),
-    Address("55 W 39th St", "Kansas City", "Missouri"),
-    Address("777 S Broadway Blvd", "Kansas City", "Missouri"),
-    Address("890 N Oak Trafficway", "Kansas City", "Missouri"),
+    Address("101 N Main St", "Kansas City", "Missouri", cross_street="E 1st St", address_validated="Y"),
+    Address("204 E 12th St", "Kansas City", "Missouri", cross_street="Oak St", address_validated="Y"),
+    Address("55 W 39th St", "Kansas City", "Missouri", cross_street="Broadway Blvd", address_validated="Y"),
+    Address("777 S Broadway Blvd", "Kansas City", "Missouri", cross_street="W 39th St", address_validated="Y"),
+    Address("890 N Oak Trafficway", "Kansas City", "Missouri", cross_street="N Main St", address_validated="Y"),
 ]
 
 

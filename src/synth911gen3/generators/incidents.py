@@ -28,6 +28,7 @@ import pandas as pd
 from synth911gen3.addresses import AddressProvider
 from synth911gen3.config import GenerationRequest, IdFormat
 from synth911gen3.constants import (
+    ADDRESS_VALIDATION_PENALTIES,
     DEFAULT_COUNTRY,
     DEFAULT_MAX_MEMORY_BYTES,
     DEFAULT_PROBLEM_PHONE_MULTIPLIER,
@@ -66,6 +67,8 @@ _ADDRESS_FIELDS = (
     "zone",
     "commonplace_name",
     "unit_number",
+    "cross_street",
+    "address_validated",
 )
 # Lognormal shape per lifecycle column. Single source of truth: the draws below
 # use it, and tests derive each column's sampling standard error from it, so the
@@ -1012,6 +1015,56 @@ class IncidentGenerator:
             dtype=float,
         )
         travel_seconds = (travel_seconds * zone_multipliers).astype(np.int64)
+
+        # Apply address validation time penalties
+        # Unvalidated addresses ('N') take longer for interview, dispatch, and travel
+        address_validated = address_columns["address_validated"]
+        unvalidated_mask = np.asarray([v == "N" for v in address_validated])
+        if unvalidated_mask.any():
+            # Read penalties from realism config (with defaults from constants)
+            interview_mean = realism.address_validation_penalties.get(
+                "interview_mean", ADDRESS_VALIDATION_PENALTIES["interview_mean"]
+            )
+            interview_sigma = realism.address_validation_penalties.get(
+                "interview_sigma", ADDRESS_VALIDATION_PENALTIES["interview_sigma"]
+            )
+            dispatch_mean = realism.address_validation_penalties.get(
+                "dispatch_mean", ADDRESS_VALIDATION_PENALTIES["dispatch_mean"]
+            )
+            dispatch_sigma = realism.address_validation_penalties.get(
+                "dispatch_sigma", ADDRESS_VALIDATION_PENALTIES["dispatch_sigma"]
+            )
+            travel_mean = realism.address_validation_penalties.get(
+                "travel_mean", ADDRESS_VALIDATION_PENALTIES["travel_mean"]
+            )
+            travel_sigma = realism.address_validation_penalties.get(
+                "travel_sigma", ADDRESS_VALIDATION_PENALTIES["travel_sigma"]
+            )
+
+            # Interview penalty: calltaker clarifies address (~10-30s range)
+            interview_penalty = _lognormal_seconds(
+                rng, interview_mean, sigma=interview_sigma, size=int(unvalidated_mask.sum()), maximum=60
+            )
+            interview_seconds[unvalidated_mask] = (
+                interview_seconds[unvalidated_mask] + interview_penalty
+            ).astype(np.int64)
+
+            # Dispatch penalty: dispatcher verifies/overrides address (~9-27s range)
+            dispatch_penalty = _lognormal_seconds(
+                rng, dispatch_mean, sigma=dispatch_sigma, size=int(unvalidated_mask.sum()), maximum=60
+            )
+            dispatch_queue_seconds[unvalidated_mask] = (
+                dispatch_queue_seconds[unvalidated_mask] + dispatch_penalty
+            ).astype(np.int64)
+
+            # Travel penalty: unit locates unvalidated address (~8-22s range)
+            travel_penalty = _lognormal_seconds(
+                rng, travel_mean, sigma=travel_sigma, size=int(unvalidated_mask.sum()), maximum=45
+            )
+            travel_seconds[unvalidated_mask] = (
+                travel_seconds[unvalidated_mask] + travel_penalty
+            ).astype(np.int64)
+
         on_scene_seconds = _lognormal_seconds(
             rng,
             means["scene_mean"],
@@ -1152,6 +1205,8 @@ class IncidentGenerator:
             "zone": address_columns["zone"],
             "commonplace_name": address_columns["commonplace_name"],
             "unit_number": address_columns["unit_number"],
+            "cross_street": address_columns["cross_street"],
+            "address_validated": address_columns["address_validated"],
             "location": location,
             "call_start_time": event_times,
             "hour": hour,

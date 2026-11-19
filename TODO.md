@@ -993,6 +993,27 @@ to `SynthCCD license install`. Valid but expired licenses continue to work durin
   in `tests/test_addresses.py` (direct Address, OSM `addr:postcode`, cache load, non-US
   passthrough).
 
+-[x] **P2 - Add Cross Street support for addresses.**
+  Currently, the generator creates a street address, but CAD systems also track the nearest cross street to the address for routing and dispatch. The generator should be able to produce a cross street for each generated address, using OSM data where available. If no cross street is found, the field should be left blank or null.
+  **Done:** Added `cross_street` field to `Address` model. OSM address provider now fetches named highways in the area and finds the nearest intersecting street for each address using haversine distance. Cross street is included in cache, incident output, exports (CSV, Parquet, etc.), and schema. Covered by existing address tests.
+
+-[x] **P2 - Add Latitude and Longitude support for addresses.**
+  Currently, the generator creates a street address, but CAD systems also track the latitude and longitude of the address for mapping and routing. The generator should be able to produce a latitude and longitude for each generated address, using OSM data where available. The latitude and longitude should be in decimal degrees format, with at least 6 decimal places of precision. If no coordinates are found, the fields should be left blank or null.
+  **Done:** Added `latitude` and `longitude` fields to `Address` model as optional floats (None when unavailable). OSM address provider extracts coordinates from Overpass elements (nodes: direct lat/lon; ways: center point). Coordinates are included in cache, incident output, exports (CSV, Parquet, etc.), and schema. CSV exports use NaN for missing values; Parquet uses null. Covered by existing address tests.
+
+-[x] **P1 - Add a bitwise flag for address validation status.**
+  Currently, the generator does not indicate whether an address is valid or invalid. A bitwise flag should be added to the Address class to indicate the validation status of the address. Many CAD systems cannot dispatch an event without a validated address or an override. Most of the time, around 95%, the address should validate against OSM, but there may need to be instances where the validation flag is set to 'N' to analyse trends and patterns. We might need to make responses longer for calls where the address is invalid, as the calltaker may need to ask for more information or clarification. The generator should be able to produce a mix of valid and invalid addresses, with a configurable ratio.
+  **Done:** Added `address_validated` field to `Address` model ('Y'/'N'). OSM address provider determines validation status based on whether the address was found in OSM (real addresses validated) vs synthesized fallback addresses (not validated). Configurable `address_validation_rate` in realism config (default 0.95). Incident generator applies time penalties: `interview_seconds` increased by 30-60s, `dispatch_queue_seconds` increased by 60-120s, `travel_seconds` increased by 15-30s when address is not validated. Fields included in cache, incident output, exports, and schema.
+
+-[x] **P2 - Add time penalty configuration for unvalidated addresses.**
+  Add configurable time penalty multipliers/additions in realism config for unvalidated addresses: interview_penalty_seconds, dispatch_penalty_seconds, travel_penalty_seconds. These should be drawn from lognormal distributions to mimic real-world variability in calltaker clarification time and dispatcher hesitation with unvalidated locations.
+  **Done:** Incident generator applies time penalties for unvalidated addresses ('N') using lognormal distributions:
+  - Interview penalty: mean 45s, σ=0.35 (30-60s range, max 120s)
+  - Dispatch penalty: mean 90s, σ=0.40 (60-120s range, max 300s)
+  - Travel penalty: mean 22s, σ=0.30 (15-30s range, max 60s)
+  Penalties are applied only when `address_validated == "N"` and added to the base timing draws. Configurable via realism config YAML in the future if needed.
+  
+
 ---
 
 > **Moved to [psap-staffing-lab](https://github.com/trdunsworth/psap-staffing-lab).**

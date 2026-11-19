@@ -337,6 +337,26 @@ priority-based `phone_mean`.
 | Noise Complaint | 1.0 | Brief informational call |
 | Traffic Stop | 1.0 | Officer-initiated, minimal caller interaction |
 
+### Address Validation Time Penalties
+
+When an address is not validated by the calltaker (`address_validated = "N"`), the generator adds time penalties to the incident's lifecycle intervals. This reflects real-world behavior where unvalidated addresses require calltaker clarification, dispatcher verification/override, and unit location effort.
+
+```yaml
+address_validation_penalties:
+  interview_mean: 20.0      # Mean seconds for calltaker address clarification
+  interview_sigma: 0.30     # Lognormal shape parameter
+  dispatch_mean: 18.0       # Mean seconds for dispatcher verification/override
+  dispatch_sigma: 0.35      # Lognormal shape parameter
+  travel_mean: 15.0         # Mean seconds for unit location effort
+  travel_sigma: 0.25        # Lognormal shape parameter
+```
+
+- **Interview penalty**: Calltaker re-asks/clarifies address (~10-30s range, lognormal σ=0.30)
+- **Dispatch penalty**: Dispatcher verifies address via floor/overrides (~9-27s range, lognormal σ=0.35)
+- **Travel penalty**: Unit takes longer to locate unvalidated address (~8-22s range, lognormal σ=0.25)
+
+Defaults are based on typical PSAP operations: real OSM addresses are marked validated (`"Y"`); synthesized fallback addresses are marked unvalidated (`"N"`). The validation status is included in the output as the `address_validated` column.
+
 ### Shift Structures
 
 Every incident is tagged with the shift on duty at its call time (`shift`,

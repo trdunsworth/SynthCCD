@@ -193,6 +193,18 @@ class Address:
     ``"Suite 15"`` or ``"Unit C"`` from ``addr:flats`` / ``addr:unit`` /
     ``addr:suite`` / ``addr:door`` / ``addr:floor`` tags.
 
+    ``cross_street`` holds the name of the nearest intersecting street
+    (cross street) when available from OSM data. This is determined by
+    finding highways that intersect the address's street near the address
+    location. Empty string when no cross street is found.
+
+    ``address_validated`` indicates whether the address was verified by the
+    calltaker ('Y') or overridden/entered manually ('N'). Approximately 95%
+    of addresses from OSM are validated; synthesized fallback addresses are
+    typically not validated. Unvalidated addresses incur time penalties on
+    interview, dispatch, and travel times to reflect real-world calltaker
+    clarification and dispatcher hesitation.
+
     When only the free-form ``street_address`` is supplied, the
     components are derived automatically via :func:`parse_address_parts`.
     """
@@ -206,11 +218,13 @@ class Address:
     prefix_directional: str = ""
     postfix_directional: str = ""
     postal_code: str = ""
-    latitude: float = 0.0
-    longitude: float = 0.0
+    latitude: float | None = None
+    longitude: float | None = None
     zone: str = "URBAN"
     commonplace_name: str = ""
     unit_number: str = ""
+    cross_street: str = ""
+    address_validated: str = "Y"
 
     def __post_init__(self) -> None:
         if not self.street_name:

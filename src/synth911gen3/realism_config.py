@@ -25,6 +25,9 @@ import yaml
 
 from .calibration import lognormal_cdf
 from .constants import (
+    ADDRESS_VALIDATION_PENALTIES as DEFAULT_ADDRESS_VALIDATION_PENALTIES,
+)
+from .constants import (
     AGENCY_WEIGHTS as DEFAULT_AGENCY_WEIGHTS,
 )
 from .constants import (
@@ -130,6 +133,10 @@ class RealismConfig:
     problem_phone_multipliers: dict[str, float] = field(default_factory=dict)
     dispatcher_disciplines: dict[str, Any] = field(default_factory=dict)
     answer_time_targets: dict[str, list[tuple[float, float]]] = field(default_factory=dict)
+    # Address validation time penalties (applied when address_validated == "N")
+    # Keys: interview_mean, interview_sigma, dispatch_mean, dispatch_sigma,
+    # travel_mean, travel_sigma (all mean seconds / lognormal sigma)
+    address_validation_penalties: dict[str, float] = field(default_factory=dict)
     # Population-based volume calibration: ``emergency_tiers`` is a list of
     # ``[exclusive_upper_bound, calls_per_1000_per_year]`` pairs (a null bound
     # means infinity); ``incidents_per_1000_yearly`` drives incident-row
@@ -183,6 +190,8 @@ class RealismConfig:
                 ],
                 "incidents_per_1000_yearly": float(DEFAULT_INCIDENTS_PER_1000),
             }
+        if not self.address_validation_penalties:
+            self.address_validation_penalties = DEFAULT_ADDRESS_VALIDATION_PENALTIES.copy()
         if not self.shift_config.shifts and not self.shift_config.rotation:
             self.shift_config = get_default_shift_config()
 
@@ -349,6 +358,20 @@ class RealismConfig:
             config.dispatcher_disciplines = {
                 str(k): v for k, v in section.items()
             }
+
+        if "address_validation_penalties" in data:
+            section = data["address_validation_penalties"]
+            if not isinstance(section, dict):
+                raise ValidationError("address_validation_penalties must be a mapping")
+            # Copy defaults and update with provided values
+            config.address_validation_penalties = dict(DEFAULT_ADDRESS_VALIDATION_PENALTIES)
+            for key in (
+                "interview_mean", "interview_sigma",
+                "dispatch_mean", "dispatch_sigma",
+                "travel_mean", "travel_sigma",
+            ):
+                if key in section:
+                    config.address_validation_penalties[key] = float(section[key])
 
         if "population_rates" in data:
             section = data["population_rates"]
@@ -709,6 +732,7 @@ class RealismConfig:
                 line: [[t, p] for t, p in points]
                 for line, points in self.answer_time_targets.items()
             },
+            "address_validation_penalties": self.address_validation_penalties,
         }
         with path.open("w", encoding="utf-8") as f:
             yaml.safe_dump(data, f, sort_keys=False, default_flow_style=None)

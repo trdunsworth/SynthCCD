@@ -646,6 +646,19 @@ ZONE_TRAVEL_MULTIPLIERS = {
     "RURAL": 1.5,
 }
 
+# Address validation time penalties (applied when address_validated == "N")
+# These are lognormal mean seconds added to base timings for unvalidated addresses
+# Interview: calltaker clarifies address; Dispatch: floor verification/manual override;
+# Travel: unit locates unvalidated address
+ADDRESS_VALIDATION_PENALTIES: dict[str, float] = {
+    "interview_mean": 20.0,    # ~10-30s range, sigma=0.30
+    "interview_sigma": 0.30,
+    "dispatch_mean": 18.0,     # ~9-27s range, sigma=0.35
+    "dispatch_sigma": 0.35,
+    "travel_mean": 15.0,       # ~8-22s range, sigma=0.25
+    "travel_sigma": 0.25,
+}
+
 # Problem-type phone duration multipliers
 # Applied to base phone_mean from TIME_PROFILES based on problem nature
 # Values > 1.0 increase call duration, < 1.0 decrease call duration

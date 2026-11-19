@@ -1070,7 +1070,13 @@ README for the area-to-file map and source citations.
 
 Addresses are fetched from OpenStreetMap using the `area_query` parameter. The query accepts **any valid location query** that OpenStreetMap's Nominatim API supports, which is geocoded to a bounding box. Real street addresses with `addr:housenumber` + `addr:street` tags are then pulled from that bounding box via the Overpass API (overpy). Where an area lacks mapped house numbers, the generator falls back to real named streets with synthesized house numbers so output is still produced.
 
-Each address is emitted as individual components (`prefix_directional`, `street_number`, `street_name`, `street_type`, `postfix_directional`, `postal_code`) in addition to the combined `street_address`. Directionals are normalized to abbreviations (e.g., `NORTH` → `N`); a component is left empty when it cannot be determined from the source data. US `postal_code` values are normalized to the 5-digit ZIP: OpenStreetMap sometimes stores a 9-digit ZIP+4 (e.g. `64110-1234`), which is truncated to `64110`. Non-US postal codes (e.g. Canadian `L4T 2D6`, UK `SW1A 2AA`) are passed through unchanged.
+Each address is emitted as individual components (`prefix_directional`, `street_number`, `street_name`, `street_type`, `postfix_directional`, `postal_code`, `cross_street`, `latitude`, `longitude`) in addition to the combined `street_address`. Directionals are normalized to abbreviations (e.g., `NORTH` → `N`); a component is left empty when it cannot be determined from the source data. US `postal_code` values are normalized to the 5-digit ZIP: OpenStreetMap sometimes stores a 9-digit ZIP+4 (e.g. `64110-1234`), which is truncated to `64110`. Non-US postal codes (e.g. Canadian `L4T 2D6`, UK `SW1A 2AA`) are passed through unchanged.
+
+The `cross_street` field contains the name of the nearest intersecting street (cross street) when available from OSM data, determined by finding highways that intersect the address's street near the address location. The field is empty when no cross street is found.
+
+The `latitude` and `longitude` fields contain the geographic coordinates in decimal degrees (6+ decimal places of precision) when available from OSM data. These fields are empty when coordinates are not available (e.g., for synthesized fallback addresses).
+
+The `address_validated` field indicates whether the address was verified by the calltaker ('Y') or overridden/entered manually ('N'). Real addresses fetched from OSM are marked as validated ('Y'); synthesized fallback addresses (used when OSM lacks house numbers) are marked as not validated ('N'). The validation rate is configurable via the `address_validation_rate` realism config parameter (default 0.95). Unvalidated addresses incur time penalties on interview, dispatch, and travel times to reflect real-world calltaker clarification and dispatcher hesitation.
 
 Addresses that correspond to a business or landmark carry a `commonplace_name` (e.g. `"T-Mobile Center"`, `"Union Station"`) extracted from the OSM `name` tag on elements with `amenity`, `shop`, `tourism`, or `historic` tags, or on named apartment buildings. The field is empty for ordinary residential addresses. Sub-address components such as suite or apartment numbers are captured in `unit_number` (e.g. `"Suite 15"`, `"Unit C"`) from `addr:flats` / `addr:unit` / `addr:suite` / `addr:door` / `addr:floor` OSM tags.
 
@@ -1799,8 +1805,10 @@ uv run SynthCCD generate --rows 5000000 --format parquet --max-memory-bytes 1073
 | `city` | str | City name |
 | `state` | str | State/province |
 | `postal_code` | str | ZIP/postal code from OSM when available. US values are normalized to the 5-digit ZIP (ZIP+4 truncates to `64110`); non-US formats pass through unchanged |
-| `latitude` | float | Latitude from OSM address node; `0.0` when no coordinates available (synthesized fallback addresses) |
-| `longitude` | float | Longitude from OSM address node; `0.0` when no coordinates available |
+| `cross_street` | str | Nearest intersecting street from OSM; empty when no cross street found |
+| `latitude` | float | Latitude from OSM address node in decimal degrees (6+ decimal places); empty when no coordinates available (synthesized fallback addresses) |
+| `longitude` | float | Longitude from OSM address node in decimal degrees (6+ decimal places); empty when no coordinates available |
+| `address_validated` | str | Address validation status: 'Y' = verified by calltaker (OSM addresses), 'N' = overridden/manual (synthesized fallback); unvalidated addresses incur time penalties on interview/dispatch/travel |
 | `zone` | str | Geographic zone classification: URBAN, SUBURBAN, or RURAL (OSM-based) |
 | `commonplace_name` | str | Business or landmark name from OSM (e.g. `"T-Mobile Center"`, `"Union Station"`); empty for residential addresses |
 | `unit_number` | str | Sub-address component from OSM `addr:flats`/`addr:unit`/`addr:suite`/`addr:door`/`addr:floor` tags (e.g. `"Suite 15"`, `"Unit C"`); empty when not present |

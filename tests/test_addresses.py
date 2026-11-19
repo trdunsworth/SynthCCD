@@ -257,12 +257,14 @@ def test_load_addresses_uses_real_addresses(tmp_path: Path) -> None:
     ]
 
     def runner(query: str) -> overpy.Result:
-        assert "addr:housenumber" in query
-        elements = "".join(
-            _way(i, **{"addr:housenumber": str(i * 10), "addr:street": f"Street {i}"})
-            for i in range(1, 11)
-        )
-        return _result_from_xml(elements)
+        if "addr:housenumber" in query:
+            elements = "".join(
+                _way(i, **{"addr:housenumber": str(i * 10), "addr:street": f"Street {i}"})
+                for i in range(1, 11)
+            )
+            return _result_from_xml(elements)
+        # Named streets query for cross street lookup
+        return _result_from_xml("")
 
     provider = OpenStreetMapAddressProvider(
         client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
@@ -332,11 +334,14 @@ def test_load_addresses_caches_results(tmp_path: Path) -> None:
 
     def runner(query: str) -> overpy.Result:
         calls["count"] += 1
-        elements = "".join(
-            _way(i, **{"addr:housenumber": str(i * 10), "addr:street": f"Street {i}"})
-            for i in range(1, 6)
-        )
-        return _result_from_xml(elements)
+        if "addr:housenumber" in query:
+            elements = "".join(
+                _way(i, **{"addr:housenumber": str(i * 10), "addr:street": f"Street {i}"})
+                for i in range(1, 6)
+            )
+            return _result_from_xml(elements)
+        # Named streets query for cross street lookup
+        return _result_from_xml("")
 
     provider = OpenStreetMapAddressProvider(
         client=_FakeClient(search_payload=search_payload),  # type: ignore[arg-type]
@@ -347,7 +352,8 @@ def test_load_addresses_caches_results(tmp_path: Path) -> None:
     second = provider.load_addresses("Kansas City, MO")
 
     assert first == second
-    assert calls["count"] == 1
+    # First load: 2 queries (real addresses + area streets), second load: 0 (cached)
+    assert calls["count"] == 2
 
 
 def _kansas_provider(tmp_path: Path, runner, query_runner_name: str = "query_runner", **kwargs):
@@ -443,7 +449,10 @@ def test_load_addresses_recovers_from_corrupt_cache(tmp_path: Path) -> None:
 
     def runner(query: str) -> overpy.Result:
         calls["count"] += 1
-        return _five_ways()
+        if "addr:housenumber" in query:
+            return _five_ways()
+        # Named streets query for cross street lookup
+        return _result_from_xml("")
 
     provider = _kansas_provider(tmp_path, runner)
     cache_path = provider._cache_path("Kansas City, MO")
@@ -452,7 +461,7 @@ def test_load_addresses_recovers_from_corrupt_cache(tmp_path: Path) -> None:
 
     addresses = provider.load_addresses("Kansas City, MO")
 
-    assert calls["count"] == 1
+    assert calls["count"] == 2
     assert len(addresses) == 5
     frame = pd.read_parquet(cache_path)
     assert len(frame) == 5
@@ -463,14 +472,17 @@ def test_load_addresses_refetches_when_cached_frame_below_min(tmp_path: Path) ->
 
     def runner(query: str) -> overpy.Result:
         calls["count"] += 1
-        return _five_ways()
+        if "addr:housenumber" in query:
+            return _five_ways()
+        # Named streets query for cross street lookup
+        return _result_from_xml("")
 
     provider = _kansas_provider(tmp_path, runner)
     _write_cache(provider, "Kansas City, MO", rows=1)
 
     addresses = provider.load_addresses("Kansas City, MO")
 
-    assert calls["count"] == 1
+    assert calls["count"] == 2
     assert len(addresses) == 5
 
 

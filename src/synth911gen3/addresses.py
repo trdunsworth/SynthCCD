@@ -412,8 +412,8 @@ class OpenStreetMapAddressProvider:
         if len(frame) < self._min_addresses:
             return None
         postal_codes = frame["postal_code"] if "postal_code" in frame.columns else [""] * len(frame)
-        latitudes = frame["latitude"] if "latitude" in frame.columns else [0.0] * len(frame)
-        longitudes = frame["longitude"] if "longitude" in frame.columns else [0.0] * len(frame)
+        latitudes = frame["latitude"] if "latitude" in frame.columns else [None] * len(frame)
+        longitudes = frame["longitude"] if "longitude" in frame.columns else [None] * len(frame)
         zones = frame["zone"] if "zone" in frame.columns else ["URBAN"] * len(frame)
         commonplace_names = (
             frame["commonplace_name"] if "commonplace_name" in frame.columns else [""] * len(frame)
@@ -421,19 +421,27 @@ class OpenStreetMapAddressProvider:
         unit_numbers = (
             frame["unit_number"] if "unit_number" in frame.columns else [""] * len(frame)
         )
+        cross_streets = (
+            frame["cross_street"] if "cross_street" in frame.columns else [""] * len(frame)
+        )
+        address_validated = (
+            frame["address_validated"] if "address_validated" in frame.columns else ["Y"] * len(frame)
+        )
         return [
             Address(
                 str(street),
                 str(city),
                 str(state),
                 postal_code=str(postal) if pd.notna(postal) else "",
-                latitude=float(lat) if pd.notna(lat) else 0.0,
-                longitude=float(lon) if pd.notna(lon) else 0.0,
+                latitude=float(lat) if pd.notna(lat) else None,
+                longitude=float(lon) if pd.notna(lon) else None,
                 zone=str(zone) if pd.notna(zone) else "URBAN",
                 commonplace_name=str(poi) if pd.notna(poi) else "",
                 unit_number=str(unit) if pd.notna(unit) else "",
+                cross_street=str(cross) if pd.notna(cross) else "",
+                address_validated=str(validated) if pd.notna(validated) else "Y",
             )
-            for street, city, state, postal, lat, lon, zone, poi, unit in zip(
+            for street, city, state, postal, lat, lon, zone, poi, unit, cross, validated in zip(
                 frame["street_address"],
                 frame["city"],
                 frame["state"],
@@ -443,6 +451,8 @@ class OpenStreetMapAddressProvider:
                 zones,
                 commonplace_names,
                 unit_numbers,
+                cross_streets,
+                address_validated,
             )
         ]
 
@@ -464,6 +474,8 @@ class OpenStreetMapAddressProvider:
                 "zone": [address.zone for address in addresses],
                 "commonplace_name": [address.commonplace_name for address in addresses],
                 "unit_number": [address.unit_number for address in addresses],
+                "cross_street": [address.cross_street for address in addresses],
+                "address_validated": [address.address_validated for address in addresses],
             }
         )
         self._cache_dir.mkdir(parents=True, exist_ok=True)
@@ -645,7 +657,21 @@ class OpenStreetMapAddressProvider:
             raise
         except AddressLookupError:
             return []
-        return self._parse_elements(result, area.city, area.state)
+
+        # Also fetch named highways in the area for cross street lookup
+        streets = self._fetch_area_streets(area)
+        return self._parse_elements(result, area.city, area.state, streets)
+
+    def _fetch_area_streets(self, area: _GeocodedArea) -> list[tuple[str, float, float]]:
+        """Fetch all named highways in the area for cross street lookup."""
+        query = _build_named_street_query(
+            area.south, area.west, area.north, area.east, self._max_addresses * 2
+        )
+        try:
+            result = self._query_runner(query)
+        except (AddressConnectionError, AddressLookupError):
+            return []
+        return self._named_streets(result)
 
     @staticmethod
     def _extract_commonplace_name(tags: dict[str, str]) -> str:
@@ -737,15 +763,33 @@ class OpenStreetMapAddressProvider:
             if self._discovered_cities
             else None
         )
+        # Also fetch all area streets for cross street lookup
+        area_streets = self._fetch_area_streets(area)
         return self._synthesize_addresses(
             street_names, area.city, area.state, self._max_addresses,
             candidate_cities=candidate_cities,
+            area_streets=area_streets,
         )
 
     def _parse_elements(
-        self, result: overpy.Result, fallback_city: str, fallback_state: str
+        self,
+        result: overpy.Result,
+        fallback_city: str,
+        fallback_state: str,
+        area_streets: list[tuple[str, float, float]] | None = None,
     ) -> list[Address]:
-        """Convert Overpass ways/nodes with address tags into deduplicated Addresses."""
+        """Convert Overpass ways/nodes with address tags into deduplicated Addresses.
+
+        If *area_streets* is provided, finds the nearest cross street for each address
+        by looking for intersecting highways near the address location.
+        """
+        # Build a lookup of streets by name for cross street finding
+        streets_by_name: dict[str, list[tuple[float, float]]] = {}
+        if area_streets:
+            for name, lat, lon in area_streets:
+                if lat is not None and lon is not None:
+                    streets_by_name.setdefault(name, []).append((lat, lon))
+
         addresses: list[Address] = []
         for element in [*result.ways, *result.nodes]:
             tags = element.tags or {}
@@ -768,11 +812,15 @@ class OpenStreetMapAddressProvider:
             if lat is None:
                 lat = getattr(element, "center_lat", None)
                 lon = getattr(element, "center_lon", None)
-            lat_val = float(lat) if lat is not None else 0.0
-            lon_val = float(lon) if lon is not None else 0.0
-            zone = self._classify_zone(tags, lat_val, lon_val)
+            lat_val = float(lat) if lat is not None else None
+            lon_val = float(lon) if lon is not None else None
+            zone = self._classify_zone(tags, lat_val or 0.0, lon_val or 0.0)
             commonplace_name = self._extract_commonplace_name(tags)
             unit_number = self._extract_unit_number(tags)
+
+            # Find cross street
+            cross_street = self._find_cross_street(street, lat_val or 0.0, lon_val or 0.0, streets_by_name)
+
             addresses.append(
                 Address(
                     f"{housenumber} {street}".strip(),
@@ -785,18 +833,68 @@ class OpenStreetMapAddressProvider:
                     zone=zone,
                     commonplace_name=commonplace_name,
                     unit_number=unit_number,
+                    cross_street=cross_street,
+                    address_validated="Y",  # Real OSM addresses are validated
                 )
             )
         return self._dedupe(addresses)
 
+    def _find_cross_street(
+        self,
+        address_street: str,
+        lat: float | None,
+        lon: float | None,
+        streets_by_name: dict[str, list[tuple[float, float]]],
+        max_distance_km: float = 0.5,
+    ) -> str:
+        """Find the nearest cross street to an address.
+
+        Looks for streets (highways) that intersect or are near the address location.
+        Returns the name of the nearest cross street, or empty string if none found
+        within *max_distance_km* or if coordinates are not available.
+        """
+        if not streets_by_name or lat is None or lon is None:
+            return ""
+
+        import math
+
+        def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+            """Calculate great-circle distance between two points in kilometers."""
+            R = 6371.0  # Earth radius in km
+            phi1 = math.radians(lat1)
+            phi2 = math.radians(lat2)
+            delta_phi = math.radians(lat2 - lat1)
+            delta_lambda = math.radians(lon2 - lon1)
+            a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+            return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        best_street = ""
+        best_distance = max_distance_km
+
+        # Normalize the address street name for comparison
+        address_street_lower = address_street.lower().strip()
+
+        for street_name, coords_list in streets_by_name.items():
+            # Skip the same street
+            if street_name.lower().strip() == address_street_lower:
+                continue
+            for street_lat, street_lon in coords_list:
+                distance = haversine_km(lat, lon, street_lat, street_lon)
+                if distance < best_distance:
+                    best_distance = distance
+                    best_street = street_name
+
+        return best_street
+
     @staticmethod
-    def _named_streets(result: overpy.Result) -> list[tuple[str, float, float]]:
+    def _named_streets(result: overpy.Result) -> list[tuple[str, float | None, float | None]]:
         """Unique (street_name, lat, lon) from named-street query results, in order.
 
         For Way elements the centre coordinates come from ``center_lat`` /
         ``center_lon``; for Nodes they come from ``lat`` / ``lon``.
+        Returns None for lat/lon when coordinates are not available.
         """
-        entries: list[tuple[str, float, float]] = []
+        entries: list[tuple[str, float | None, float | None]] = []
         seen: set[str] = set()
         for way in result.ways:
             name = (way.tags or {}).get("name")
@@ -804,7 +902,7 @@ class OpenStreetMapAddressProvider:
                 lat = getattr(way, "center_lat", None)
                 lon = getattr(way, "center_lon", None)
                 seen.add(name)
-                entries.append((name, float(lat) if lat else 0.0, float(lon) if lon else 0.0))
+                entries.append((name, float(lat) if lat is not None else None, float(lon) if lon is not None else None))
         return entries
 
     @staticmethod
@@ -814,6 +912,7 @@ class OpenStreetMapAddressProvider:
         state: str,
         count: int,
         candidate_cities: list[str] | None = None,
+        area_streets: list[tuple[str, float, float]] | None = None,
     ) -> list[Address]:
         """Build plausible house numbers on the given streets (deterministic by name).
 
@@ -825,9 +924,20 @@ class OpenStreetMapAddressProvider:
         distributed across those city names instead of all receiving the
         same *city* value.  This produces realistic multi-city output for
         county-level areas.
+
+        If *area_streets* is provided, finds the nearest cross street for each
+        synthesized address.
         """
         if not street_names:
             return []
+
+        # Build streets lookup for cross street finding
+        streets_by_name: dict[str, list[tuple[float, float]]] = {}
+        if area_streets:
+            for name, lat, lon in area_streets:
+                if lat != 0.0 or lon != 0.0:
+                    streets_by_name.setdefault(name, []).append((lat, lon))
+
         cities = candidate_cities if candidate_cities else [city]
         addresses: list[Address] = []
         seen: set[tuple[str, str, str]] = set()
@@ -839,13 +949,27 @@ class OpenStreetMapAddressProvider:
                 100 + (int(hashlib.md5(name.encode("utf-8")).hexdigest(), 16) + offset * 97) % 8_900
             )
             assigned_city = cities[len(addresses) % len(cities)]
+
+            # Convert 0.0 to None for missing coordinates
+            lat_val = src_lat if src_lat != 0.0 else None
+            lon_val = src_lon if src_lon != 0.0 else None
+
+            # Find cross street for synthesized address
+            cross_street = ""
+            if streets_by_name and lat_val is not None and lon_val is not None:
+                cross_street = OpenStreetMapAddressProvider._find_cross_street_static(
+                    name, lat_val, lon_val, streets_by_name
+                )
+
             address = Address(
                 f"{number} {name}",
                 assigned_city,
                 state,
                 zone="SUBURBAN",
-                latitude=src_lat,
-                longitude=src_lon,
+                latitude=lat_val,
+                longitude=lon_val,
+                cross_street=cross_street,
+                address_validated="N",  # Synthesized addresses are not validated
             )
             key = (address.street_address, assigned_city, state)
             if key not in seen:
@@ -853,6 +977,48 @@ class OpenStreetMapAddressProvider:
                 addresses.append(address)
             index += 1
         return addresses
+
+    @staticmethod
+    def _find_cross_street_static(
+        address_street: str,
+        lat: float,
+        lon: float,
+        streets_by_name: dict[str, list[tuple[float, float]]],
+        max_distance_km: float = 0.5,
+    ) -> str:
+        """Static version of _find_cross_street for use in static methods."""
+        if not streets_by_name or (lat == 0.0 and lon == 0.0):
+            return ""
+
+        import math
+
+        def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+            """Calculate great-circle distance between two points in kilometers."""
+            R = 6371.0  # Earth radius in km
+            phi1 = math.radians(lat1)
+            phi2 = math.radians(lat2)
+            delta_phi = math.radians(lat2 - lat1)
+            delta_lambda = math.radians(lon2 - lon1)
+            a = math.sin(delta_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+            return 2 * R * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        best_street = ""
+        best_distance = max_distance_km
+
+        # Normalize the address street name for comparison
+        address_street_lower = address_street.lower().strip()
+
+        for street_name, coords_list in streets_by_name.items():
+            # Skip the same street
+            if street_name.lower().strip() == address_street_lower:
+                continue
+            for street_lat, street_lon in coords_list:
+                distance = haversine_km(lat, lon, street_lat, street_lon)
+                if distance < best_distance:
+                    best_distance = distance
+                    best_street = street_name
+
+        return best_street
 
     @staticmethod
     def _dedupe(addresses: list[Address]) -> list[Address]:
