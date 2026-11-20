@@ -11,6 +11,7 @@ manifest.
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 
 import pandas as pd
 
@@ -30,6 +31,53 @@ from .manifest import Manifest
 from .metrics import GENERATION_ROWS
 
 logger = get_logger("app")
+
+
+def _load_hourly_event_counts_from_file(
+    path: str | Path,
+) -> tuple[dict[pd.Timestamp, int], dict[pd.Timestamp, int]]:
+    """Load incidents from a CSV/Parquet file and compute hourly event counts.
+
+    Returns a tuple of (hourly_created_counts, hourly_closed_counts) where
+    each dict maps hour timestamps to event counts.
+    """
+    import pandas as pd
+
+    path = Path(path)
+    if path.suffix.lower() == ".parquet":
+        df = pd.read_parquet(path)
+    else:
+        # Default to CSV
+        df = pd.read_csv(path)
+
+    # Ensure required columns exist
+    required_cols = {"call_start_time", "time_call_closed"}
+    missing = required_cols - set(df.columns)
+    if missing:
+        raise ValueError(f"Incidents file missing required columns: {missing}")
+
+    # Parse timestamps
+    df["call_start_time"] = pd.to_datetime(df["call_start_time"])
+    df["time_call_closed"] = pd.to_datetime(df["time_call_closed"])
+
+    # Bin by hour
+    created_hours = df["call_start_time"].dt.floor("h")
+    closed_hours = df["time_call_closed"].dt.floor("h")
+
+    hourly_created = created_hours.value_counts().to_dict()
+    hourly_closed = closed_hours.value_counts().to_dict()
+
+    # Convert keys to Timestamps for consistency
+    hourly_created = {pd.Timestamp(k): int(v) for k, v in hourly_created.items()}
+    hourly_closed = {pd.Timestamp(k): int(v) for k, v in hourly_closed.items()}
+
+    logger.info(
+        "Loaded %d incidents from file: %d unique created hours, %d unique closed hours",
+        len(df),
+        len(hourly_created),
+        len(hourly_closed),
+    )
+    return hourly_created, hourly_closed
 
 
 class Synth911Application:
@@ -107,7 +155,17 @@ class Synth911Application:
         incidents = None
         hourly_call_counts = None
         hourly_event_counts: dict[pd.Timestamp, int] | None = None
+        hourly_closed_counts: dict[pd.Timestamp, int] | None = None
         streamed_artifacts: dict[str, object] = {}
+
+        # Load hourly event counts from external incidents file if provided
+        if (
+            request.incidents_input is not None
+            and request.include_event_counts
+            and request.dataset in (DatasetKind.PHONE, DatasetKind.ALL)
+        ):
+            logger.info("Loading hourly event counts from %s", request.incidents_input)
+            hourly_event_counts, hourly_closed_counts = _load_hourly_event_counts_from_file(request.incidents_input)
 
         if request.dataset in (DatasetKind.INCIDENTS, DatasetKind.ALL):
             logger.info("Building incident dataset (%d rows)", request.rows)
@@ -134,15 +192,22 @@ class Synth911Application:
                     # Accumulate event counts per hour when requested, then
                     # chain all chunks (including the first) for export.
                     hourly_event_counts: dict[pd.Timestamp, int] | None = None
+                    hourly_closed_counts: dict[pd.Timestamp, int] | None = None
                     all_chunks: list[pd.DataFrame] = [first_chunk]
                     if request.include_event_counts:
                         hourly_event_counts = {}
+                        hourly_closed_counts = {}
                         all_chunks = [first_chunk, *chunk_frames]
                         for chunk in all_chunks:
                             hours = chunk["call_start_time"].dt.floor("h")
                             for hour, count in hours.value_counts().items():
                                 hourly_event_counts[hour] = (
                                     hourly_event_counts.get(hour, 0) + int(count)
+                                )
+                            closed_hours = chunk["time_call_closed"].dt.floor("h")
+                            for hour, count in closed_hours.value_counts().items():
+                                hourly_closed_counts[hour] = (
+                                    hourly_closed_counts.get(hour, 0) + int(count)
                                 )
                     else:
                         all_chunks.extend(chunk_frames)
@@ -175,22 +240,52 @@ class Synth911Application:
                 GENERATION_ROWS.labels(dataset="incidents").inc(len(incidents))
                 if request.include_event_counts:
                     hourly_event_counts = {}
+                    hourly_closed_counts = {}
                     hours = incidents["call_start_time"].dt.floor("h")
                     for hour, count in hours.value_counts().items():
                         hourly_event_counts[hour] = int(count)
+                    closed_hours = incidents["time_call_closed"].dt.floor("h")
+                    for hour, count in closed_hours.value_counts().items():
+                        hourly_closed_counts[hour] = int(count)
 
         if request.dataset in (DatasetKind.PHONE, DatasetKind.ALL):
             logger.info("Building hourly phone-metrics dataset")
             hourly_call_counts = HourlyCallCountGenerator().generate(request)
             if hourly_event_counts is not None:
-                event_series = pd.Series(hourly_event_counts, dtype="int64")
-                hour_key = hourly_call_counts["hour_start"].dt.floor("h")
+                # Build complete hourly index from the phone metrics frame
+                hour_index = hourly_call_counts["hour_start"].dt.floor("h")
+                
+                # Events created per hour
+                created_series = pd.Series(hourly_event_counts, dtype="int64")
                 hourly_call_counts["events_created"] = (
-                    hour_key.map(event_series).fillna(0).astype(int)
+                    hour_index.map(created_series).fillna(0).astype(int)
                 )
+                
+                # Events closed per hour
+                if hourly_closed_counts is not None:
+                    closed_series = pd.Series(hourly_closed_counts, dtype="int64")
+                    hourly_call_counts["events_closed"] = (
+                        hour_index.map(closed_series).fillna(0).astype(int)
+                    )
+                else:
+                    hourly_call_counts["events_closed"] = 0
+                
+                # Compute cumulative events created and closed
+                cum_created = hourly_call_counts["events_created"].cumsum()
+                cum_closed = hourly_call_counts["events_closed"].cumsum()
+                
+                # Events remaining open at end of hour
+                hourly_call_counts["events_remaining"] = cum_created - cum_closed
+                
+                # Open incidents at start of hour (remaining from previous hour)
+                hourly_call_counts["open_incidents"] = hourly_call_counts["events_remaining"].shift(1, fill_value=0).astype(int)
+                
                 logger.info(
-                    "Added events_created column (total events: %d)",
+                    "Added event workflow columns: events_created, events_closed, events_remaining, open_incidents "
+                    "(total created: %d, total closed: %d, final remaining: %d)",
                     hourly_call_counts["events_created"].sum(),
+                    hourly_call_counts["events_closed"].sum(),
+                    int(hourly_call_counts["events_remaining"].iloc[-1]) if len(hourly_call_counts) > 0 else 0,
                 )
             datasets["hourly_call_counts"] = hourly_call_counts
             logger.info(

@@ -1013,7 +1013,14 @@ to `SynthCCD license install`. Valid but expired licenses continue to work durin
   - Travel penalty: mean 22s, σ=0.30 (15-30s range, max 60s)
   Penalties are applied only when `address_validated == "N"` and added to the base timing draws. Configurable via realism config YAML in the future if needed.
   
+  -[ ] **P2 - Find a way to query population from an authoritative source like census.gov** 
+  This would enable us to find a way to gather a base population for a region without looking it up ourselves.
+ 
+ -[ ] **P3 - Find a common problem type list**
+Use that for all of the calls and better balance the number or problem types and add diversity in the problem types simultaneously.
 
+-[x] **P2 - integrate a volume count for events** 
+Use the information from an event query to generate hourly volumes for calls opened, calls closed, calls remaining, at the end of each hour, then add that as a volume option alongside phone volumes. 
 ---
 
 > **Moved to [psap-staffing-lab](https://github.com/trdunsworth/psap-staffing-lab).**

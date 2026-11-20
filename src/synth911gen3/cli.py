@@ -285,8 +285,23 @@ def generate(
         False,
         "--include-event-counts",
         help=(
-            "When generating both incidents and phone data (dataset=all), add an "
-            "events_created column to hourly call counts showing incidents per hour."
+            "When generating both incidents and phone data (dataset=all), add "
+            "events_created, events_closed, events_remaining, and open_incidents "
+            "columns to hourly call counts showing incident workflow per hour."
+        ),
+    ),
+    incidents_input: Path | None = typer.Option(
+        None,
+        "--incidents-input",
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        show_default=False,
+        help=(
+            "Path to an existing incidents CSV/Parquet file to derive hourly event "
+            "counts from (events_created, events_closed, events_remaining, open_incidents). "
+            "Used with dataset=phone to add workflow columns without generating incidents."
         ),
     ),
     psap_agency: str | None = typer.Option(
@@ -431,6 +446,8 @@ def generate(
         cli_params["include_10_digit_emergency"] = True
     if include_event_counts:
         cli_params["include_event_counts"] = True
+    if incidents_input is not None:
+        cli_params["incidents_input"] = str(incidents_input)
     if psap_agency is not None:
         cli_params["psap_agency"] = psap_agency.lower()
     if db_dialect is not None:

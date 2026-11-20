@@ -398,6 +398,15 @@ class Synth911Tui(App[None]):
                                     ),
                                 )
                                 yield _field(
+                                    "Incidents input file",
+                                    "incidents_input",
+                                    Input(
+                                        "",
+                                        id="incidents_input",
+                                        placeholder="optional: path to incidents CSV/Parquet",
+                                    ),
+                                )
+                                yield _field(
                                     "Max memory (bytes)",
                                     "max_memory_bytes",
                                     Input(
@@ -782,6 +791,8 @@ class Synth911Tui(App[None]):
         include_event_counts = (
             str(self.query_one("#include_event_counts", Select).value) == "1"
         )
+        incidents_input_raw = self.query_one("#incidents_input", Input).value.strip()
+        incidents_input = Path(incidents_input_raw) if incidents_input_raw else None
 
         return GenerationRequest(
             rows=rows,
@@ -806,6 +817,7 @@ class Synth911Tui(App[None]):
             emergency_numbers=emergency_numbers,
             include_10_digit_emergency=include_10_digit_emergency,
             include_event_counts=include_event_counts,
+            incidents_input=incidents_input,
         )
 
     def _generate(self) -> None:

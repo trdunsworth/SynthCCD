@@ -1161,6 +1161,412 @@ def test_event_counts_csv_export(tmp_path) -> None:
     assert df["events_created"].sum() > 0
 
 
+def test_event_counts_includes_events_closed() -> None:
+    """include_event_counts adds events_closed column to hourly call counts."""
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=100,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.hourly_call_counts is not None
+    assert "events_closed" in result.hourly_call_counts.columns
+    assert len(result.hourly_call_counts) == 7 * 24
+
+
+def test_event_counts_includes_events_remaining() -> None:
+    """include_event_counts adds events_remaining column to hourly call counts."""
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=100,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.hourly_call_counts is not None
+    assert "events_remaining" in result.hourly_call_counts.columns
+    # events_remaining should be non-negative
+    assert (result.hourly_call_counts["events_remaining"] >= 0).all()
+
+
+def test_event_counts_includes_open_incidents() -> None:
+    """include_event_counts adds open_incidents column to hourly call counts."""
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=100,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.hourly_call_counts is not None
+    assert "open_incidents" in result.hourly_call_counts.columns
+    # open_incidents should be non-negative
+    assert (result.hourly_call_counts["open_incidents"] >= 0).all()
+
+
+def test_event_counts_open_incidents_matches_previous_remaining() -> None:
+    """open_incidents for hour N equals events_remaining for hour N-1."""
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=200,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.PANDAS,
+        seed=55,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.hourly_call_counts is not None
+    df = result.hourly_call_counts
+    # First hour's open_incidents should be 0 (no previous hour)
+    assert df["open_incidents"].iloc[0] == 0
+    # For subsequent hours, open_incidents should equal previous hour's events_remaining
+    for i in range(1, len(df)):
+        assert df["open_incidents"].iloc[i] == df["events_remaining"].iloc[i - 1]
+
+
+def test_event_counts_remaining_matches_cumulative_diff() -> None:
+    """events_remaining equals cumulative_created - cumulative_closed at each hour."""
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=200,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.PANDAS,
+        seed=66,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.hourly_call_counts is not None
+    df = result.hourly_call_counts
+    cum_created = df["events_created"].cumsum()
+    cum_closed = df["events_closed"].cumsum()
+    expected_remaining = cum_created - cum_closed
+    assert (df["events_remaining"] == expected_remaining).all()
+
+
+def test_event_counts_total_closed_matches_incidents_eventually() -> None:
+    """Over the full date range, total events_closed should equal total incidents
+    minus any still-open incidents at the end of the range."""
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+            Address("55 W 39th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=500,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.PANDAS,
+        seed=77,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.incidents is not None
+    assert result.hourly_call_counts is not None
+    total_created = result.hourly_call_counts["events_created"].sum()
+    total_closed = result.hourly_call_counts["events_closed"].sum()
+    final_remaining = result.hourly_call_counts["events_remaining"].iloc[-1]
+    # All created events should either close or remain open at end of range
+    assert total_created == len(result.incidents)
+    assert total_closed + final_remaining == len(result.incidents)
+    # Total closed should be <= total created
+    assert total_closed <= total_created
+
+
+def test_event_counts_extended_columns_csv_export(tmp_path) -> None:
+    """CSV export with include_event_counts includes all extended columns."""
+    import pandas as pd
+
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=50,
+        dataset=DatasetKind.ALL,
+        output_format=OutputFormat.CSV,
+        output_dir=tmp_path,
+        output_stem="test_events_extended",
+        seed=33,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+    )
+
+    Synth911Application(address_provider=provider).generate(request)
+
+    phone_path = tmp_path / "test_events_extended_hourly_call_counts.csv"
+    assert phone_path.exists()
+    df = pd.read_csv(phone_path)
+    for col in ["events_created", "events_closed", "events_remaining", "open_incidents"]:
+        assert col in df.columns, f"Missing column: {col}"
+    assert df["events_created"].sum() > 0
+
+
+# ---------------------------------------------------------------------------
+# External incidents file input mode
+# ---------------------------------------------------------------------------
+
+
+def test_event_counts_from_external_file(tmp_path) -> None:
+    """Load hourly event counts from an external incidents CSV file."""
+    import pandas as pd
+
+    # Create a sample incidents file
+    incidents_data = pd.DataFrame(
+        {
+            "call_start_time": pd.to_datetime(
+                [
+                    "2026-01-01 00:15:00",
+                    "2026-01-01 00:45:00",
+                    "2026-01-01 01:30:00",
+                    "2026-01-01 02:00:00",
+                    "2026-01-01 02:30:00",
+                ]
+            ),
+            "time_call_closed": pd.to_datetime(
+                [
+                    "2026-01-01 01:00:00",
+                    "2026-01-01 01:30:00",
+                    "2026-01-01 02:15:00",
+                    "2026-01-01 03:00:00",
+                    "2026-01-01 03:30:00",
+                ]
+            ),
+        }
+    )
+    incidents_path = tmp_path / "test_incidents.csv"
+    incidents_data.to_csv(incidents_path, index=False)
+
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=100,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+        incidents_input=incidents_path,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.hourly_call_counts is not None
+    df = result.hourly_call_counts
+    # Check all four columns exist
+    for col in ["events_created", "events_closed", "events_remaining", "open_incidents"]:
+        assert col in df.columns, f"Missing column: {col}"
+    # Verify counts match the input file
+    # Hour 0: 2 created, 0 closed -> remaining 2, open 0
+    assert df.loc[df["hour_of_day"] == 0, "events_created"].values[0] == 2
+    assert df.loc[df["hour_of_day"] == 0, "events_closed"].values[0] == 0
+    # Hour 1: 1 created, 2 closed -> remaining 1, open 2
+    assert df.loc[df["hour_of_day"] == 1, "events_created"].values[0] == 1
+    assert df.loc[df["hour_of_day"] == 1, "events_closed"].values[0] == 2
+    # Hour 2: 2 created, 1 closed -> remaining 2, open 1
+    assert df.loc[df["hour_of_day"] == 2, "events_created"].values[0] == 2
+    assert df.loc[df["hour_of_day"] == 2, "events_closed"].values[0] == 1
+    # Hour 3: 0 created, 2 closed -> remaining 0, open 2
+    assert df.loc[df["hour_of_day"] == 3, "events_created"].values[0] == 0
+    assert df.loc[df["hour_of_day"] == 3, "events_closed"].values[0] == 2
+
+
+def test_event_counts_from_external_parquet(tmp_path) -> None:
+    """Load hourly event counts from an external incidents Parquet file."""
+    import pandas as pd
+
+    # Create a sample incidents file
+    incidents_data = pd.DataFrame(
+        {
+            "call_start_time": pd.to_datetime(
+                [
+                    "2026-01-01 10:00:00",
+                    "2026-01-01 10:30:00",
+                    "2026-01-01 11:00:00",
+                ]
+            ),
+            "time_call_closed": pd.to_datetime(
+                [
+                    "2026-01-01 11:00:00",
+                    "2026-01-01 11:30:00",
+                    "2026-01-01 12:00:00",
+                ]
+            ),
+        }
+    )
+    incidents_path = tmp_path / "test_incidents.parquet"
+    incidents_data.to_parquet(incidents_path, index=False)
+
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=100,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+        incidents_input=incidents_path,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.hourly_call_counts is not None
+    df = result.hourly_call_counts
+    # Hour 10: 2 created, 0 closed
+    assert df.loc[df["hour_of_day"] == 10, "events_created"].values[0] == 2
+    assert df.loc[df["hour_of_day"] == 10, "events_closed"].values[0] == 0
+    # Hour 11: 1 created, 2 closed
+    assert df.loc[df["hour_of_day"] == 11, "events_created"].values[0] == 1
+    assert df.loc[df["hour_of_day"] == 11, "events_closed"].values[0] == 2
+    # Hour 12: 0 created, 1 closed
+    assert df.loc[df["hour_of_day"] == 12, "events_created"].values[0] == 0
+    assert df.loc[df["hour_of_day"] == 12, "events_closed"].values[0] == 1
+
+
+def test_event_counts_file_input_without_include_event_counts_fails(tmp_path) -> None:
+    """incidents_input without include_event_counts should not add columns."""
+    import pandas as pd
+
+    incidents_data = pd.DataFrame(
+        {
+            "call_start_time": pd.to_datetime(["2026-01-01 00:15:00"]),
+            "time_call_closed": pd.to_datetime(["2026-01-01 01:00:00"]),
+        }
+    )
+    incidents_path = tmp_path / "test_incidents.csv"
+    incidents_data.to_csv(incidents_path, index=False)
+
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=100,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=False,  # Not enabled
+        incidents_input=incidents_path,
+    )
+
+    result = Synth911Application(address_provider=provider).generate(request)
+
+    assert result.hourly_call_counts is not None
+    # Columns should NOT be added when include_event_counts=False
+    for col in ["events_created", "events_closed", "events_remaining", "open_incidents"]:
+        assert col not in result.hourly_call_counts.columns
+
+
+def test_event_counts_file_input_missing_columns_raises(tmp_path) -> None:
+    """External file missing required columns should raise an error."""
+    import pandas as pd
+
+    incidents_data = pd.DataFrame(
+        {
+            "call_start_time": pd.to_datetime(["2026-01-01 00:15:00"]),
+            # Missing time_call_closed
+        }
+    )
+    incidents_path = tmp_path / "test_incidents.csv"
+    incidents_data.to_csv(incidents_path, index=False)
+
+    provider = StaticAddressProvider(
+        [
+            Address("101 N Main St", "Kansas City", "Missouri"),
+            Address("204 E 12th St", "Kansas City", "Missouri"),
+        ]
+    )
+    request = GenerationRequest(
+        rows=100,
+        dataset=DatasetKind.PHONE,
+        output_format=OutputFormat.PANDAS,
+        seed=42,
+        start_date=date(2026, 1, 1),
+        end_date=date(2026, 1, 7),
+        include_event_counts=True,
+        incidents_input=incidents_path,
+    )
+
+    import pytest
+
+    with pytest.raises(ValueError, match="time_call_closed"):
+        Synth911Application(address_provider=provider).generate(request)
+
+
 # ---------------------------------------------------------------------------
 # Auto-population resolution from address provider
 # ---------------------------------------------------------------------------

@@ -93,6 +93,11 @@ class GenerationRequest:
     # When True and dataset=ALL, add an ``events_created`` column to the
     # hourly call counts showing how many incidents fell into each hour.
     include_event_counts: bool = False
+    # Optional path to an existing incidents file (CSV/Parquet) to derive
+    # hourly event counts from (events_created, events_closed, events_remaining,
+    # open_incidents). Used with dataset=phone to add workflow columns without
+    # generating incidents.
+    incidents_input: Path | None = None
     # Database export options
     db_dialect: DatabaseDialect | None = None
     db_host: str | None = None
